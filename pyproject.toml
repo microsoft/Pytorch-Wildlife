@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "PytorchWildlife"
+version = "1.3.0"
+description = "PyTorch-Wildlife: unified open-source AI framework for camera-trap detection, species classification, and wildlife monitoring."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Andres Hernandez", email = "v-hernandres@microsoft.com"},
+    {name = "Zhongqi Miao", email = "zhongqimiao@microsoft.com"},
+    {name = "Daniela Ruiz Lopez", email = "v-druizlopez@microsoft.com"},
+    {name = "Isai Daniel Chacon Silva", email = "v-ichaconsil@microsoft.com"},
+]
+keywords = [
+    "PyTorch-Wildlife",
+    "MegaDetector",
+    "camera traps",
+    "wildlife detection",
+    "animal detection",
+    "species classification",
+    "conservation",
+    "computer vision",
+    "object detection",
+    "deep learning",
+    "bioacoustics",
+    "AI for Good",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "tqdm",
+    "Pillow",
+    "supervision==0.23.0",
+    "gradio",
+    "ultralytics",
+    "chardet",
+    "wget",
+    "yolov5",
+    "setuptools",
+    "scikit-learn",
+    "timm",
+    "lightning",
+    "omegaconf",
+]
+
+[project.urls]
+Homepage = "https://github.com/microsoft/Pytorch-Wildlife"
+Documentation = "https://microsoft.github.io/Pytorch-Wildlife/"
+Repository = "https://github.com/microsoft/Pytorch-Wildlife"
+"Bug Tracker" = "https://github.com/microsoft/Pytorch-Wildlife/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yml"]
