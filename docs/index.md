@@ -10,6 +10,8 @@ tags:
   - Microsoft AI for Good
 ---
 
+![PyTorch-Wildlife — open-source AI framework for wildlife monitoring from the Microsoft AI for Good Lab](https://zenodo.org/records/15376499/files/Pytorch_Banner_transparentbk.png)
+
 # PyTorch-Wildlife
 
 > [!TIP]

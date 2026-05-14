@@ -1,4 +1,4 @@
-![A colorful banner illustrating various species of animals and plants in a natural environment, symbolizing biodiversity and the use of AI for conservation purposes.](https://zenodo.org/records/20044680/files/Biodiversity_Banner.png)
+![PyTorch-Wildlife — open-source AI framework for wildlife monitoring from the Microsoft AI for Good Lab](https://zenodo.org/records/15376499/files/Pytorch_Banner_transparentbk.png)
 
 # PyTorch-Wildlife
 
