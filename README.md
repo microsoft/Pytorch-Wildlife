@@ -80,6 +80,7 @@ PyTorch-Wildlife is part of the larger open-source ecosystem from the Microsoft 
 | [microsoft/MegaDetector](https://github.com/microsoft/MegaDetector) | Animal detection in camera-trap imagery |
 | [microsoft/SPARROW](https://github.com/microsoft/SPARROW) | Solar-Powered Acoustic and Remote Recording Observation Watch — AI-enabled edge device |
 | [microsoft/MegaDetector-Acoustic](https://github.com/microsoft/MegaDetector-Acoustic) | Bioacoustic models for audio-based wildlife monitoring |
+| [microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) | Camera-trap species classification fine-tuning — adapt classifiers to your own datasets and geographic regions |
 | [microsoft/MegaDetector-Overhead](https://github.com/microsoft/MegaDetector-Overhead) | Point-based detection for overhead and aerial imagery |
 | [SPARROW Studio](https://github.com/microsoft/Biodiversity/tree/main/SPARROW-Studio) | Desktop application for running all models with a graphical interface |
 
