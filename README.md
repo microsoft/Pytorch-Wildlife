@@ -82,6 +82,6 @@ PyTorch-Wildlife is part of the larger open-source ecosystem from the Microsoft 
 | [microsoft/MegaDetector-Acoustic](https://github.com/microsoft/MegaDetector-Acoustic) | Bioacoustic models for audio-based wildlife monitoring |
 | [microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) | Camera-trap species classification fine-tuning — adapt classifiers to your own datasets and geographic regions |
 | [microsoft/MegaDetector-Overhead](https://github.com/microsoft/MegaDetector-Overhead) | Point-based detection for overhead and aerial imagery |
-| [SPARROW Studio](https://github.com/microsoft/Biodiversity/tree/main/SPARROW-Studio) | Desktop application for running all models with a graphical interface |
+| SPARROW Studio | Desktop application for running all models with a graphical interface |
 
 > Questions? [Email us](mailto:zhongqimiao@microsoft.com) or join the [![Discord](https://img.shields.io/badge/any_text-Join_us!-blue?logo=discord&label=Discord)](https://discord.gg/TeEVxzaYtm)
