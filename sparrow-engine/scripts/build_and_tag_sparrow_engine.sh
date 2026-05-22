@@ -45,15 +45,28 @@ ort_runtime_version="$(extract_ort_runtime_version)"
 source_commit="$(git rev-parse --short HEAD)"
 cpu_image="sparrow-engine:cpu-$tag"
 gpu_image="sparrow-engine:gpu-$tag"
+cpu_image_deploy="sparrow-engine-server:$tag"
+gpu_image_deploy="sparrow-engine-server-gpu:$tag"
 
 docker build -t "$cpu_image" -f sparrow-engine/docker/Dockerfile.cpu sparrow-engine/
 docker build -t "$gpu_image" -f sparrow-engine/docker/Dockerfile.gpu sparrow-engine/
 
+# Add the deployment-friendly aliases consumed by Sparrow Studio Web's
+# image-pin contract (sparrow/sparrow-engine/sparrow-engine.version +
+# docker-compose.yaml services sparrow-engine-cpu / sparrow-engine-gpu).
+# Keeping both tags lets sparrow_contract_test.sh stay on the internal
+# `sparrow-engine:<flavor>-<tag>` form while consumers still resolve
+# `sparrow-engine-server[-gpu]:<tag>` directly.
+docker tag "$cpu_image" "$cpu_image_deploy"
+docker tag "$gpu_image" "$gpu_image_deploy"
+
 cpu_digest="$(docker image inspect --format='{{.Id}}' "$cpu_image")"
 gpu_digest="$(docker image inspect --format='{{.Id}}' "$gpu_image")"
 
-printf 'CPU  image: %-24s @ %s\n' "$cpu_image" "$cpu_digest"
-printf 'GPU  image: %-24s @ %s\n' "$gpu_image" "$gpu_digest"
+printf 'CPU  image: %-32s @ %s\n' "$cpu_image" "$cpu_digest"
+printf 'CPU  alias: %-32s\n'      "$cpu_image_deploy"
+printf 'GPU  image: %-32s @ %s\n' "$gpu_image" "$gpu_digest"
+printf 'GPU  alias: %-32s\n'      "$gpu_image_deploy"
 printf 'sparrow_engine_source_commit: %s\n' "$source_commit"
 printf 'ort_crate_version:          %s\n' "$ort_crate_version"
 printf 'ort_runtime_version:        %s\n' "$ort_runtime_version"
