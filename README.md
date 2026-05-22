@@ -34,6 +34,52 @@ and **cuDNN ≥9.10** (cuDNN 9.8 has a Conv-engine bug on sm_89).
 
 ---
 
+## Model zoo
+
+Sparrow Engine doesn't ship the ONNX model weights in the repo. They live in a public Zenodo record so the repo stays small and operators can pull just the models they need.
+
+**Zenodo DOI**: [10.5281/zenodo.20348979](https://doi.org/10.5281/zenodo.20348979)
+
+Download all 14 models to `./models/`:
+
+```bash
+bash scripts/download_models.sh
+```
+
+Or just specific models:
+
+```bash
+bash scripts/download_models.sh MDV6-yolov10-e SpeciesNet-Crop
+bash scripts/download_models.sh --list          # list available model IDs
+bash scripts/download_models.sh --dest /custom/path
+```
+
+Point Sparrow Engine at the directory:
+
+```bash
+export SPARROW_ENGINE_MODELS_DIR=$(realpath ./models)
+spe models list                                 # confirms catalog discovery
+spe detect --model MDV6-yolov10-e --print image.jpg
+```
+
+The downloader verifies SHA-256 per model, is idempotent (skip-if-present unless `--force`), and unpacks into the layout Sparrow Engine expects (`<dir>/<model_id>/manifest.toml` + `model.onnx` + `labels.txt`).
+
+### Per-model licensing
+
+This is a **multi-license bundle** — each model ships under its own upstream license:
+
+| License | Models |
+|---------|--------|
+| Ultralytics AGPL-3.0 | MDV6 × 2, MDV5a, deepfaune-yolo8s, european / NA / sub-Saharan mammals |
+| CC-BY-NC-SA 4.0 | Deepfaune-Europe, Deepfaune-New-England |
+| AGPL-3.0 + CC-BY-NC-SA 4.0 (intersection) | deepfaune-yolo8s (also YOLO) |
+| Apache 2.0 | SpeciesNet-Crop |
+| MIT | AI4G-Amazon-V2, AI4G-Serengeti, OWL, HerdNet |
+
+Open each `models/<model_id>/LICENSE.md` after download for the canonical terms. **Commercial users of YOLO-based detectors** should obtain an [Ultralytics Enterprise License](https://www.ultralytics.com/license).
+
+---
+
 ## Architecture
 
 Sparrow Engine is engine-only: it loads ONNX models and runs inference.
