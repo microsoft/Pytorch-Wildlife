@@ -38,35 +38,35 @@ Plain definitions before the first technical sentence.
 ## Top-level overview
 
 ```
-                       sparrow-engine (Rust workspace, 7 crates)
-                                   │
-       ┌───────────────────────────┼───────────────────────────┐
-       │                           │                           │
-       v                           v                           v
-  sparrow-engine-types               sparrow-engine-core                  sparrow-engine-cpu / sparrow-engine-gpu
-  (shared data              (shared logic              (engine flavors,
-   types — no               — no ORT, no               each ships libsparrow_engine.so
-   ORT, no CUDA)             CUDA)                      with 32 sparrow_engine_* exports)
-                                                              │
-                              ┌───────────────────────────────┼───────────────────────┐
-                              │                               │                       │
-                              v                               v                       v
+                       sparrow-engine (Rust workspace, 7 crates)                                                       
+                                   │                                                                                   
+       ┌───────────────────────────┼───────────────────────────┐                                                       
+       │                           │                           │                                                       
+       v                           v                           v                                                       
+  sparrow-engine-types               sparrow-engine-core                  sparrow-engine-cpu / sparrow-engine-gpu      
+  (shared data              (shared logic              (engine flavors,                                                
+   types — no               — no ORT, no               each ships libsparrow_engine.so                                 
+   ORT, no CUDA)             CUDA)                      with 32 sparrow_engine_* exports)                              
+                                                              │                                                        
+                              ┌───────────────────────────────┼───────────────────────┐                                
+                              │                               │                       │                                
+                              v                               v                       v                                
                         sparrow-engine-server               sparrow-engine-cli                    sparrow-engine-python
-                        (HTTP API, 15 routes)      (CLI binary)                 (Python wheel)
-                              │                               │                       │
-                              │  ┌────────────────────────────┼───────────────────┐   │
-                              │  │                                                │   │
-                              v  v                                                v   v
-                         Sparrow Studio Web                              Sparrow Studio Local
-                         (Flask + workers, Docker)                       (Avalonia / .NET desktop;
-                                                                         loads sparrow_engine.dll via P/Invoke)
+                        (HTTP API, 15 routes)      (CLI binary)                 (Python wheel)                         
+                              │                               │                       │                                
+                              │  ┌────────────────────────────┼───────────────────┐   │                                
+                              │  │                                                │   │                                
+                              v  v                                                v   v                                
+                         Sparrow Studio Web                              Sparrow Studio Local                          
+                         (Flask + workers, Docker)                       (Avalonia / .NET desktop;                     
+                                                                         loads sparrow_engine.dll via P/Invoke)        
 
-Five ways to call Sparrow Engine:
-  CLI binary · Python wheel · HTTP SDK (sparrow-engine-client) · HTTP API (sparrow-engine-server) · Native DLL (C ABI)
+Five ways to call Sparrow Engine:                                                                                      
+  CLI binary · Python wheel · HTTP SDK (sparrow-engine-client) · HTTP API (sparrow-engine-server) · Native DLL (C ABI) 
 
-Two device flavors, never co-located in one binary:
-  cpu  → ORT CPU EP only,  Python wheel "sparrow-engine",     CLI binary "spe"
-  gpu  → ORT CUDA EP added, Python wheel "sparrow-engine-gpu", CLI binary "spe-gpu"
+Two device flavors, never co-located in one binary:                                                                    
+  cpu  → ORT CPU EP only,  Python wheel "sparrow-engine",     CLI binary "spe"                                         
+  gpu  → ORT CUDA EP added, Python wheel "sparrow-engine-gpu", CLI binary "spe-gpu"                                    
 ```
 
 Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparrow_engine.so` — Sparrow Studio Local's `[DllImport("sparrow_engine")]` resolves either flavor.
@@ -78,20 +78,20 @@ Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparr
 ### Section overview
 
 ```
-                  ┌──────────────────────────────────────┐
-                  │              sparrow-engine            │
-                  │  Loads ONNX models, runs inference.  │
-                  │  That's it. No annotation, no        │
-                  │  training, no storage, no registry.  │
-                  └──────────────────┬───────────────────┘
-                                     │
-       ┌─────────────────────────────┼─────────────────────────────┐
-       │                             │                             │
-       v                             v                             v
-   Sparrow Studio              sparrow-data sibling        sparrow-ops sibling
-   (consumer; uses             (DEFERRED — data            (DEFERRED — registry,
+                  ┌──────────────────────────────────────┐                                
+                  │              sparrow-engine            │                              
+                  │  Loads ONNX models, runs inference.  │                                
+                  │  That's it. No annotation, no        │                                
+                  │  training, no storage, no registry.  │                                
+                  └──────────────────┬───────────────────┘                                
+                                     │                                                    
+       ┌─────────────────────────────┼─────────────────────────────┐                      
+       │                             │                             │                      
+       v                             v                             v                      
+   Sparrow Studio              sparrow-data sibling        sparrow-ops sibling            
+   (consumer; uses             (DEFERRED — data            (DEFERRED — registry,          
     sparrow-engine's HTTP API            substrate, ingestion,        drift Tier-3, CI/CD,
-    and native DLL)             logging, snapshots)          monitoring)
+    and native DLL)             logging, snapshots)          monitoring)                  
 ```
 
 **Why**: Sparrow Engine exists so wildlife-conservation teams can run camera-trap and bioacoustic models fast, in production, without re-implementing inference per consumer.
@@ -106,11 +106,11 @@ Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparr
 
 ```
 PytorchWildlife (Python)         sparrow-engine (Rust)
-  ┌───────────────┐               ┌───────────────┐
-  │ ~6× slower    │  ── rewrite ─►│ Sub-100 ms    │
-  │ Multi-GB env  │               │ Single binary │
-  │ Python-only   │               │ + 4 consumers │
-  └───────────────┘               └───────────────┘
+  ┌───────────────┐               ┌───────────────┐   
+  │ ~6× slower    │  ── rewrite ─►│ Sub-100 ms    │   
+  │ Multi-GB env  │               │ Single binary │   
+  │ Python-only   │               │ + 4 consumers │   
+  └───────────────┘               └───────────────┘   
 ```
 
 **Why**: PytorchWildlife (Python + Triton) was slow and hard to ship. Sparrow Studio needed an engine that could be embedded as a DLL.
@@ -144,29 +144,29 @@ The following constraints are baked into the engine. If you onboard a new model,
 ### Section overview
 
 ```
-                       installer/sparrow-engine-install.{sh,ps1}
-                                    │
-                  ┌─────────────────┴─────────────────┐
-                  │           Layer 1 probe           │
-                  │  nvidia-smi · libcuda.so.1 ·      │
-                  │  WMI Win32_VideoController        │
-                  └─────────────────┬─────────────────┘
-                                    │ found NVIDIA?
-                           yes ─────┴───── no
-                            │              │
-                            v              v
-                      Layer 2 probe     CPU flavor
-                      (cuDNN ≥9.10)        │
-                            │              │
-                       pass │ fail         │
-                            │   └─exit 11──┘
-                            v
-                       GPU flavor
-                            │
-       ┌────────────────────┼─────────────────────────┐
-       │                    │                         │
-       v                    v                         v
-   CLI tarball         pip wheel                Docker image
+                       installer/sparrow-engine-install.{sh,ps1}             
+                                    │                                        
+                  ┌─────────────────┴─────────────────┐                      
+                  │           Layer 1 probe           │                      
+                  │  nvidia-smi · libcuda.so.1 ·      │                      
+                  │  WMI Win32_VideoController        │                      
+                  └─────────────────┬─────────────────┘                      
+                                    │ found NVIDIA?                          
+                           yes ─────┴───── no                                
+                            │              │                                 
+                            v              v                                 
+                      Layer 2 probe     CPU flavor                           
+                      (cuDNN ≥9.10)        │                                 
+                            │              │                                 
+                       pass │ fail         │                                 
+                            │   └─exit 11──┘                                 
+                            v                                                
+                       GPU flavor                                            
+                            │                                                
+       ┌────────────────────┼─────────────────────────┐                      
+       │                    │                         │                      
+       v                    v                         v                      
+   CLI tarball         pip wheel                Docker image                 
    ~/.sparrow_engine/bin    active Python env       sparrow-engine:cpu / :gpu
 ```
 
@@ -181,11 +181,11 @@ The following constraints are baked into the engine. If you onboard a new model,
 ### 2.1 Quickstart per platform
 
 ```
-┌────────────────────┬────────────────────────────────────────────┐
+┌────────────────────┬────────────────────────────────────────────┐         
 │ Linux x86_64       │ bash installer/sparrow-engine-install.sh            │
 │ macOS arm64/x86_64 │ bash installer/sparrow-engine-install.sh (CPU only) │
 │ Windows x86_64     │ installer\sparrow-engine-install.ps1                │
-└────────────────────┴────────────────────────────────────────────┘
+└────────────────────┴────────────────────────────────────────────┘         
 ```
 
 **Why**: same script, same flags, different shell.
@@ -212,17 +212,17 @@ The following constraints are baked into the engine. If you onboard a new model,
 ### 2.3 What lands on disk
 
 ```
-~/.sparrow_engine/
-├── bin/
-│   ├── spe                    (or spe-gpu on the GPU flavor)
-│   └── (symlink helpers, ort-env.sh)
+~/.sparrow_engine/                                            
+├── bin/                                                      
+│   ├── spe                    (or spe-gpu on the GPU flavor) 
+│   └── (symlink helpers, ort-env.sh)                         
 ├── lib/              (any extra .so files the wrapper places)
-└── current_flavor    (one line: "cpu" or "gpu")
+└── current_flavor    (one line: "cpu" or "gpu")              
 
-~/.bashrc / ~/.zshrc:
-  # >>> sparrow_engine >>>
-  export PATH="$HOME/.sparrow_engine/bin:$PATH"
-  # <<< sparrow_engine <<<
+~/.bashrc / ~/.zshrc:                                         
+  # >>> sparrow_engine >>>                                    
+  export PATH="$HOME/.sparrow_engine/bin:$PATH"               
+  # <<< sparrow_engine <<<                                    
 ```
 
 **Why**: predictable footprint so uninstall is one `rm -rf ~/.sparrow_engine` and one rc-file block delete.
@@ -273,14 +273,14 @@ The following constraints are baked into the engine. If you onboard a new model,
 ### 2.6 Air-gapped install
 
 ```
-ONLINE machine:                 OFFLINE machine:
-┌───────────────────┐           ┌───────────────────┐
-│ Build / download  │   USB     │ Receive tarball   │
+ONLINE machine:                 OFFLINE machine:              
+┌───────────────────┐           ┌───────────────────┐         
+│ Build / download  │   USB     │ Receive tarball   │         
 │   sparrow-engine tarball   │  ───────► │ + sha256          │
 │ + sparrow_engine.dll       │           │                   │
-│ + sha256          │           │ Verify + extract  │
+│ + sha256          │           │ Verify + extract  │         
 └───────────────────┘           │ into ~/.sparrow_engine/    │
-                                └───────────────────┘
+                                └───────────────────┘         
 ```
 
 **Why**: many camera-trap deployments are in field sites with no internet.
@@ -334,15 +334,15 @@ ONLINE machine:                 OFFLINE machine:
 
 ```
 spe device  →  prints "cuda:0"   ← compile-time check only
-                    │
-                    │ does NOT verify:
-                    │  • GPU hardware present
-                    │  • driver loaded
-                    │  • cuDNN findable
-                    │  • CUDA runtime accessible
-                    v
-              Real GPU check: run an inference and watch
-              `nvidia-smi --query-compute-apps=...`
+                    │                                     
+                    │ does NOT verify:                    
+                    │  • GPU hardware present             
+                    │  • driver loaded                    
+                    │  • cuDNN findable                   
+                    │  • CUDA runtime accessible          
+                    v                                     
+              Real GPU check: run an inference and watch  
+              `nvidia-smi --query-compute-apps=...`       
 ```
 
 **Why**: `ort::ep::CUDA::is_available()` only checks "was ORT built with CUDA EP support" — not that the GPU works.
@@ -370,19 +370,19 @@ spe device  →  prints "cuda:0"   ← compile-time check only
 ### Section overview
 
 ```
-                       Same engine, same models, five surfaces
+                       Same engine, same models, five surfaces                                                                     
 
      sparrow-engine CLI       sparrow-engine-python      sparrow-engine-client      sparrow-engine-server      libsparrow_engine.so
-     (terminal)      (Python pkg)      (HTTP SDK)        (HTTP server)     (C ABI DLL)
-         │                │                 │                 │                 │
-         │ PyO3 bindings  │  HTTP over      │ axum routes     │ cdylib called   │
-         │ (in-process)   │  localhost      │ + 15 endpoints  │ via P/Invoke    │
-         v                v                 v                 v                 v
-                              ┌─────────────────────────┐
-                              │   sparrow-engine          │
-                              │   (sparrow-engine-cpu OR         │
-                              │    sparrow-engine-gpu)           │
-                              └─────────────────────────┘
+     (terminal)      (Python pkg)      (HTTP SDK)        (HTTP server)     (C ABI DLL)                                             
+         │                │                 │                 │                 │                                                  
+         │ PyO3 bindings  │  HTTP over      │ axum routes     │ cdylib called   │                                                  
+         │ (in-process)   │  localhost      │ + 15 endpoints  │ via P/Invoke    │                                                  
+         v                v                 v                 v                 v                                                  
+                              ┌─────────────────────────┐                                                                          
+                              │   sparrow-engine          │                                                                        
+                              │   (sparrow-engine-cpu OR         │                                                                 
+                              │    sparrow-engine-gpu)           │                                                                 
+                              └─────────────────────────┘                                                                          
 ```
 
 **Why**: different consumers need different surfaces. A scientist wants the CLI; a notebook wants Python; Sparrow Web wants HTTP; Sparrow Local wants native DLL.
@@ -416,18 +416,18 @@ Both CLI and Python expose the **same** function set with the same conventions. 
 ### 4.2 Device selection
 
 ```
-              Device::Auto  (default)
-                     │
-            ┌────────┴────────┐
-            │                 │
-       CPU flavor          GPU flavor
-            │                 │
-            v                 v
-              Cpu          ────────►   Cuda(0)
-        (always)           (always)
+              Device::Auto  (default)                                    
+                     │                                                   
+            ┌────────┴────────┐                                          
+            │                 │                                          
+       CPU flavor          GPU flavor                                    
+            │                 │                                          
+            v                 v                                          
+              Cpu          ────────►   Cuda(0)                           
+        (always)           (always)                                      
 
-              Device::Cpu          →   Cpu (both flavors)
-              Device::Cuda(N)      →   Cuda(N) on GPU flavor;
+              Device::Cpu          →   Cpu (both flavors)                
+              Device::Cuda(N)      →   Cuda(N) on GPU flavor;            
                                      warns + coerces to Cpu on CPU flavor
 ```
 
@@ -442,12 +442,12 @@ Both CLI and Python expose the **same** function set with the same conventions. 
 ### 4.3 Future surfaces — R + Julia bindings (planned, not built yet)
 
 ```
-            Today (5)                             Future (planned)
-   ─────────────────────────────────         ─────────────────────────────────
-   CLI · Python · HTTP SDK · HTTP API        R bindings  (via `extendr` or
-   · Native DLL (C ABI)                       direct C ABI from R's
-                                              `.Call` interface)
-                                             Julia bindings (via `ccall` on
+            Today (5)                             Future (planned)                  
+   ─────────────────────────────────         ─────────────────────────────────      
+   CLI · Python · HTTP SDK · HTTP API        R bindings  (via `extendr` or          
+   · Native DLL (C ABI)                       direct C ABI from R's                 
+                                              `.Call` interface)                    
+                                             Julia bindings (via `ccall` on         
                                               the existing libsparrow_engine cdylib)
 ```
 
@@ -470,25 +470,25 @@ Both CLI and Python expose the **same** function set with the same conventions. 
 ### Section overview
 
 ```
-sparrow-engine [GLOBAL FLAGS] <COMMAND> [COMMAND FLAGS] [INPUT...]
+sparrow-engine [GLOBAL FLAGS] <COMMAND> [COMMAND FLAGS] [INPUT...]           
 
-Global flags:
-  --device {auto,cpu,cuda:N}    default: auto
+Global flags:                                                                
+  --device {auto,cpu,cuda:N}    default: auto                                
   --model-dir <PATH>            default: SPARROW_ENGINE_MODEL_DIR or ./models
-  --quiet                       suppress progress bars
+  --quiet                       suppress progress bars                       
 
-Commands:
-  detect          Object detection on images
-  classify        Single-label classification on images
-  detect-audio    Sliding-window audio detection
-  pipeline        detect → classify on each crop
-  models list     List loaded models
-  models info     Show info for one loaded model
-  models verify   Verify ONNX SHA-256 against manifest
-  device          Print the active device label
-  init            Pre-load the engine (uses global flags)
-  hash            SHA-256 of one file
-  day-night       Day/night classification (BT.709 brightness)
+Commands:                                                                    
+  detect          Object detection on images                                 
+  classify        Single-label classification on images                      
+  detect-audio    Sliding-window audio detection                             
+  pipeline        detect → classify on each crop                             
+  models list     List loaded models                                         
+  models info     Show info for one loaded model                             
+  models verify   Verify ONNX SHA-256 against manifest                       
+  device          Print the active device label                              
+  init            Pre-load the engine (uses global flags)                    
+  hash            SHA-256 of one file                                        
+  day-night       Day/night classification (BT.709 brightness)               
 ```
 
 **Why**: a CLI that mirrors the Python API one-for-one so scripts and notebooks stay consistent.
@@ -502,11 +502,11 @@ Commands:
 ### 5.1 `spe detect` — bounding-box detection
 
 ```
-$ spe detect IMG1.jpg IMG2.jpg \
-    --model megadetector-v6-yolov10e \
-    --threshold 0.2 \
+$ spe detect IMG1.jpg IMG2.jpg \                          
+    --model megadetector-v6-yolov10e \                    
+    --threshold 0.2 \                                     
     --export-format coco --export-output detections.json \
-    --visualize --output-dir viz_out/ --show-labels
+    --visualize --output-dir viz_out/ --show-labels       
 ```
 
 **Why**: find boxes (animals, vehicles, people) in camera-trap images.
@@ -535,10 +535,10 @@ $ spe detect IMG1.jpg IMG2.jpg \
 ### 5.2 `spe classify` — single-label classification
 
 ```
-$ spe classify crops/*.jpg \
+$ spe classify crops/*.jpg \ 
     --model speciesnet-crop \
-    --top-k 3 \
-    --print --format json
+    --top-k 3 \              
+    --print --format json    
 ```
 
 **Why**: assign a species label to a pre-cropped image.
@@ -557,9 +557,9 @@ $ spe classify crops/*.jpg \
 
 ```
 $ spe detect-audio recordings/*.wav \
-    --model md-audiobirds-v1 \
-    --threshold 0.9 \
-    --raw-segments
+    --model md-audiobirds-v1 \       
+    --threshold 0.9 \                
+    --raw-segments                   
 ```
 
 **Why**: detect birds (or other audio classes) in WAV recordings.
@@ -582,10 +582,10 @@ $ spe detect-audio recordings/*.wav \
 ### 5.4 `spe pipeline` — detector → classifier
 
 ```
-$ spe pipeline IMG.jpg \
-    --detector megadetector-v6-yolov10e \
-    --classifier speciesnet-crop \
-    --threshold 0.2 --top-k 3 \
+$ spe pipeline IMG.jpg \                            
+    --detector megadetector-v6-yolov10e \           
+    --classifier speciesnet-crop \                  
+    --threshold 0.2 --top-k 3 \                     
     --export-format megadet --export-output out.json
 ```
 
@@ -623,20 +623,20 @@ $ spe pipeline IMG.jpg \
 ### Section overview
 
 ```
-                       pip install sparrow-engine            (CPU; depends on onnxruntime>=1.25.1,<1.26)
+                       pip install sparrow-engine            (CPU; depends on onnxruntime>=1.25.1,<1.26)    
                        pip install sparrow-engine-gpu        (GPU; depends on onnxruntime-gpu>=1.25.1,<1.26)
 
-                       Both wheels:
-                                  import sparrow_engine
-                                       │
-                                       v
-                       _sparrow_engine_core.cpython-3X.so       (PyO3 native module)
-                                       │
-                                       v
-                                sparrow-engine-cpu or sparrow-engine-gpu Rust crate
-                                       │
-                                       v
-                                    ORT (CPU or CUDA EP)
+                       Both wheels:                                                                         
+                                  import sparrow_engine                                                     
+                                       │                                                                    
+                                       v                                                                    
+                       _sparrow_engine_core.cpython-3X.so       (PyO3 native module)                        
+                                       │                                                                    
+                                       v                                                                    
+                                sparrow-engine-cpu or sparrow-engine-gpu Rust crate                         
+                                       │                                                                    
+                                       v                                                                    
+                                    ORT (CPU or CUDA EP)                                                    
 ```
 
 **Why**: scientists work in notebooks. A Python wheel removes the install friction of the CLI.
@@ -675,10 +675,10 @@ $ spe pipeline IMG.jpg \
 `detect`, `classify`, `detect_audio`, and `pipeline` accept any of:
 
 ```
-Path-like               → sparrow_engine.detect("img.jpg", ...)
-List of path-likes      → sparrow_engine.detect(["a.jpg", "b.jpg"], ...)
-Directory               → sparrow_engine.detect("/photos/", ...)
-List of directories     → sparrow_engine.detect(["/A/", "/B/"], ...)
+Path-like               → sparrow_engine.detect("img.jpg", ...)           
+List of path-likes      → sparrow_engine.detect(["a.jpg", "b.jpg"], ...)  
+Directory               → sparrow_engine.detect("/photos/", ...)          
+List of directories     → sparrow_engine.detect(["/A/", "/B/"], ...)      
 Mixed                   → sparrow_engine.detect(["img.jpg", "/dir/"], ...)
 ```
 
@@ -691,8 +691,8 @@ Mixed                   → sparrow_engine.detect(["img.jpg", "/dir/"], ...)
 ### 6.3 Progress callback
 
 ```python
-def on_progress(filename: str, index: int, total: int) -> None:
-    print(f"[{index}/{total}] {filename}")
+def on_progress(filename: str, index: int, total: int) -> None: 
+    print(f"[{index}/{total}] {filename}")                      
 
 sparrow_engine.detect("/photos/", progress_callback=on_progress)
 ```
@@ -734,20 +734,20 @@ Sparrow Engine's Rust `tracing` events are bridged to the Python `logging` modul
 ### Section overview
 
 ```
-                      sparrow-engine-server (axum, 15 routes)
-                                  │
-       ┌──────────────────────────┼─────────────────────────────┐
-       │ Inference (5)            │ Management (8)              │ Health (2)
-       │                          │                             │
-       │ POST /v1/detect          │ GET    /v1/catalog          │ GET /v1/health
-       │ POST /v1/detect/batch    │ GET    /v1/models           │ GET /healthz
-       │ POST /v1/classify        │ POST   /v1/models/load      │
-       │ POST /v1/audio/detect    │ DELETE /v1/models/{id}      │
-       │ POST /v1/pipeline        │ GET    /v1/pipelines        │
-       │                          │ POST   /v1/pipelines        │
-       │                          │ POST   /v1/pipelines/load   │
-       │                          │ DELETE /v1/pipelines/{id}   │
-       └──────────────────────────┴─────────────────────────────┘
+                      sparrow-engine-server (axum, 15 routes)                        
+                                  │                                                  
+       ┌──────────────────────────┼─────────────────────────────┐                    
+       │ Inference (5)            │ Management (8)              │ Health (2)         
+       │                          │                             │                    
+       │ POST /v1/detect          │ GET    /v1/catalog          │ GET /v1/health     
+       │ POST /v1/detect/batch    │ GET    /v1/models           │ GET /healthz       
+       │ POST /v1/classify        │ POST   /v1/models/load      │                    
+       │ POST /v1/audio/detect    │ DELETE /v1/models/{id}      │                    
+       │ POST /v1/pipeline        │ GET    /v1/pipelines        │                    
+       │                          │ POST   /v1/pipelines        │                    
+       │                          │ POST   /v1/pipelines/load   │                    
+       │                          │ DELETE /v1/pipelines/{id}   │                    
+       └──────────────────────────┴─────────────────────────────┘                    
 
        Per-request query params (Phase 4):  ?store=true · ?halt_on_store_failure=true
 ```
@@ -787,10 +787,10 @@ Sparrow Engine's Rust `tracing` events are bridged to the Python `logging` modul
 
 ```
 $ sparrow-engine-server --help        # exit 0, lists every SPARROW_ENGINE_* env var
-$ sparrow-engine-server --version     # exit 0
-$ sparrow-engine-server healthcheck   # Docker HEALTHCHECK probe
-$ sparrow-engine-server               # serve (no positional args)
-$ sparrow-engine-server --unknown     # exit 2, clap error message
+$ sparrow-engine-server --version     # exit 0                                      
+$ sparrow-engine-server healthcheck   # Docker HEALTHCHECK probe                    
+$ sparrow-engine-server               # serve (no positional args)                  
+$ sparrow-engine-server --unknown     # exit 2, clap error message                  
 ```
 
 **Why**: `--help` and `--version` used to be silently ignored (the server booted ORT before checking argv). Phase 4.4 fixes that.
@@ -820,13 +820,13 @@ $ sparrow-engine-server --unknown     # exit 2, clap error message
 ### 7.4 Per-request log + drift query params (Phase 4)
 
 ```
-POST /v1/detect?model=<id>&store=true&halt_on_store_failure=false
-                                  │            │
-                                  │            └── if sink errs:
-                                  │                  false → 200 + warn-log
-                                  │                  true  → 500 INTERNAL_ERROR
+POST /v1/detect?model=<id>&store=true&halt_on_store_failure=false                   
+                                  │            │                                    
+                                  │            └── if sink errs:                    
+                                  │                  false → 200 + warn-log         
+                                  │                  true  → 500 INTERNAL_ERROR     
                                   └── emit InferenceLogRecord (schema_version="1.0")
-                                       AFTER successful inference
+                                       AFTER successful inference                   
 ```
 
 **Why**: sparrow-data (deferred sibling) will ingest these records; this is the pre-positioning hook.
@@ -840,15 +840,15 @@ POST /v1/detect?model=<id>&store=true&halt_on_store_failure=false
 ### 7.5 Phase 4.2 catalog + lazy-load endpoints
 
 ```
-GET /v1/catalog            → all discovered models + pipelines + loaded state
-GET /v1/models             → only currently-loaded ORT sessions
-POST /v1/models/load       → load by id (idempotent: get_or_load)
-DELETE /v1/models/{id}     → unload one model
+GET /v1/catalog            → all discovered models + pipelines + loaded state        
+GET /v1/models             → only currently-loaded ORT sessions                      
+POST /v1/models/load       → load by id (idempotent: get_or_load)                    
+DELETE /v1/models/{id}     → unload one model                                        
 
-GET /v1/pipelines          → list registered alias pipelines
+GET /v1/pipelines          → list registered alias pipelines                         
 POST /v1/pipelines         → create named alias (idempotent; ?replace=true overrides)
-POST /v1/pipelines/load    → load all component models of an existing alias
-DELETE /v1/pipelines/{id}  → remove an alias
+POST /v1/pipelines/load    → load all component models of an existing alias          
+DELETE /v1/pipelines/{id}  → remove an alias                                         
 ```
 
 **Why**: Phase 4.2 made the server boot fast (no eager model load) and added alias management so consumers can register pipelines at runtime.
@@ -863,11 +863,11 @@ DELETE /v1/pipelines/{id}  → remove an alias
 
 ```
 loop every clamp(SPARROW_ENGINE_IDLE_UNLOAD_SEC, 1, 60) seconds:
-  for each loaded model:
-    if last_used_age > SPARROW_ENGINE_IDLE_UNLOAD_SEC
-       and model not in MRU keep_last_N:
-       Engine::unload_model_by_id(model)
-       tracing::info!("unloaded: {model_id}")
+  for each loaded model:                                        
+    if last_used_age > SPARROW_ENGINE_IDLE_UNLOAD_SEC           
+       and model not in MRU keep_last_N:                        
+       Engine::unload_model_by_id(model)                        
+       tracing::info!("unloaded: {model_id}")                   
 ```
 
 **Why**: long-running servers with many models leak GPU memory if nothing unloads sessions; eager unload would thrash the cache; idle-with-keep-N is the middle ground.
@@ -896,20 +896,20 @@ loop every clamp(SPARROW_ENGINE_IDLE_UNLOAD_SEC, 1, 60) seconds:
 ### Section overview
 
 ```
-sparrow-engine-client (Python package — separate from sparrow-engine)
-  ┌─────────────────────────────────────────────────────┐
+sparrow-engine-client (Python package — separate from sparrow-engine)     
+  ┌─────────────────────────────────────────────────────┐                 
   │ from sparrow_engine_client import SparrowEngineClient                │
-  │                                                     │
-  │ c = SparrowEngineClient("http://server:8080")               │
-  │ result = c.detect(open("img.jpg","rb"),             │
-  │                   model="megadetector-v6-yolov10e") │
-  └─────────────────────────────────────────────────────┘
-                            │
-                            v
-                  HTTP POST /v1/detect
-                            │
-                            v
-                       sparrow-engine-server
+  │                                                     │                 
+  │ c = SparrowEngineClient("http://server:8080")               │         
+  │ result = c.detect(open("img.jpg","rb"),             │                 
+  │                   model="megadetector-v6-yolov10e") │                 
+  └─────────────────────────────────────────────────────┘                 
+                            │                                             
+                            v                                             
+                  HTTP POST /v1/detect                                    
+                            │                                             
+                            v                                             
+                       sparrow-engine-server                              
 ```
 
 **Why**: Sparrow Studio Web and other operators run sparrow-engine as a remote service. A Python SDK saves them writing HTTP clients.
@@ -938,16 +938,16 @@ sparrow-engine-client (Python package — separate from sparrow-engine)
 ### Section overview
 
 ```
-                          libsparrow_engine.so / sparrow_engine.dll / libsparrow_engine.dylib
-                                          │
-                                  32 exported symbols
-                                  (all begin with `sparrow_engine_`)
-                                          │
-        ┌─────────────────────────────────┼─────────────────────────────────┐
-        v                                 v                                 v
+                          libsparrow_engine.so / sparrow_engine.dll / libsparrow_engine.dylib          
+                                          │                                                            
+                                  32 exported symbols                                                  
+                                  (all begin with `sparrow_engine_`)                                   
+                                          │                                                            
+        ┌─────────────────────────────────┼─────────────────────────────────┐                          
+        v                                 v                                 v                          
    sparrow_engine.h (auto-generated by      NativeMethods.g.cs (auto-       Avalonia / .NET desktop app
-   cbindgen, in repo)              generated by csbindgen)        uses `[DllImport("sparrow_engine")]`
-                                                                  to call the 32 exports
+   cbindgen, in repo)              generated by csbindgen)        uses `[DllImport("sparrow_engine")]` 
+                                                                  to call the 32 exports               
 ```
 
 **Why**: Sparrow Studio Local is a cross-platform desktop app written in C# (Avalonia). It can't link Rust directly; it needs a stable C ABI.
@@ -982,17 +982,17 @@ Total: 32. Both `libsparrow_engine.so` flavors must export this exact set (G5 ac
 ### 9.2 Memory ownership rules
 
 ```
-Returns from sparrow-engine:                          You must call:
-  *mut SparrowEngine   (from engine_new)          ──► sparrow_engine_engine_free
-  *mut SparrowEngineDetections                    ──► sparrow_engine_detections_free
-  *mut SparrowEngineClassifyResult                ──► sparrow_engine_classify_result_free
-  *mut SparrowEnginePipelineResult                ──► sparrow_engine_pipeline_result_free
-  *mut SparrowEngineAudioResult                   ──► sparrow_engine_audio_result_free
-  *mut c_char (strings)                           ──► sparrow_engine_free_string
-  Verify result                                   ──► sparrow_engine_verify_result_free
+Returns from sparrow-engine:                          You must call:                                    
+  *mut SparrowEngine   (from engine_new)          ──► sparrow_engine_engine_free                        
+  *mut SparrowEngineDetections                    ──► sparrow_engine_detections_free                    
+  *mut SparrowEngineClassifyResult                ──► sparrow_engine_classify_result_free               
+  *mut SparrowEnginePipelineResult                ──► sparrow_engine_pipeline_result_free               
+  *mut SparrowEngineAudioResult                   ──► sparrow_engine_audio_result_free                  
+  *mut c_char (strings)                           ──► sparrow_engine_free_string                        
+  Verify result                                   ──► sparrow_engine_verify_result_free                 
 
-Errors:
-  After ANY *_new / *_load / *_detect that returns NULL or non-zero error,
+Errors:                                                                                                 
+  After ANY *_new / *_load / *_detect that returns NULL or non-zero error,                              
   call `sparrow_engine_last_error()`                → returns *const c_char (read-only, no free needed).
 ```
 
@@ -1007,7 +1007,7 @@ Errors:
 ### 9.3 Opaque handle safety
 
 ```
-SparrowEngine    = c_void   (opaque)
+SparrowEngine    = c_void   (opaque)      
 SparrowEngineModel     = c_void   (opaque)
 SparrowEnginePipeline  = c_void   (opaque)
 ```
@@ -1025,10 +1025,10 @@ SparrowEnginePipeline  = c_void   (opaque)
 ### 9.4 Both flavors export the same symbols
 
 ```
-libsparrow_engine.so (CPU flavor):                 libsparrow_engine.so (GPU flavor):
-  32 sparrow_engine_* symbols                        32 sparrow_engine_* symbols  ── byte-identical
+libsparrow_engine.so (CPU flavor):                 libsparrow_engine.so (GPU flavor):                                   
+  32 sparrow_engine_* symbols                        32 sparrow_engine_* symbols  ── byte-identical                     
   sparrow-engine-cpu/Cargo.toml: [lib] name="sparrow-engine"  sparrow-engine-gpu/Cargo.toml: [lib] name="sparrow-engine"
-  cdylib filename: libsparrow_engine.so              cdylib filename: libsparrow_engine.so
+  cdylib filename: libsparrow_engine.so              cdylib filename: libsparrow_engine.so                              
 ```
 
 **Why**: Sparrow Studio Local's `[DllImport("sparrow_engine")]` must resolve regardless of which flavor is installed.
@@ -1046,21 +1046,21 @@ libsparrow_engine.so (CPU flavor):                 libsparrow_engine.so (GPU fla
 ### Section overview
 
 ```
-$MODEL_DIR/                       (SPARROW_ENGINE_MODEL_DIR)
-├── megadetector-v6-yolov10e/
-│   ├── manifest.toml             (canonical schema)
-│   ├── *.onnx                    (model file)
-│   ├── *_fp16.onnx               (optional FP16 file)
-│   └── *_labels.txt              (class names)
-├── speciesnet-crop/
-│   ├── manifest.toml
-│   ├── ...
-├── megadet-speciesnet/
-│   └── pipeline.toml             (named pipeline alias)
-└── ...
+$MODEL_DIR/                       (SPARROW_ENGINE_MODEL_DIR)                           
+├── megadetector-v6-yolov10e/                                                          
+│   ├── manifest.toml             (canonical schema)                                   
+│   ├── *.onnx                    (model file)                                         
+│   ├── *_fp16.onnx               (optional FP16 file)                                 
+│   └── *_labels.txt              (class names)                                        
+├── speciesnet-crop/                                                                   
+│   ├── manifest.toml                                                                  
+│   ├── ...                                                                            
+├── megadet-speciesnet/                                                                
+│   └── pipeline.toml             (named pipeline alias)                               
+└── ...                                                                                
 
 Sparrow Engine discovers each directory whose name matches the manifest's `[model] id`.
-Mismatch → directory skipped + tracing::warn.
+Mismatch → directory skipped + tracing::warn.                                          
 ```
 
 **Why**: Sparrow Engine is model-agnostic. Onboarding a new model = writing a manifest, not patching the engine.
@@ -1074,45 +1074,45 @@ Mismatch → directory skipped + tracing::warn.
 ### 10.1 Manifest schema (TOML)
 
 ```toml
-[model]
-id              = "megadetector-v6-yolov10e"     # MUST match the parent directory name
-format          = "onnx"
-file            = "model.onnx"
-file_fp16       = "model_fp16.onnx"               # optional
-onnx_sha256     = "9a9f22b8..."                   # used by `spe models verify`
-onnx_size_bytes = 118484529                       # additional integrity field
+[model]                                                                                                  
+id              = "megadetector-v6-yolov10e"     # MUST match the parent directory name                  
+format          = "onnx"                                                                                 
+file            = "model.onnx"                                                                           
+file_fp16       = "model_fp16.onnx"               # optional                                             
+onnx_sha256     = "9a9f22b8..."                   # used by `spe models verify`                          
+onnx_size_bytes = 118484529                       # additional integrity field                           
 
-[inference]
-precision = "fp16"                                 # "fp16" or "fp32"; default fp32
-strategy  = "single"                               # "single" or "tiled" (HerdNet, OWL-T)
-# cudnn_search_mode = "exhaustive"                 # (planned, P3.8-8) — not in current schema
+[inference]                                                                                              
+precision = "fp16"                                 # "fp16" or "fp32"; default fp32                      
+strategy  = "single"                               # "single" or "tiled" (HerdNet, OWL-T)                
+# cudnn_search_mode = "exhaustive"                 # (planned, P3.8-8) — not in current schema           
 
-[preprocessing]
-input_size      = [1280, 1280]
-layout          = "nchw"                           # mandatory; NHWC rejected
-channel_order   = "bgr"                            # "rgb" (default) or "bgr"
-method          = "letterbox"                      # "letterbox" or "resize"
-normalization   = "unit"                           # "unit" (/255) or "imagenet"
-pad_value       = 0.447
+[preprocessing]                                                                                          
+input_size      = [1280, 1280]                                                                           
+layout          = "nchw"                           # mandatory; NHWC rejected                            
+channel_order   = "bgr"                            # "rgb" (default) or "bgr"                            
+method          = "letterbox"                      # "letterbox" or "resize"                             
+normalization   = "unit"                           # "unit" (/255) or "imagenet"                         
+pad_value       = 0.447                                                                                  
 
-[postprocessing]
-method                = "yolo_e2e"                  # see methods table below
-confidence_threshold  = 0.2
+[postprocessing]                                                                                         
+method                = "yolo_e2e"                  # see methods table below                            
+confidence_threshold  = 0.2                                                                              
 iou_threshold         = 0.45                        # for megadet_v5a (class-aware NMS in sparrow-engine)
 
-[labels]
-file   = "labels.txt"
-format = "name_index_csv"
+[labels]                                                                                                 
+file   = "labels.txt"                                                                                    
+format = "name_index_csv"                                                                                
 
-[provenance]   # OPTIONAL; round-tripped on output; sparrow-engine never interprets
-training_dataset_id    = "..."
-training_experiment_id = "..."
-training_repo_commit   = "..."
+[provenance]   # OPTIONAL; round-tripped on output; sparrow-engine never interprets                      
+training_dataset_id    = "..."                                                                           
+training_experiment_id = "..."                                                                           
+training_repo_commit   = "..."                                                                           
 
-[drift_reference]   # OPTIONAL; per-class frequency for PSI computation
-buffalo  = 0.32
-elephant = 0.20
-empty    = 0.48
+[drift_reference]   # OPTIONAL; per-class frequency for PSI computation                                  
+buffalo  = 0.32                                                                                          
+elephant = 0.20                                                                                          
+empty    = 0.48                                                                                          
 ```
 
 **Cite**: `sparrow-engine/sparrow-engine-types/src/manifest.rs`; canonical examples at `sparrow-engine/models/audiobirds.toml`, `sparrow-engine/models/herdnet.toml`, `sparrow-engine/models/owlt.toml`.
@@ -1159,16 +1159,16 @@ empty    = 0.48
 ### 10.4 Pipeline manifests
 
 ```toml
-[pipeline]
-id = "megadet-speciesnet"
+[pipeline]                        
+id = "megadet-speciesnet"         
 
-[[pipeline.steps]]
-role  = "detector"
+[[pipeline.steps]]                
+role  = "detector"                
 model = "megadetector-v6-yolov10e"
 
-[[pipeline.steps]]
-role  = "classifier"
-model = "speciesnet-crop"
+[[pipeline.steps]]                
+role  = "classifier"              
+model = "speciesnet-crop"         
 ```
 
 **Why**: named aliases let consumers say "run pipeline X" instead of specifying both models per request.
@@ -1197,35 +1197,35 @@ model = "speciesnet-crop"
 ### Section overview
 
 ```
-                    Per-request opt-in:  ?store=true
-                                  │
-                                  v
-                  ┌────────────────────────────────┐
-                  │      InferenceLogRecord        │
-                  │      schema_version = "1.0"    │
-                  │                                │
-                  │  request_id   (UUID v4)        │
-                  │  timestamp_utc (RFC3339 ms)    │
-                  │  media_hash   (sha256-hex)     │
-                  │  model_id                      │
-                  │  device       ("cuda:0", ...)  │
-                  │  inference_ms (f64)            │
-                  │  result       (full payload)   │
-                  │  provenance   (optional)       │
-                  │  drift_metrics (optional)      │
-                  └────────────────┬───────────────┘
-                                   │
-                                   v
-                          InferenceLogSink trait
-                                   │
-                          ┌────────┴────────┐
-                          │                 │
-                          v                 v
-                  StderrJsonLines     (future: sparrow-data
+                    Per-request opt-in:  ?store=true         
+                                  │                          
+                                  v                          
+                  ┌────────────────────────────────┐         
+                  │      InferenceLogRecord        │         
+                  │      schema_version = "1.0"    │         
+                  │                                │         
+                  │  request_id   (UUID v4)        │         
+                  │  timestamp_utc (RFC3339 ms)    │         
+                  │  media_hash   (sha256-hex)     │         
+                  │  model_id                      │         
+                  │  device       ("cuda:0", ...)  │         
+                  │  inference_ms (f64)            │         
+                  │  result       (full payload)   │         
+                  │  provenance   (optional)       │         
+                  │  drift_metrics (optional)      │         
+                  └────────────────┬───────────────┘         
+                                   │                         
+                                   v                         
+                          InferenceLogSink trait             
+                                   │                         
+                          ┌────────┴────────┐                
+                          │                 │                
+                          v                 v                
+                  StderrJsonLines     (future: sparrow-data  
                   (default sink)       HTTP sink, filesystem,
-                   JSON line per       etc.)
-                   record, stderr-
-                   locked emit
+                   JSON line per       etc.)                 
+                   record, stderr-                           
+                   locked emit                               
 ```
 
 **Why**: sparrow-data (deferred sibling) needs a wire-format to ingest from. Phase 4 freezes that format so sparrow-data work doesn't churn sparrow_engine.
@@ -1239,9 +1239,9 @@ model = "speciesnet-crop"
 ### 11.1 `?store=true` — the opt-in
 
 ```
-POST /v1/detect?model=<id>                                 # no log
+POST /v1/detect?model=<id>                                 # no log                
 POST /v1/detect?model=<id>&store=true                      # emit; warn on sink err
-POST /v1/detect?model=<id>&store=true&halt_on_store_failure=true
+POST /v1/detect?model=<id>&store=true&halt_on_store_failure=true                   
                                                             # emit; 500 on sink err
 ```
 
@@ -1297,12 +1297,12 @@ POST /v1/detect?model=<id>&store=true&halt_on_store_failure=true
 ### 11.4 Provenance round-trip
 
 ```
-Manifest:                                         InferenceLogRecord:
-  [provenance]                                      "provenance": {
+Manifest:                                         InferenceLogRecord:                     
+  [provenance]                                      "provenance": {                       
   training_dataset_id    = "ct-2024"      ───►        "training_dataset_id":    "ct-2024",
-  training_experiment_id = "exp-7"                    "training_experiment_id": "exp-7",
-  training_repo_commit   = "abc123"                   "training_repo_commit":   "abc123"
-                                                    }
+  training_experiment_id = "exp-7"                    "training_experiment_id": "exp-7",  
+  training_repo_commit   = "abc123"                   "training_repo_commit":   "abc123"  
+                                                    }                                     
 ```
 
 **Why**: when sparrow-data eventually exists, it needs to map each prediction back to the exact model build that produced it. Provenance fields are the join key.
@@ -1314,11 +1314,11 @@ Manifest:                                         InferenceLogRecord:
 ### 11.5 Idempotency at the storage layer (not in sparrow-engine)
 
 ```
-sparrow-engine (engine):                sparrow-data (deferred sibling):
-  emit one JSON line             treats (media_hash, model_id) as UNIQUE
+sparrow-engine (engine):                sparrow-data (deferred sibling):   
+  emit one JSON line             treats (media_hash, model_id) as UNIQUE   
   every request                  silently drops duplicates on second insert
-        │                              ▲
-        └────── HTTP / FS sink ────────┘
+        │                              ▲                                   
+        └────── HTTP / FS sink ────────┘                                   
 ```
 
 **Why**: sparrow-engine should not maintain a "did I already see this" cache — that's storage's job.
@@ -1334,26 +1334,26 @@ sparrow-engine (engine):                sparrow-data (deferred sibling):
 ### Section overview
 
 ```
-                Server boot (cold)
-                       │
-                       │  Phase 4.2 contract:
-                       │   1. Scan SPARROW_ENGINE_MODEL_DIR/<id>/manifest.toml → Catalog
-                       │   2. Bind TCP listener
-                       │   3. Become ready (GET /v1/health                     → "no_models")
-                       │   4. DO NOT load any ORT sessions yet
-                       │
-                       v
-            ┌──────────────────────┐                 ┌────────────────────┐
-            │  GET /v1/catalog     │                 │  SPARROW_ENGINE_PRELOAD set │
+                Server boot (cold)                                                                 
+                       │                                                                           
+                       │  Phase 4.2 contract:                                                      
+                       │   1. Scan SPARROW_ENGINE_MODEL_DIR/<id>/manifest.toml → Catalog           
+                       │   2. Bind TCP listener                                                    
+                       │   3. Become ready (GET /v1/health                     → "no_models")      
+                       │   4. DO NOT load any ORT sessions yet                                     
+                       │                                                                           
+                       v                                                                           
+            ┌──────────────────────┐                 ┌────────────────────┐                        
+            │  GET /v1/catalog     │                 │  SPARROW_ENGINE_PRELOAD set │               
                        │  returns all models  │                 │              → eager-load those │
-            │  + `loaded: false`   │                 │  IDs at boot       │
-            └──────────┬───────────┘                 └─────────┬──────────┘
-                       │                                       │
-            ┌──────────┴──────────┬──────────────────┐         │
-            v                     v                  v         v
-      POST /v1/models/load   POST /v1/detect    POST /v1/pipeline
-      (explicit eager)        (lazy: load on    (lazy: load all
-                              first request)     step models)
+            │  + `loaded: false`   │                 │  IDs at boot       │                        
+            └──────────┬───────────┘                 └─────────┬──────────┘                        
+                       │                                       │                                   
+            ┌──────────┴──────────┬──────────────────┐         │                                   
+            v                     v                  v         v                                   
+      POST /v1/models/load   POST /v1/detect    POST /v1/pipeline                                  
+      (explicit eager)        (lazy: load on    (lazy: load all                                    
+                              first request)     step models)                                      
 ```
 
 **Why**: Phase 4.1 §8.13 surfaced that boot used to eager-load every model, which made server startup take minutes when the catalog had 14 models.
@@ -1388,11 +1388,11 @@ sparrow-engine (engine):                sparrow-data (deferred sibling):
 
 ```
 SPARROW_ENGINE_PRELOAD=megadetector-v6-yolov10e,md-audiobirds-v1 sparrow-engine-server
-                        │
-                        v
-   Boot: load both models eagerly (parallel, blocking until both succeed).
-   Unknown ID → fail boot with a clear log line.
-   Empty      → no preload (default).
+                        │                                                             
+                        v                                                             
+   Boot: load both models eagerly (parallel, blocking until both succeed).            
+   Unknown ID → fail boot with a clear log line.                                      
+   Empty      → no preload (default).                                                 
 ```
 
 **Why**: production deployments often have a known "hot" subset that should always be ready.
@@ -1404,14 +1404,14 @@ SPARROW_ENGINE_PRELOAD=megadetector-v6-yolov10e,md-audiobirds-v1 sparrow-engine-
 ### 12.3 Runtime pipeline aliases
 
 ```
-POST /v1/pipelines
-{
-  "id": "my-alias",
-  "steps": [
+POST /v1/pipelines                                            
+{                                                             
+  "id": "my-alias",                                           
+  "steps": [                                                  
     {"role": "detector", "model": "megadetector-v6-yolov10e"},
-    {"role": "classifier", "model": "speciesnet-crop"}
-  ]
-}
+    {"role": "classifier", "model": "speciesnet-crop"}        
+  ]                                                           
+}                                                             
 ```
 
 | Behavior | Detail |
@@ -1430,12 +1430,12 @@ POST /v1/pipelines
 ### 12.4 `GET /v1/catalog` shape
 
 ```json
-[
-  {"model_id": "megadetector-v6-yolov10e", "model_type": "detector",   "framework": "onnx", "loaded": true},
+[                                                                                                            
+  {"model_id": "megadetector-v6-yolov10e", "model_type": "detector",   "framework": "onnx", "loaded": true}, 
   {"model_id": "speciesnet-crop",          "model_type": "classifier", "framework": "onnx", "loaded": false},
   {"model_id": "md-audiobirds-v1",         "model_type": "audio",      "framework": "onnx", "loaded": false},
   {"model_id": "megadet-speciesnet",       "model_type": "pipeline",   "framework": "alias", "loaded": false}
-]
+]                                                                                                            
 ```
 
 **Note**: response is a **flat JSON array**, not an envelope. (Phase 4.2 manual test MT-4.2-7 corrected docs that had assumed an envelope shape.)
@@ -1473,10 +1473,10 @@ POST /v1/pipelines
 ### 13.1 cuDNN 9.8 vs ≥ 9.10
 
 ```
-Session creation crashes:
+Session creation crashes:                                       
   "[E:onnxruntime:default] No valid engine configs for ConvFwd_"
-  + dozens of engine-config dumps
-  → SpeciesNet fails to load on RTX 6000 Ada (sm_89)
+  + dozens of engine-config dumps                               
+  → SpeciesNet fails to load on RTX 6000 Ada (sm_89)            
 ```
 
 **Why**: cuDNN 9.8 has a Conv-engine bug with asymmetric padding; PyTorch and TensorFlow wheels both bundle cuDNN 9.8 by default, so the dev box picks one and silently breaks.
@@ -1490,11 +1490,11 @@ Session creation crashes:
 ### 13.2 ORT ABI version pin (`<1.26`)
 
 ```
-  nm -D --with-symbol-versions libonnxruntime.so.1.25.1   → VERS_1.25.1   present
-  nm -D --with-symbol-versions libonnxruntime.so.1.26.0   → VERS_1.25.1   DROPPED
-                                                          (new VERS_1.26.0 namespace)
+  nm -D --with-symbol-versions libonnxruntime.so.1.25.1   → VERS_1.25.1   present                   
+  nm -D --with-symbol-versions libonnxruntime.so.1.26.0   → VERS_1.25.1   DROPPED                   
+                                                          (new VERS_1.26.0 namespace)               
 
-If your wheel was compiled against the `ort` Rust crate's 1.25.x ABI:
+If your wheel was compiled against the `ort` Rust crate's 1.25.x ABI:                               
   installing onnxruntime 1.26+ at runtime                 → ImportError on `_sparrow_engine_core.so`
 ```
 
@@ -1509,8 +1509,8 @@ If your wheel was compiled against the `ort` Rust crate's 1.25.x ABI:
 ### 13.3 GPU teardown heap corruption (MT-17)
 
 ```
-$ spe pipeline IMG.jpg --device cuda:0
-... inference completes correctly ...
+$ spe pipeline IMG.jpg --device cuda:0                                 
+... inference completes correctly ...                                  
 *** corrupted double-linked list (SIGABRT, exit 134)  ← at PROCESS EXIT
 ```
 
@@ -1525,15 +1525,15 @@ $ spe pipeline IMG.jpg --device cuda:0
 ### 13.4 fork() + Engine singleton
 
 ```
-import multiprocessing as mp
-import sparrow_engine
-sparrow_engine.init(device="cuda:0")
+import multiprocessing as mp                                                 
+import sparrow_engine                                                        
+sparrow_engine.init(device="cuda:0")                                         
 
-# Spawning a child process:
+# Spawning a child process:                                                  
 ctx = mp.get_context("fork")   ← BREAKS: ENGINE_EXISTS bool leaks into child;
-                                  child's Engine::new() returns error.
+                                  child's Engine::new() returns error.       
 
-ctx = mp.get_context("spawn")  ← OK: child has a fresh process state.
+ctx = mp.get_context("spawn")  ← OK: child has a fresh process state.        
 ```
 
 **Why**: `ENGINE_EXISTS` is an `AtomicBool` that prevents two engines in one process. `fork()` duplicates it into the child, which then thinks an engine already exists.
@@ -1590,12 +1590,12 @@ ORT CUDA EP + NHWC + dynamic shapes  →  SafeInt overflow in Conv
 ### 13.8 eza/exa aliases corrupting paths
 
 ```
-$ GPU_WHL=$(ls -t target/wheels/*.whl | head -1)
-$ pip install "$GPU_WHL"
-Error: Expected package name, found '-I'
+$ GPU_WHL=$(ls -t target/wheels/*.whl | head -1)         
+$ pip install "$GPU_WHL"                                 
+Error: Expected package name, found '-I'                 
 
 # Reason: zsh aliased `ls` to `eza --git --icons=always`.
-# `$GPU_WHL` captured "-I <icon> target/wheels/...whl"
+# `$GPU_WHL` captured "-I <icon> target/wheels/...whl"   
 ```
 
 **Why**: zsh/bash users alias `ls` to `eza` or `exa`, which inject git-status flags + nerd-font icons before file names. When you capture `$(ls ...)` in a variable, you capture the noise too.
@@ -1624,8 +1624,8 @@ $ spe detect /photos/ --print --format json | head -1
 ### 13.10 Cross-flavor refusal
 
 ```
-$ bash installer/sparrow-engine-install.sh --flavor gpu
-# Current install is CPU.
+$ bash installer/sparrow-engine-install.sh --flavor gpu          
+# Current install is CPU.                                        
 Error: cross-flavor install attempted without --reprobe (exit 12)
 ```
 
@@ -1638,16 +1638,16 @@ Error: cross-flavor install attempted without --reprobe (exit 12)
 ### 13.11 Dependency version pins — what's enforced today vs. what's planned
 
 ```
-ENFORCEMENT TIERS (today)
-   1. Wheel METADATA Requires-Dist:                  ENFORCED at pip install
+ENFORCEMENT TIERS (today)                                                              
+   1. Wheel METADATA Requires-Dist:                  ENFORCED at pip install           
         sparrow-engine:     onnxruntime>=1.25.1,<1.26         (pip refuses out-of-range
-        sparrow-engine-gpu: onnxruntime-gpu>=1.25.1,<1.26      installs)
-   2. installer/probe_gpu_quality.{sh,ps1}:          ENFORCED at install
-        cuDNN >= 9.10                                 (exit 11 if violated)
-   3. NVIDIA driver >= 550.x                         ENFORCED via cuDNN probe
-                                                      side-effect; weak
-   4. Provides-Dist / Conflicts-Dist                 ADVISORY ONLY in pip ≥22
-                                                      (does not block install)
+        sparrow-engine-gpu: onnxruntime-gpu>=1.25.1,<1.26      installs)               
+   2. installer/probe_gpu_quality.{sh,ps1}:          ENFORCED at install               
+        cuDNN >= 9.10                                 (exit 11 if violated)            
+   3. NVIDIA driver >= 550.x                         ENFORCED via cuDNN probe          
+                                                      side-effect; weak                
+   4. Provides-Dist / Conflicts-Dist                 ADVISORY ONLY in pip ≥22          
+                                                      (does not block install)         
 ```
 
 **Why**: people installing sparrow-engine into mismatched environments produce the worst-class of "it loads but crashes" bugs (MT-4.1-14 ORT 1.26 symbol-namespace drop; cuDNN 9.8 Conv crash; CPU/GPU wheel coexistence).
@@ -1683,14 +1683,14 @@ ENFORCEMENT TIERS (today)
 ### Section overview
 
 ```
-                    Workload                       Latency (RTX 6000 Ada)
-   ─────────────────────────────────────────────  ───────────────────────────
-   sparrow-engine-gpu  MDv6 (yolov10-e) FP16               13.46 ms / image (median)
+                    Workload                       Latency (RTX 6000 Ada)              
+   ─────────────────────────────────────────────  ───────────────────────────          
+   sparrow-engine-gpu  MDv6 (yolov10-e) FP16               13.46 ms / image (median)   
    sparrow-engine-gpu  MD_AudioBirds_V1 FP16                8.52 ms / 1.0s window (p50)
-   sparrow-engine-gpu  Pipeline (MDv6 → SpeciesNet)        ~60 ms / image
-   sparrow-engine-cpu  MDv6 FP32 (debian:bookworm-slim)    ~1.9 s  / image
+   sparrow-engine-gpu  Pipeline (MDv6 → SpeciesNet)        ~60 ms / image              
+   sparrow-engine-cpu  MDv6 FP32 (debian:bookworm-slim)    ~1.9 s  / image             
    sparrow-engine-gpu  Cold start (CUDA EP init + load)    ~2.8 s  (first request only)
-   sparrow-engine-server  HTTP cold boot (no preload)      Sub-second to ready
+   sparrow-engine-server  HTTP cold boot (no preload)      Sub-second to ready         
 ```
 
 **Why**: production deployments care more about p95 latency than peak GPU FLOPs.
@@ -1727,11 +1727,11 @@ ENFORCEMENT TIERS (today)
 ### 14.3 Idle reaper memory behavior
 
 ```
-Long-running sparrow-engine-server with 14 models:
+Long-running sparrow-engine-server with 14 models:                           
   Without reaper:  all 14 sessions resident → ~10 GB GPU memory (and growing)
-  With reaper (default 30 min, keep 1):
-     14 sessions briefly, then drops to 1 + whatever's in active use
-                                            → ~1.5–2 GB steady-state
+  With reaper (default 30 min, keep 1):                                      
+     14 sessions briefly, then drops to 1 + whatever's in active use         
+                                            → ~1.5–2 GB steady-state         
 ```
 
 **Why**: ORT sessions hold GPU memory until dropped. A server that's been up for hours can pin out the GPU.
@@ -1745,16 +1745,16 @@ Long-running sparrow-engine-server with 14 models:
 ### Section overview
 
 ```
-                    Sparrow Studio
-        ┌────────────────────┴────────────────────┐
-        │                                         │
-   Sparrow Web                              Sparrow Local
-   (server, multi-user)                     (desktop, single-user)
-        │                                         │
-   HTTP API                                  Native DLL
-        │                                         │
-        v                                         v
-   sparrow-engine-server                              libsparrow_engine.{so,dll,dylib}
+                    Sparrow Studio                                                           
+        ┌────────────────────┴────────────────────┐                                          
+        │                                         │                                          
+   Sparrow Web                              Sparrow Local                                    
+   (server, multi-user)                     (desktop, single-user)                           
+        │                                         │                                          
+   HTTP API                                  Native DLL                                      
+        │                                         │                                          
+        v                                         v                                          
+   sparrow-engine-server                              libsparrow_engine.{so,dll,dylib}       
    (Docker, CPU + GPU images)                (cdylib + sparrow_engine.h + NativeMethods.g.cs)
 ```
 
@@ -1767,11 +1767,11 @@ Long-running sparrow-engine-server with 14 models:
 ### 15.1 Sparrow Studio Web — what's locked in
 
 ```
-sparrow/sparrow-engine/                            (image-pin contract)
+sparrow/sparrow-engine/                            (image-pin contract)          
 ├── sparrow_engine.version                         tag + digest pin + ORT version
-├── sparrow-engine-source.toml                     human-readable provenance
-├── sync.lock                             machine-checkable hashes
-└── docker-compose.override.yaml.example  dev bind-mount template
+├── sparrow-engine-source.toml                     human-readable provenance     
+├── sync.lock                             machine-checkable hashes               
+└── docker-compose.override.yaml.example  dev bind-mount template                
 ```
 
 | Item | Status |
@@ -1791,14 +1791,14 @@ sparrow/sparrow-engine/                            (image-pin contract)
 ### 15.2 Sparrow Studio Local — what's in flight
 
 ```
-Linux side (bongo_dev):                    Windows side (Sparrow Local):
-  ┌──────────────────────┐                 ┌──────────────────────┐
+Linux side (bongo_dev):                    Windows side (Sparrow Local):             
+  ┌──────────────────────┐                 ┌──────────────────────┐                  
   │ libsparrow_engine.{so}        │                 │ sparrow_engine.dll (build)    │
-  │ sparrow_engine.h (cbindgen)   │   port  ──►     │ NativeMethods.g.cs   │
-  │ NativeMethods.g.cs   │                 │ Avalonia desktop app │
+  │ sparrow_engine.h (cbindgen)   │   port  ──►     │ NativeMethods.g.cs   │         
+  │ NativeMethods.g.cs   │                 │ Avalonia desktop app │                  
   │ 32 sparrow_engine_* exports   │                 │ [DllImport("sparrow_engine")] │
-  │ G5 invariant         │                 │ G5-equivalent check  │
-  └──────────────────────┘                 └──────────────────────┘
+  │ G5 invariant         │                 │ G5-equivalent check  │                  
+  └──────────────────────┘                 └──────────────────────┘                  
 ```
 
 | Step | Status |
@@ -1819,19 +1819,19 @@ Linux side (bongo_dev):                    Windows side (Sparrow Local):
 ### 15.3 What happens if Windows surfaces a sparrow-engine defect
 
 ```
-Windows hands-on finds defect
-            │
-            v
-File MT-SL-N ticket in:
+Windows hands-on finds defect                                 
+            │                                                 
+            v                                                 
+File MT-SL-N ticket in:                                       
    docs/ideas.md § Sparrow Studio Local Integration follow-ups
-            │
-            v
-If defect is in sparrow-engine (not Sparrow app):
-   → branch off main
-   → fix
-   → re-run Linux G5 + Phase 4.1 §1.11 + §9.1
-   → cross-build on Windows
-   → close ticket
+            │                                                 
+            v                                                 
+If defect is in sparrow-engine (not Sparrow app):             
+   → branch off main                                          
+   → fix                                                      
+   → re-run Linux G5 + Phase 4.1 §1.11 + §9.1                 
+   → cross-build on Windows                                   
+   → close ticket                                             
 ```
 
 **Why**: every Windows-surfaced sparrow-engine defect should be reproducible on Linux first, fixed on Linux, then re-tested on Windows.
@@ -1845,18 +1845,18 @@ If defect is in sparrow-engine (not Sparrow app):
 ## Summary
 
 ```
-                              The sparrow-engine surface at a glance
+                              The sparrow-engine surface at a glance                          
 
-      What it is                  How you call it                What it produces
-   ───────────────────       ───────────────────────────       ────────────────────
+      What it is                  How you call it                What it produces             
+   ───────────────────       ───────────────────────────       ────────────────────           
    Rust ML engine for        1. sparrow-engine CLI                       Normalized bbox [0,1]
-   ONNX vision + audio       2. sparrow-engine Python wheel              + class + confidence
-   (camera-trap species,     3. sparrow-engine-client (HTTP SDK)           or
-    bioacoustics)            4. sparrow-engine-server (HTTP API)         Audio time-ranges
-                             5. libsparrow_engine cdylib (C ABI)         + max_confidence
-                                                                 or
-                                                                Pipeline crops
-                                                                + top_k labels
+   ONNX vision + audio       2. sparrow-engine Python wheel              + class + confidence 
+   (camera-trap species,     3. sparrow-engine-client (HTTP SDK)           or                 
+    bioacoustics)            4. sparrow-engine-server (HTTP API)         Audio time-ranges    
+                             5. libsparrow_engine cdylib (C ABI)         + max_confidence     
+                                                                 or                           
+                                                                Pipeline crops                
+                                                                + top_k labels                
 ```
 
 | Metric | Value |
