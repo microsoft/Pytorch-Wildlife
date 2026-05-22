@@ -26,9 +26,13 @@ to install the HTTP-server image instead.
 System prerequisites for GPU: NVIDIA driver ≥550.x, CUDA 12.6 runtime,
 and **cuDNN ≥9.10** (cuDNN 9.8 has a Conv-engine bug on sm_89).
 
-See [`docs/user-manual.md`](docs/user-manual.md) for the full install
-reference (per-platform commands, air-gapped path, exit-code catalog
-0–14, troubleshooting).
+---
+
+> 📖 **[Read the full user manual →](docs/user-manual.md)**
+>
+> One document covering install, CLI (`spe`), Python wheel (`import sparrow_engine`), HTTP API server, HTTP SDK, native DLL (C ABI), TOML model manifests, the Phase 4 inference-log / drift / provenance surface, cold-start + lazy load, gotchas + edge cases, performance characteristics, and Sparrow Studio integration.
+
+---
 
 ## Architecture
 
@@ -44,15 +48,6 @@ Core invariants:
 - TOML manifests (one per model)
 - NMS in the ONNX graph, never in the Sparrow Engine
 - `Engine` is a singleton (ORT is process-global)
-
-## Documentation
-
-- [`docs/user-manual.md`](docs/user-manual.md) — User manual: install,
-  CLI (`spe`), Python (`import sparrow_engine`), HTTP API server,
-  HTTP SDK, native DLL (C ABI), models + TOML manifests, the Phase 4
-  inference-log / drift / provenance surface, cold-start + lazy load,
-  gotchas + edge cases, performance characteristics, Sparrow Studio
-  integration.
 
 ## License
 
