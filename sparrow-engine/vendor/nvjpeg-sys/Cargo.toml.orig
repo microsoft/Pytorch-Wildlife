@@ -1,0 +1,16 @@
+[package]
+name = "nvjpeg-sys"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Raw Rust bindings for NVIDIA nvJPEG library"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[dev-dependencies]
+# custos = { version="0.6", default-features=false, features=["cuda"] }
+custos = { git = "https://github.com/elftausend/custos.git", branch = "custos-0.7", default-features=false, features=["cuda", "static-api"] }
+# custos = { path = "../../custos", default-features=false, features=["cuda", "static-api"] }
+
