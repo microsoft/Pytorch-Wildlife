@@ -37,6 +37,42 @@ Plain definitions before the first technical sentence.
 
 ## Top-level overview
 
+> **ASCII version (for comparison)**:
+
+```
+                       sparrow-engine (Rust workspace, 7 crates)                                                       
+                                   │                                                                                   
+       ┌───────────────────────────┼───────────────────────────┐                                                       
+       │                           │                           │                                                       
+       v                           v                           v                                                       
+  sparrow-engine-types               sparrow-engine-core                  sparrow-engine-cpu / sparrow-engine-gpu      
+  (shared data              (shared logic              (engine flavors,                                                
+   types — no               — no ORT, no               each ships libsparrow_engine.so                                 
+   ORT, no CUDA)             CUDA)                      with 32 sparrow_engine_* exports)                              
+                                                              │                                                        
+                              ┌───────────────────────────────┼───────────────────────┐                                
+                              │                               │                       │                                
+                              v                               v                       v                                
+                        sparrow-engine-server               sparrow-engine-cli                    sparrow-engine-python
+                        (HTTP API, 15 routes)      (CLI binary)                 (Python wheel)                         
+                              │                               │                       │                                
+                              │  ┌────────────────────────────┼───────────────────┐   │                                
+                              │  │                                                │   │                                
+                              v  v                                                v   v                                
+                         Sparrow Studio Web                              Sparrow Studio Local                          
+                         (Flask + workers, Docker)                       (Avalonia / .NET desktop;                     
+                                                                         loads sparrow_engine.dll via P/Invoke)        
+
+Five ways to call Sparrow Engine:                                                                                      
+  CLI binary · Python wheel · HTTP SDK (sparrow-engine-client) · HTTP API (sparrow-engine-server) · Native DLL (C ABI) 
+
+Two device flavors, never co-located in one binary:                                                                    
+  cpu  → ORT CPU EP only,  Python wheel "sparrow-engine",     CLI binary "spe"                                         
+  gpu  → ORT CUDA EP added, Python wheel "sparrow-engine-gpu", CLI binary "spe-gpu"                                    
+```
+
+> **Mermaid version**:
+
 ```mermaid
 %%{init: {'flowchart': {'curve': 'step'}}}%%
 flowchart TB
@@ -74,6 +110,27 @@ Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparr
 ## 1. What Sparrow Engine is
 
 ### Section overview
+
+> **ASCII version (for comparison)**:
+
+```
+                  ┌──────────────────────────────────────┐                                
+                  │              sparrow-engine            │                              
+                  │  Loads ONNX models, runs inference.  │                                
+                  │  That's it. No annotation, no        │                                
+                  │  training, no storage, no registry.  │                                
+                  └──────────────────┬───────────────────┘                                
+                                     │                                                    
+       ┌─────────────────────────────┼─────────────────────────────┐                      
+       │                             │                             │                      
+       v                             v                             v                      
+   Sparrow Studio              sparrow-data sibling        sparrow-ops sibling            
+   (consumer; uses             (DEFERRED — data            (DEFERRED — registry,          
+    sparrow-engine's HTTP API            substrate, ingestion,        drift Tier-3, CI/CD,
+    and native DLL)             logging, snapshots)          monitoring)                  
+```
+
+> **Mermaid version**:
 
 ```mermaid
 %%{init: {'flowchart': {'curve': 'step'}}}%%
@@ -134,6 +191,8 @@ The following constraints are baked into the engine. If you onboard a new model,
 
 ### Section overview
 
+> **ASCII version (for comparison)**:
+
 ```
                        installer/sparrow-engine-install.{sh,ps1}             
                                     │                                        
@@ -159,6 +218,28 @@ The following constraints are baked into the engine. If you onboard a new model,
        v                    v                         v                      
    CLI tarball         pip wheel                Docker image                 
    ~/.sparrow_engine/bin    active Python env       sparrow-engine:cpu / :gpu
+```
+
+> **Mermaid version**:
+
+```mermaid
+%%{init: {'flowchart': {'curve': 'step'}}}%%
+flowchart TB
+    INST["installer/sparrow-engine-install.{sh,ps1}"]
+    L1["**Layer 1 probe**<br/>nvidia-smi · libcuda.so.1<br/>WMI Win32_VideoController"]
+    L2{"**Layer 2 probe**<br/>cuDNN ≥9.10?"}
+    CPU["CPU flavor"]
+    GPU["GPU flavor"]
+    TAR["CLI tarball<br/>~/.sparrow_engine/bin"]
+    PIP["pip wheel<br/>active Python env"]
+    DOCK["Docker image<br/>sparrow-engine:cpu / :gpu"]
+
+    INST --> L1
+    L1 -- "NVIDIA found" --> L2
+    L1 -- "no NVIDIA" --> CPU
+    L2 -- "pass" --> GPU
+    L2 -- "fail · exit 11" --> CPU
+    GPU --> TAR & PIP & DOCK
 ```
 
 **Why**: one wrapper hides the GPU-detection complexity. The user runs one command and gets the right build.
