@@ -52,7 +52,7 @@
 //! Easiest: use the one-command runner
 //!
 //! ```bash
-//! ./scripts/run_audio_parity.sh    # from repo root (bongo_dev/)
+//! ./scripts/run_audio_parity.sh    # from repo root (sparrow-engine-dev/)
 //! ```
 //!
 //! Manual: from the sparrow-engine crate workspace:

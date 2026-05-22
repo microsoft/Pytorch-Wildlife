@@ -343,7 +343,7 @@ main() {
     require_cmd python3
 
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    repo_root="$(git -C "$script_dir/../.." rev-parse --show-toplevel 2>/dev/null)" || die "script must run inside the bongo_dev repository"
+    repo_root="$(git -C "$script_dir/../.." rev-parse --show-toplevel 2>/dev/null)" || die "script must run inside the sparrow-engine-dev repository"
     cd "$repo_root"
 
     scratch_root="$repo_root/scratch"

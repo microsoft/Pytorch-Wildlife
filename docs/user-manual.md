@@ -1795,7 +1795,7 @@ sparrow/sparrow-engine/                     (image-pin contract)
 ### 15.2 Sparrow Studio Local — what's in flight
 
 ```
-Linux side (bongo_dev):                           Windows side (Sparrow Local):                                         
+Linux side (sparrow-engine-dev):                  Windows side (Sparrow Local):                                         
 ┌──────────────────────────────────┐              ┌──────────────────────────────────────┐                              
 │ libsparrow_engine.{so,dylib}     │              │ sparrow_engine.dll (build)           │                              
 │ sparrow_engine.h (cbindgen)      │              │ NativeMethods.g.cs                   │                              
