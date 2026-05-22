@@ -38,46 +38,35 @@ Plain definitions before the first technical sentence.
 ## Top-level overview
 
 ```
-                       sparrow-engine (Rust workspace, 7 crates)                                                       
-                                   │                                                                                   
-       ┌───────────────────────────┼───────────────────────────┐                                                       
-       │                           │                           │                                                       
-       v                           v                           v                                                       
-  sparrow-engine-types               sparrow-engine-core                  sparrow-engine-cpu / sparrow-engine-gpu      
-  (shared data              (shared logic              (engine flavors,                                                
-   types — no               — no ORT, no               each ships libsparrow_engine.so                                 
-   ORT, no CUDA)             CUDA)                      with 32 sparrow_engine_* exports)                              
-                                                              │                                                        
-                              ┌───────────────────────────────┼───────────────────────┐                                
-                              │                               │                       │                                
-                              v                               v                       v                                
-                        sparrow-engine-server               sparrow-engine-cli                    sparrow-engine-python
-                        (HTTP API, 15 routes)      (CLI binary)                 (Python wheel)                         
-                              │                               │                       │                                
-                              │  ┌────────────────────────────┼───────────────────┐   │                                
-                              │  │                                                │   │                                
-                              v  v                                                v   v                                
-                         Sparrow Studio Web                              Sparrow Studio Local                          
-                         (Flask + workers, Docker)                       (Avalonia / .NET desktop;                     
-                                                                         loads sparrow_engine.dll via P/Invoke)        
+               sparrow-engine (Rust workspace, 7 crates)                                                                
+                                   │                                                                                    
+       ┌───────────────────────────┼───────────────────────────┐                                                        
+       │                           │                           │                                                        
+       v                           v                           v                                                        
+       sparrow-engine-types        sparrow-engine-core         sparrow-engine-cpu / sparrow-engine-gpu                  
+       (shared data                (shared logic               (engine flavors;                                         
+        types — no                  — no ORT, no                each ships libsparrow_engine.so                         
+        ORT, no CUDA)               CUDA)                       with 32 sparrow_engine_* exports)                       
+                                                               │                                                        
+                                 ┌─────────────────────────────┼─────────────────────────────┐                          
+                                 │                             │                             │                          
+                                 v                             v                             v                          
+                                 sparrow-engine-server         sparrow-engine-cli            sparrow-engine-python      
+                                 (HTTP API, 15 routes)         (CLI binary)                  (Python wheel)             
+                                 │                             │                             │                          
+                                 │                             └──────────────┬──────────────┘                          
+                                 v                                            v                                         
+                                 Sparrow Studio Web                           Sparrow Studio Local                      
+                                 (Flask + workers, Docker)                    (Avalonia / .NET desktop;                 
+                                                                               loads sparrow_engine.dll via P/Invoke)   
 
-Five ways to call Sparrow Engine:                                                                                      
-  CLI binary · Python wheel · HTTP SDK (sparrow-engine-client) · HTTP API (sparrow-engine-server) · Native DLL (C ABI) 
+Five ways to call Sparrow Engine:                                                                                       
+  CLI binary · Python wheel · HTTP SDK (sparrow-engine-client) · HTTP API (sparrow-engine-server) · Native DLL (C ABI)  
 
-Two device flavors, never co-located in one binary:                                                                    
-  cpu  → ORT CPU EP only,  Python wheel "sparrow-engine",     CLI binary "spe"                                         
-  gpu  → ORT CUDA EP added, Python wheel "sparrow-engine-gpu", CLI binary "spe-gpu"                                    
+Two device flavors, never co-located in one binary:                                                                     
+  cpu  → ORT CPU EP only,  Python wheel "sparrow-engine",     CLI binary "spe"                                          
+  gpu  → ORT CUDA EP added, Python wheel "sparrow-engine-gpu", CLI binary "spe-gpu"                                     
 ```
-
-- **types / core**: shared data + logic; no ORT, no CUDA.
-- **cpu / gpu**: engine flavors; each ships `libsparrow_engine.so` with 32 `sparrow_engine_*` FFI exports. Never co-located in one binary.
-- **server / cli / python**: the three first-party consumer surfaces. `server` exposes 15 HTTP routes; `cli` ships as `spe` (CPU) or `spe-gpu` (GPU); `python` is the maturin wheel.
-- **Sparrow Studio Web**: Flask + workers + Docker, consumes the HTTP API.
-- **Sparrow Studio Local**: Avalonia / .NET desktop; loads `sparrow_engine.dll` via P/Invoke (uses the CLI or wheel for the Python plugin path).
-
-**Five ways to call Sparrow Engine**: CLI binary · Python wheel · HTTP SDK (`sparrow-engine-client`) · HTTP API (`sparrow-engine-server`) · Native DLL (C ABI).
-
-**Two device flavors**: `cpu` (ORT CPU EP only) and `gpu` (ORT CUDA EP added).
 
 Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparrow_engine.so` — Sparrow Studio Local's `[DllImport("sparrow_engine")]` resolves either flavor.
 
@@ -88,20 +77,20 @@ Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparr
 ### Section overview
 
 ```
-                  ┌──────────────────────────────────────┐                                
-                  │              sparrow-engine            │                              
-                  │  Loads ONNX models, runs inference.  │                                
-                  │  That's it. No annotation, no        │                                
-                  │  training, no storage, no registry.  │                                
-                  └──────────────────┬───────────────────┘                                
-                                     │                                                    
-       ┌─────────────────────────────┼─────────────────────────────┐                      
-       │                             │                             │                      
-       v                             v                             v                      
-   Sparrow Studio              sparrow-data sibling        sparrow-ops sibling            
-   (consumer; uses             (DEFERRED — data            (DEFERRED — registry,          
-    sparrow-engine's HTTP API            substrate, ingestion,        drift Tier-3, CI/CD,
-    and native DLL)             logging, snapshots)          monitoring)                  
+                   ┌────────────────────────────────────────┐                                                           
+                   │             sparrow-engine             │                                                           
+                   │   Loads ONNX models, runs inference.   │                                                           
+                   │      That's it. No annotation, no      │                                                           
+                   │   training, no storage, no registry.   │                                                           
+                   └────────────────────┬───────────────────┘                                                           
+                                        │                                                                               
+          ┌─────────────────────────────┼─────────────────────────────┐                                                 
+          │                             │                             │                                                 
+          v                             v                             v                                                 
+          Sparrow Studio                sparrow-data sibling          sparrow-ops sibling                               
+          (consumer; uses               (DEFERRED — data              (DEFERRED — registry,                             
+           sparrow-engine HTTP           substrate, ingestion,         drift Tier-3, CI/CD,                             
+           API + native DLL)             logging, snapshots)           monitoring)                                      
 ```
 
 **Why**: Sparrow Engine exists so wildlife-conservation teams can run camera-trap and bioacoustic models fast, in production, without re-implementing inference per consumer.
@@ -191,11 +180,11 @@ The following constraints are baked into the engine. If you onboard a new model,
 ### 2.1 Quickstart per platform
 
 ```
-┌────────────────────┬────────────────────────────────────────────┐         
-│ Linux x86_64       │ bash installer/sparrow-engine-install.sh            │
-│ macOS arm64/x86_64 │ bash installer/sparrow-engine-install.sh (CPU only) │
-│ Windows x86_64     │ installer\sparrow-engine-install.ps1                │
-└────────────────────┴────────────────────────────────────────────┘         
+┌────────────────────┬─────────────────────────────────────────────────────┐                                            
+│ Linux x86_64       │ bash installer/sparrow-engine-install.sh            │                                            
+│ macOS arm64/x86_64 │ bash installer/sparrow-engine-install.sh (CPU only) │                                            
+│ Windows x86_64     │ installer\sparrow-engine-install.ps1                │                                            
+└────────────────────┴─────────────────────────────────────────────────────┘                                            
 ```
 
 **Why**: same script, same flags, different shell.
@@ -283,14 +272,14 @@ The following constraints are baked into the engine. If you onboard a new model,
 ### 2.6 Air-gapped install
 
 ```
-ONLINE machine:                 OFFLINE machine:              
-┌───────────────────┐           ┌───────────────────┐         
-│ Build / download  │   USB     │ Receive tarball   │         
-│   sparrow-engine tarball   │  ───────► │ + sha256          │
-│ + sparrow_engine.dll       │           │                   │
-│ + sha256          │           │ Verify + extract  │         
-└───────────────────┘           │ into ~/.sparrow_engine/    │
-                                └───────────────────┘         
+ONLINE machine:                        OFFLINE machine:                                                                 
+┌────────────────────────┐             ┌────────────────────────┐                                                       
+│ Build / download       │             │ Receive tarball        │                                                       
+│ sparrow-engine tarball │             │ + sha256               │                                                       
+│ + sparrow_engine.dll   │   USB ─►    │                        │                                                       
+│ + sha256               │             │ Verify + extract       │                                                       
+│                        │             │ into ~/.sparrow_engine/│                                                       
+└────────────────────────┘             └────────────────────────┘                                                       
 ```
 
 **Why**: many camera-trap deployments are in field sites with no internet.
@@ -380,19 +369,21 @@ spe device  →  prints "cuda:0"   ← compile-time check only
 ### Section overview
 
 ```
-                       Same engine, same models, five surfaces                                                                     
+                                  Same engine, same models, five surfaces                                               
 
-     sparrow-engine CLI       sparrow-engine-python      sparrow-engine-client      sparrow-engine-server      libsparrow_engine.so
-     (terminal)      (Python pkg)      (HTTP SDK)        (HTTP server)     (C ABI DLL)                                             
-         │                │                 │                 │                 │                                                  
-         │ PyO3 bindings  │  HTTP over      │ axum routes     │ cdylib called   │                                                  
-         │ (in-process)   │  localhost      │ + 15 endpoints  │ via P/Invoke    │                                                  
-         v                v                 v                 v                 v                                                  
-                              ┌─────────────────────────┐                                                                          
-                              │   sparrow-engine          │                                                                        
-                              │   (sparrow-engine-cpu OR         │                                                                 
-                              │    sparrow-engine-gpu)           │                                                                 
-                              └─────────────────────────┘                                                                          
+        spe                   sparrow_engine         sparrow_engine_client  sparrow-engine-server libsparrow_engine.so  
+        (CLI binary)          (Python pkg)           (HTTP SDK)             (HTTP API)            (C ABI DLL)           
+        │                     │                      │                      │                     │                     
+        v                     v                      v                      v                     v                     
+        └─────────────────────┴──────────────────────┼──────────────────────┴─────────────────────┘                     
+                                                     │                                                                  
+                                                     v                                                                  
+                                         ┌──────────────────────┐                                                       
+                                         │    sparrow-engine    │                                                       
+                                         │  sparrow-engine-cpu  │                                                       
+                                         │          OR          │                                                       
+                                         │  sparrow-engine-gpu  │                                                       
+                                         └──────────────────────┘                                                       
 ```
 
 **Why**: different consumers need different surfaces. A scientist wants the CLI; a notebook wants Python; Sparrow Web wants HTTP; Sparrow Local wants native DLL.
@@ -426,19 +417,20 @@ Both CLI and Python expose the **same** function set with the same conventions. 
 ### 4.2 Device selection
 
 ```
-              Device::Auto  (default)                                    
-                     │                                                   
-            ┌────────┴────────┐                                          
-            │                 │                                          
-       CPU flavor          GPU flavor                                    
-            │                 │                                          
-            v                 v                                          
-              Cpu          ────────►   Cuda(0)                           
-        (always)           (always)                                      
+                        Device::Auto  (default)                                                                         
+                                   │                                                                                    
+                    ┌──────────────┴──────────────┐                                                                     
+                    │                             │                                                                     
+                    v                             v                                                                     
+                    CPU flavor                    GPU flavor                                                            
+                    │                             │                                                                     
+                    v                             v                                                                     
+                    Cpu                           Cuda(0)                                                               
+                    (always)                      (always)                                                              
 
-              Device::Cpu          →   Cpu (both flavors)                
-              Device::Cuda(N)      →   Cuda(N) on GPU flavor;            
-                                     warns + coerces to Cpu on CPU flavor
+   Device::Cpu        →   Cpu (both flavors)                                                                            
+   Device::Cuda(N)    →   Cuda(N) on GPU flavor;                                                                        
+                          warns + coerces to Cpu on CPU flavor                                                          
 ```
 
 **Why**: post-MT-4.1-2, `Device::Auto` is **flavor-strict** — the CPU wheel never opportunistically grabs CUDA via runtime ORT, even if `LD_LIBRARY_PATH` exposes a GPU ORT.
@@ -906,20 +898,20 @@ loop every clamp(SPARROW_ENGINE_IDLE_UNLOAD_SEC, 1, 60) seconds:
 ### Section overview
 
 ```
-sparrow-engine-client (Python package — separate from sparrow-engine)     
-  ┌─────────────────────────────────────────────────────┐                 
-  │ from sparrow_engine_client import SparrowEngineClient                │
-  │                                                     │                 
-  │ c = SparrowEngineClient("http://server:8080")               │         
-  │ result = c.detect(open("img.jpg","rb"),             │                 
-  │                   model="megadetector-v6-yolov10e") │                 
-  └─────────────────────────────────────────────────────┘                 
-                            │                                             
-                            v                                             
-                  HTTP POST /v1/detect                                    
-                            │                                             
-                            v                                             
-                       sparrow-engine-server                              
+sparrow-engine-client (Python package — separate from sparrow-engine)                                                   
+  ┌───────────────────────────────────────────────────────┐                                                             
+  │ from sparrow_engine_client import SparrowEngineClient │                                                             
+  │                                                       │                                                             
+  │ c = SparrowEngineClient("http://server:8080")         │                                                             
+  │ result = c.detect(open("img.jpg","rb"),               │                                                             
+  │                   model="megadetector-v6-yolov10e")   │                                                             
+  └───────────────────────────────────────────────────────┘                                                             
+                              │                                                                                         
+                              v                                                                                         
+                    HTTP POST /v1/detect                                                                                
+                              │                                                                                         
+                              v                                                                                         
+                    sparrow-engine-server                                                                               
 ```
 
 **Why**: Sparrow Studio Web and other operators run sparrow-engine as a remote service. A Python SDK saves them writing HTTP clients.
@@ -1017,9 +1009,9 @@ Errors:
 ### 9.3 Opaque handle safety
 
 ```
-SparrowEngine    = c_void   (opaque)      
-SparrowEngineModel     = c_void   (opaque)
-SparrowEnginePipeline  = c_void   (opaque)
+SparrowEngine          = c_void   (opaque)                                                                              
+SparrowEngineModel     = c_void   (opaque)                                                                              
+SparrowEnginePipeline  = c_void   (opaque)                                                                              
 ```
 
 **Why**: the C side never sees Rust's struct layout, so structs can evolve without an ABI break.
@@ -1035,10 +1027,12 @@ SparrowEnginePipeline  = c_void   (opaque)
 ### 9.4 Both flavors export the same symbols
 
 ```
-libsparrow_engine.so (CPU flavor):                 libsparrow_engine.so (GPU flavor):                                   
-  32 sparrow_engine_* symbols                        32 sparrow_engine_* symbols  ── byte-identical                     
-  sparrow-engine-cpu/Cargo.toml: [lib] name="sparrow-engine"  sparrow-engine-gpu/Cargo.toml: [lib] name="sparrow-engine"
-  cdylib filename: libsparrow_engine.so              cdylib filename: libsparrow_engine.so                              
+libsparrow_engine.so (CPU flavor):                        libsparrow_engine.so (GPU flavor):                            
+  32 sparrow_engine_* symbols                               32 sparrow_engine_* symbols   ◄── byte-identical            
+  sparrow-engine-cpu/Cargo.toml:                            sparrow-engine-gpu/Cargo.toml:                              
+    [lib] name = "sparrow_engine"                             [lib] name = "sparrow_engine"                             
+  cdylib filename:                                          cdylib filename:                                            
+    libsparrow_engine.so                                      libsparrow_engine.so                                      
 ```
 
 **Why**: Sparrow Studio Local's `[DllImport("sparrow_engine")]` must resolve regardless of which flavor is installed.
@@ -1344,26 +1338,26 @@ sparrow-engine (engine):                sparrow-data (deferred sibling):
 ### Section overview
 
 ```
-                Server boot (cold)                                                                 
-                       │                                                                           
-                       │  Phase 4.2 contract:                                                      
-                       │   1. Scan SPARROW_ENGINE_MODEL_DIR/<id>/manifest.toml → Catalog           
-                       │   2. Bind TCP listener                                                    
-                       │   3. Become ready (GET /v1/health                     → "no_models")      
-                       │   4. DO NOT load any ORT sessions yet                                     
-                       │                                                                           
-                       v                                                                           
-            ┌──────────────────────┐                 ┌────────────────────┐                        
-            │  GET /v1/catalog     │                 │  SPARROW_ENGINE_PRELOAD set │               
-                       │  returns all models  │                 │              → eager-load those │
-            │  + `loaded: false`   │                 │  IDs at boot       │                        
-            └──────────┬───────────┘                 └─────────┬──────────┘                        
-                       │                                       │                                   
-            ┌──────────┴──────────┬──────────────────┐         │                                   
-            v                     v                  v         v                                   
-      POST /v1/models/load   POST /v1/detect    POST /v1/pipeline                                  
-      (explicit eager)        (lazy: load on    (lazy: load all                                    
-                              first request)     step models)                                      
+                    Server boot (cold)                                                                                  
+                            │                                                                                           
+                            │  Phase 4.2 contract:                                                                      
+                            │    1. Scan SPARROW_ENGINE_MODEL_DIR/<id>/manifest.toml → Catalog                          
+                            │    2. Bind TCP listener                                                                   
+                            │    3. Become ready (GET /v1/health → "no_models")                                         
+                            │    4. DO NOT load any ORT sessions yet                                                    
+                            │                                                                                           
+                            v                                                                                           
+      ┌───────────────────────────────────────────┐           ┌──────────────────────────────────────────────┐          
+      │              GET /v1/catalog              │           │          SPARROW_ENGINE_PRELOAD set          │          
+      │             returns all models            │           │              → eager-load those              │          
+      │             + `loaded: false`             │           │                 IDs at boot                  │          
+      └─────────────────────┬─────────────────────┘           └──────────────────────────────────────────────┘          
+                            │                                                                                           
+                            v                                                                                           
+                  Lazy-load triggers (catalog members only):                                                            
+                    • POST /v1/models/load   (explicit eager load)                                                      
+                    • POST /v1/detect        (load on first inference request)                                          
+                    • POST /v1/pipeline      (load all detector + classifier step models)                               
 ```
 
 **Why**: Phase 4.1 §8.13 surfaced that boot used to eager-load every model, which made server startup take minutes when the catalog had 14 models.
@@ -1777,11 +1771,11 @@ Long-running sparrow-engine-server with 14 models:
 ### 15.1 Sparrow Studio Web — what's locked in
 
 ```
-sparrow/sparrow-engine/                            (image-pin contract)          
-├── sparrow_engine.version                         tag + digest pin + ORT version
-├── sparrow-engine-source.toml                     human-readable provenance     
-├── sync.lock                             machine-checkable hashes               
-└── docker-compose.override.yaml.example  dev bind-mount template                
+sparrow/sparrow-engine/                     (image-pin contract)                                                        
+├── sparrow_engine.version                  tag + digest pin + ORT version                                              
+├── sparrow-engine-source.toml              human-readable provenance                                                   
+├── sync.lock                               machine-checkable hashes                                                    
+└── docker-compose.override.yaml.example    dev bind-mount template                                                     
 ```
 
 | Item | Status |
@@ -1801,14 +1795,14 @@ sparrow/sparrow-engine/                            (image-pin contract)
 ### 15.2 Sparrow Studio Local — what's in flight
 
 ```
-Linux side (bongo_dev):                    Windows side (Sparrow Local):             
-  ┌──────────────────────┐                 ┌──────────────────────┐                  
-  │ libsparrow_engine.{so}        │                 │ sparrow_engine.dll (build)    │
-  │ sparrow_engine.h (cbindgen)   │   port  ──►     │ NativeMethods.g.cs   │         
-  │ NativeMethods.g.cs   │                 │ Avalonia desktop app │                  
-  │ 32 sparrow_engine_* exports   │                 │ [DllImport("sparrow_engine")] │
-  │ G5 invariant         │                 │ G5-equivalent check  │                  
-  └──────────────────────┘                 └──────────────────────┘                  
+Linux side (bongo_dev):                           Windows side (Sparrow Local):                                         
+┌──────────────────────────────────┐              ┌──────────────────────────────────────┐                              
+│ libsparrow_engine.{so,dylib}     │              │ sparrow_engine.dll (build)           │                              
+│ sparrow_engine.h (cbindgen)      │              │ NativeMethods.g.cs                   │                              
+│ NativeMethods.g.cs (csbindgen)   │  port ─►     │ Avalonia desktop app                 │                              
+│ 32 sparrow_engine_* exports      │              │ [DllImport("sparrow_engine")]        │                              
+│ G5 invariant                     │              │ G5-equivalent check                  │                              
+└──────────────────────────────────┘              └──────────────────────────────────────┘                              
 ```
 
 | Step | Status |
@@ -1850,23 +1844,21 @@ If defect is in sparrow-engine (not Sparrow app):
 
 ---
 
-<!-- SUMMARY-MARKER -->
-
 ## Summary
 
 ```
-                              The sparrow-engine surface at a glance                          
+                                         The sparrow-engine surface at a glance                                         
 
-      What it is                  How you call it                What it produces             
-   ───────────────────       ───────────────────────────       ────────────────────           
-   Rust ML engine for        1. sparrow-engine CLI                       Normalized bbox [0,1]
-   ONNX vision + audio       2. sparrow-engine Python wheel              + class + confidence 
-   (camera-trap species,     3. sparrow-engine-client (HTTP SDK)           or                 
-    bioacoustics)            4. sparrow-engine-server (HTTP API)         Audio time-ranges    
-                             5. libsparrow_engine cdylib (C ABI)         + max_confidence     
-                                                                 or                           
-                                                                Pipeline crops                
-                                                                + top_k labels                
+    What it is                      How you call it                     What it produces                                
+    ────────────────────            ───────────────────────────         ────────────────────────                        
+    Rust ML engine for              1. sparrow-engine CLI (spe)         Normalized bbox [0,1]                           
+    ONNX vision + audio             2. sparrow-engine Python wheel      + class + confidence                            
+    (camera-trap species,           3. sparrow-engine-client (HTTP SDK)   or                                            
+      bioacoustics)                 4. sparrow-engine-server (HTTP API) Audio time-ranges                               
+                                    5. libsparrow_engine.so (C ABI DLL) + max_confidence                                
+                                                                          or                                            
+                                                                        Pipeline crops                                  
+                                                                        + top_k labels                                  
 ```
 
 | Metric | Value |
