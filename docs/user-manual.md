@@ -37,8 +37,6 @@ Plain definitions before the first technical sentence.
 
 ## Top-level overview
 
-> **ASCII version (for comparison)**:
-
 ```
                        sparrow-engine (Rust workspace, 7 crates)                                                       
                                    │                                                                                   
@@ -71,28 +69,6 @@ Two device flavors, never co-located in one binary:
   gpu  → ORT CUDA EP added, Python wheel "sparrow-engine-gpu", CLI binary "spe-gpu"                                    
 ```
 
-> **Mermaid version**:
-
-```mermaid
-%%{init: {'flowchart': {'curve': 'step'}}}%%
-flowchart TB
-    WS["sparrow-engine workspace<br/>(7 Rust crates)"]
-    TYPES["sparrow-engine-types"]
-    CORE["sparrow-engine-core"]
-    FLAV["sparrow-engine-cpu<br/>sparrow-engine-gpu"]
-    SRV["sparrow-engine-server<br/>(HTTP API)"]
-    CLI["sparrow-engine-cli<br/>(spe / spe-gpu)"]
-    PY["sparrow-engine-python<br/>(wheel)"]
-    SW["Sparrow Studio Web"]
-    SL["Sparrow Studio Local"]
-
-    WS --> TYPES & CORE & FLAV
-    FLAV --> SRV & CLI & PY
-    SRV --> SW
-    CLI --> SL
-    PY --> SL
-```
-
 - **types / core**: shared data + logic; no ORT, no CUDA.
 - **cpu / gpu**: engine flavors; each ships `libsparrow_engine.so` with 32 `sparrow_engine_*` FFI exports. Never co-located in one binary.
 - **server / cli / python**: the three first-party consumer surfaces. `server` exposes 15 HTTP routes; `cli` ships as `spe` (CPU) or `spe-gpu` (GPU); `python` is the maturin wheel.
@@ -111,8 +87,6 @@ Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparr
 
 ### Section overview
 
-> **ASCII version (for comparison)**:
-
 ```
                   ┌──────────────────────────────────────┐                                
                   │              sparrow-engine            │                              
@@ -128,18 +102,6 @@ Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparr
    (consumer; uses             (DEFERRED — data            (DEFERRED — registry,          
     sparrow-engine's HTTP API            substrate, ingestion,        drift Tier-3, CI/CD,
     and native DLL)             logging, snapshots)          monitoring)                  
-```
-
-> **Mermaid version**:
-
-```mermaid
-%%{init: {'flowchart': {'curve': 'step'}}}%%
-flowchart TB
-    SE["**sparrow-engine**<br/>Loads ONNX models, runs inference.<br/>No annotation, training, storage, registry."]
-    STUDIO["Sparrow Studio<br/>(consumer)"]
-    DATA["sparrow-data sibling<br/>(DEFERRED)"]
-    OPS["sparrow-ops sibling<br/>(DEFERRED)"]
-    SE --> STUDIO & DATA & OPS
 ```
 
 **Why**: Sparrow Engine exists so wildlife-conservation teams can run camera-trap and bioacoustic models fast, in production, without re-implementing inference per consumer.
@@ -191,8 +153,6 @@ The following constraints are baked into the engine. If you onboard a new model,
 
 ### Section overview
 
-> **ASCII version (for comparison)**:
-
 ```
                        installer/sparrow-engine-install.{sh,ps1}             
                                     │                                        
@@ -218,28 +178,6 @@ The following constraints are baked into the engine. If you onboard a new model,
        v                    v                         v                      
    CLI tarball         pip wheel                Docker image                 
    ~/.sparrow_engine/bin    active Python env       sparrow-engine:cpu / :gpu
-```
-
-> **Mermaid version**:
-
-```mermaid
-%%{init: {'flowchart': {'curve': 'step'}}}%%
-flowchart TB
-    INST["installer/sparrow-engine-install.{sh,ps1}"]
-    L1["**Layer 1 probe**<br/>nvidia-smi · libcuda.so.1<br/>WMI Win32_VideoController"]
-    L2{"**Layer 2 probe**<br/>cuDNN ≥9.10?"}
-    CPU["CPU flavor"]
-    GPU["GPU flavor"]
-    TAR["CLI tarball<br/>~/.sparrow_engine/bin"]
-    PIP["pip wheel<br/>active Python env"]
-    DOCK["Docker image<br/>sparrow-engine:cpu / :gpu"]
-
-    INST --> L1
-    L1 -- "NVIDIA found" --> L2
-    L1 -- "no NVIDIA" --> CPU
-    L2 -- "pass" --> GPU
-    L2 -- "fail · exit 11" --> CPU
-    GPU --> TAR & PIP & DOCK
 ```
 
 **Why**: one wrapper hides the GPU-detection complexity. The user runs one command and gets the right build.
