@@ -1,0 +1,67 @@
+services:
+  sparrow-engine-cpu:
+    image: sparrow-engine:cpu
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cpu
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${SPARROW_ENGINE_MODEL_DIR:-./models}:/models:ro
+    environment:
+      - SPARROW_ENGINE_DEVICE=cpu
+      - SPARROW_ENGINE_LOG_FORMAT=pretty
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 4g
+    cpus: "4.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    profiles:
+      - cpu
+
+  sparrow-engine-gpu:
+    image: sparrow-engine:gpu
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gpu
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${SPARROW_ENGINE_MODEL_DIR:-./models}:/models:ro
+    environment:
+      - SPARROW_ENGINE_DEVICE=cuda:0
+      - SPARROW_ENGINE_LOG_FORMAT=pretty
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 8g
+    cpus: "4.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    profiles:
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

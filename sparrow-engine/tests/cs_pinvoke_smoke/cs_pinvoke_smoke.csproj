@@ -1,0 +1,15 @@
+<!-- Phase 3.8 Phase C Wave 5: C# P/Invoke smoke test for acceptance gate G1.
+     See cs_pinvoke_smoke/Program.cs for the full contract and
+     docs/review/phase3.8-phase-c/round_01/acceptance_gates.md for the
+     G1 evidence format. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SparrowEngineSmoke</RootNamespace>
+    <AssemblyName>SparrowEngineSmoke</AssemblyName>
+    <SelfContained>false</SelfContained>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+</Project>

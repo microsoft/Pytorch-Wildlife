@@ -1,0 +1,4 @@
+# dotnet build artifacts
+bin/
+obj/
+*.user

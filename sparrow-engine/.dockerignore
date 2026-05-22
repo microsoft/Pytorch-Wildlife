@@ -1,0 +1,12 @@
+target/
+.git/
+docs/
+test_outputs/
+tests/
+tools/
+prompts_responses/
+*.md
+*.log
+docker/
+.dockerignore
+.gitignore

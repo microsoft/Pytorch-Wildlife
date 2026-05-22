@@ -1,0 +1,41 @@
+# NOTE: BirdNET is a third-party model (CC-BY-NC-SA). The default first-party
+# audio model for Bongo is MD_AudioBirds_V1.onnx. This manifest is retained as
+# an example of audio model configuration.
+
+schema_version = "1.0"
+
+[model]
+id              = "birdnet-v2.4"
+name            = "BirdNET v2.4"
+type            = "audio_classification"
+format          = "onnx"
+version         = "2.4.0"
+license         = "CC-BY-NC-SA-4.0"
+description     = "Bird species identifier from audio recordings. Trained on BirdNET dataset (6,522 species). Non-commercial use only."
+tags            = ["audio", "bird", "bioacoustics", "species-id"]
+file            = "birdnet_v2.4.onnx"
+sha256          = "0000000000000000000000000000000000000000000000000000000000000000"
+file_size_bytes = 14_200_000
+input_format    = "NCHW"
+input_shape     = [-1, 1, 128, 384]
+opset_version   = 17
+labels_file     = "birdnet_labels.txt"
+
+[model.preprocessing]
+type             = "audio_mel_spectrogram"
+sample_rate      = 48000
+segment_duration = 3.0
+n_fft            = 1024
+hop_length       = 278
+n_mels           = 128
+normalize        = true
+
+[model.postprocessing]
+type                   = "audio_softmax"
+default_conf_threshold = 0.1
+output_names           = ["logits"]
+
+[model.provenance]
+producer_name    = "tensorflow"
+producer_version = "2.12.0"
+ir_version       = 8

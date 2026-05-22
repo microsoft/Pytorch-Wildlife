@@ -1,87 +1,87 @@
-![PyTorch-Wildlife — open-source AI framework for wildlife monitoring from the Microsoft AI for Good Lab](https://zenodo.org/records/15376499/files/Pytorch_Banner_transparentbk.png)
+# Sparrow Engine
 
-# PyTorch-Wildlife
+A Rust ML inference engine for camera-trap and bioacoustic data.
+Drop-in for MegaDetector v6, DeepFaune, HerdNet, OWL-T, SpeciesNet, and
+MD_AudioBirds_V1; model-agnostic via TOML manifests.
 
-**Unified open-source AI framework for wildlife monitoring and conservation.**  
-Microsoft AI for Good Lab — camera-trap detection, species classification, bioacoustic analysis, and more.
+## Quickstart
 
-<div align="center">
-<br>
-<a href="https://github.com/microsoft/Pytorch-Wildlife/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" /></a>
-<a href="https://pypi.org/project/PytorchWildlife"><img src="https://img.shields.io/pypi/v/PytorchWildlife?color=limegreen" /></a>
-<a href="https://pypi.org/project/PytorchWildlife"><img src="https://static.pepy.tech/badge/pytorchwildlife" /></a>
-<a href="https://pypi.org/project/PytorchWildlife"><img src="https://img.shields.io/pypi/pyversions/PytorchWildlife" /></a>
-<a href="https://huggingface.co/spaces/ai-for-good-lab/pytorch-wildlife"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-blue" /></a>
-<a href="https://discord.gg/TeEVxzaYtm"><img src="https://img.shields.io/badge/Discord-Join_us-5865F2?logo=discord&logoColor=white" /></a>
-<a href="https://microsoft.github.io/Pytorch-Wildlife/"><img src="https://img.shields.io/badge/Docs-526CFE?logo=MaterialForMkDocs&logoColor=white" /></a>
-<br><br>
-</div>
+> NOTE: install URLs below are RFC-2606 placeholders pending public
+> hosting per `docs/release_dev_plan.md § R1` + `§ R3`. Today's
+> supported lead form is to clone the repo and run the wrapper locally;
+> the `curl | sh` and `iwr | iex` one-liners are documented for
+> post-R3.
 
-PyTorch-Wildlife is the collaborative deep learning framework that powers the [Microsoft AI for Good Lab](https://www.microsoft.com/en-us/ai/ai-for-good)'s biodiversity work. It hosts detection models, species classifiers, and the tools needed to run them — from single-image inference to large-scale batch processing.
-
-**MegaDetector**, the most widely used camera-trap detection model in conservation, is invoked through PyTorch-Wildlife. So are the species classifiers for Amazon Rainforest, Snapshot Serengeti, and European ecosystems.
-
-
-## Quick Start
+**Today (supported)** — clone the repo and run the wrapper locally
+(CWD = repo root):
 
 ```bash
-pip install PytorchWildlife
+# Linux / macOS
+bash installer/sparrow-engine-install.sh
 ```
 
-```python
-import numpy as np
-from PytorchWildlife.models import detection as pw_detection
-from PytorchWildlife.models import classification as pw_classification
-
-# Detection — weights download automatically
-detection_model = pw_detection.MegaDetectorV6()
-detection_result = detection_model.single_image_detection("path/to/image.jpg")
-
-# Classification
-classification_model = pw_classification.AI4GAmazonRainforest()
-classification_result = classification_model.single_image_classification("path/to/image.jpg")
+```powershell
+# Windows PowerShell
+installer\sparrow-engine-install.ps1
 ```
 
-**Try without installing anything:**
-- [Hugging Face demo](https://huggingface.co/spaces/ai-for-good-lab/pytorch-wildlife) — upload images in your browser
-- [Google Colab notebook](https://colab.research.google.com/drive/1rjqHrTMzEHkMualr4vB55dQWCsCKMNXi?usp=sharing) — free cloud GPU
+**Post-R3 (deferred; not yet supported)** — once GH Releases publish
+the canonical URL, the stdin-piped one-liner will become the lead form:
 
+```bash
+# Linux / macOS (post-R3)
+curl -LsSf https://sparrow-engine.example/install.sh | sh
+```
 
-## Available Models
+<!-- TODO: replace with canonical sparrow-engine URL when public hosting fires per release_dev_plan.md § R3 -->
 
-### Detection
-| Model | Architecture | Description |
-|---|---|---|
-| `MegaDetectorV6` | YOLOv10 / YOLOv9 / RT-DETR | Animal detection in camera-trap images |
-| `MegaDetectorV5` | YOLOv5 | Previous generation, widely deployed |
-| `DeepfauneDetector` | YOLOv8 | European ecosystem detection |
-| `HerdNet` | CNN localization | Point-based detection for aerial imagery |
+```powershell
+# Windows PowerShell (post-R3)
+iwr https://sparrow-engine.example/install.ps1 -useb | iex
+```
 
-### Classification
-| Model | Description |
-|---|---|
-| `AI4GAmazonRainforest` | Species classification for Amazon Rainforest |
-| `AI4GSnapshotSerengeti` | Species classification for African savanna |
-| `AI4GOpossum` | Opossum vs. non-opossum classifier |
-| `DeepfauneClassifier` | European ecosystem species classifier |
-| `DFNE` | Deepfaune fine-tuned for Northeastern North America |
+The stdin-piped form fails today because the wrapper resolves
+`probe.sh` relative to `dirname "$0"`; under `curl | sh`, `$0` is
+`bash`, not the script path. See `docs/install.md § Troubleshooting`.
 
-See the [Model Zoo](https://microsoft.github.io/Pytorch-Wildlife/model_zoo/) for full details, performance benchmarks, and version history.
+The wrapper probes hardware once, picks the right CPU or GPU build, and
+installs the matching CLI binary plus the Python wheel into `~/.sparrow_engine/`.
+Pass `--flavor cpu` or `--flavor gpu` to skip the probe. Pass `--docker`
+to install the HTTP-server image instead.
 
+System prerequisites for GPU: NVIDIA driver ≥550.x, CUDA 12.6 runtime,
+and **cuDNN ≥9.10** (cuDNN 9.8 has a Conv-engine bug on sm_89 — see
+`docs/install.md § Troubleshooting`).
 
-## Part of the Biodiversity Ecosystem
+See `docs/install.md` for the full install reference (per-platform
+commands, air-gapped path, exit-code catalog 0–14, troubleshooting).
 
-PyTorch-Wildlife is part of the larger open-source ecosystem from the Microsoft AI for Good Lab:
+## Architecture
 
-| Repo | Purpose |
-|---|---|
-| [microsoft/Biodiversity](https://github.com/microsoft/Biodiversity) | The umbrella repository — documentation hub for the AI for Good Lab's biodiversity work |
-| [microsoft/Pytorch-Wildlife](https://github.com/microsoft/Pytorch-Wildlife) | This repo — the unified deep learning framework |
-| [microsoft/MegaDetector](https://github.com/microsoft/MegaDetector) | Animal detection in camera-trap imagery |
-| [microsoft/SPARROW](https://github.com/microsoft/SPARROW) | Solar-Powered Acoustic and Remote Recording Observation Watch — AI-enabled edge device |
-| [microsoft/MegaDetector-Acoustic](https://github.com/microsoft/MegaDetector-Acoustic) | Bioacoustic models for audio-based wildlife monitoring |
-| [microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) | Camera-trap species classification fine-tuning — adapt classifiers to your own datasets and geographic regions |
-| [microsoft/MegaDetector-Overhead](https://github.com/microsoft/MegaDetector-Overhead) | Point-based detection for overhead and aerial imagery |
-| SPARROW Studio | Desktop application for running all models with a graphical interface |
+Sparrow Engine is engine-only: it loads ONNX models and runs inference. Annotation,
+training, data versioning, model registry, drift detection, and
+deployment orchestration live in sibling repos. See
+`docs/design/architecture.md` for the canonical 5-component layout.
 
-> Questions? [Email us](mailto:zhongqimiao@microsoft.com) or join the [![Discord](https://img.shields.io/badge/any_text-Join_us!-blue?logo=discord&label=Discord)](https://discord.gg/TeEVxzaYtm)
+Core invariants:
+
+- ONNX for all models (vision + audio)
+- NCHW layout mandatory
+- Normalized bbox `[0,1]` at all public API boundaries
+- TOML manifests (one per model)
+- NMS in the ONNX graph, never in the Sparrow Engine
+- `Engine` is a singleton (ORT is process-global)
+
+See `CLAUDE.md` for the full set of locked-in design decisions.
+
+## Documentation
+
+- `docs/install.md` — User-facing install guide (canonical)
+- `docs/master_plan.md` — Phase status (Phase 1 → Phase 4.1)
+- `docs/design/architecture.md` — 5-component architecture
+- `docs/benchmarks.md` — Benchmark results + methodology
+- `docs/tech_report/` — Public technical report
+
+## License
+
+`<!-- TODO: license details when public release work fires per release_dev_plan.md § R3 -->`

@@ -1,0 +1,40 @@
+[package]
+name = "sparrow-engine-python"
+version = "0.1.0"
+edition = "2021"
+description = "PyO3 bindings for sparrow-engine (CPU or GPU pipeline) — camera trap ML inference"
+
+[lib]
+name = "_sparrow_engine_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Phase 3.8 Phase C Wave 4a (2026-05-06): per-flavor engine deps.
+# Both sparrow-engine-cpu and sparrow-engine-gpu now set
+# `[lib] name = "sparrow_engine"` (cdylib filename invariant
+# `libsparrow_engine.so` — see
+# `docs/design/phase3.8/phase_c/implementation_plan.md` §2.2). The
+# `cpu` / `gpu` features are mutually exclusive — exactly one engine
+# crate is linked per build, so `use sparrow_engine::*` inside the
+# dispatch shim resolves unambiguously. The `compile_error!` mutex in
+# `src/lib.rs` enforces this at compile time.
+sparrow-engine-cpu = { path = "../sparrow-engine-cpu", optional = true }
+sparrow-engine-gpu = { path = "../sparrow-engine-gpu", optional = true }
+pyo3 = "0.25"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# S6: tracing events are emitted to the `log` crate (via the `log` feature) and
+# bridged into Python's `logging` module by `pyo3-log` at module init. This
+# replaces `eprintln!` — which is invisible under PyO3/Jupyter (PyO3 #2247).
+# `pyo3-log` 0.12 is the last line that supports PyO3 0.25 (0.13+ requires 0.26).
+tracing = { version = "0.1", features = ["log"] }
+pyo3-log = "0.12"
+
+[features]
+extension-module = ["pyo3/extension-module"]
+# Phase 3.8 Phase C Wave 4a: dual-flavor wheels.
+# `cargo build --features cpu` -> CPU wheel (default; pulls in sparrow-engine-cpu).
+# `cargo build --features gpu` -> GPU wheel (pulls in sparrow-engine-gpu).
+# `--features "cpu gpu"` triggers the mutex `compile_error!` in lib.rs.
+default = ["extension-module", "cpu"]
+cpu = ["dep:sparrow-engine-cpu"]
+gpu = ["dep:sparrow-engine-gpu"]

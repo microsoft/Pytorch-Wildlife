@@ -1,0 +1,42 @@
+[package]
+name = "sparrow-engine-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for sparrow-engine wildlife inference engine"
+
+# Phase 3.8 Phase C Wave 3: cpu / gpu features select the engine flavor
+# at compile time. Both binaries share `src/main.rs` — the
+# `engine_dispatch` shim re-exports the active engine crate so the rest
+# of the CLI stays flavor-agnostic. `default = ["cpu"]` keeps existing
+# `cargo build -p sparrow-engine-cli` builds producing the CPU `spe` binary.
+[features]
+default = ["cpu"]
+cpu = ["dep:sparrow-engine-cpu"]
+gpu = ["dep:sparrow-engine-gpu"]
+
+# Two binaries, one source. `required-features` ensures cargo only
+# attempts to build the binary whose engine flavor is active. Building
+# with `--no-default-features --features gpu` produces `spe-gpu`
+# alone; building with the default `cpu` feature produces `spe` alone.
+[[bin]]
+name = "spe"
+path = "src/main.rs"
+required-features = ["cpu"]
+
+[[bin]]
+name = "spe-gpu"
+path = "src/main.rs"
+required-features = ["gpu"]
+
+[dependencies]
+sparrow-engine-cpu = { path = "../sparrow-engine-cpu", optional = true }
+sparrow-engine-gpu = { path = "../sparrow-engine-gpu", optional = true }
+clap = { version = "4", features = ["derive", "wrap_help"] }
+serde_json = { workspace = true }
+serde = { workspace = true }
+image = "0.25"
+indicatif = "0.17"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }   # RUST_LOG / EnvFilter at runtime
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,21 @@
+# Minimal Ubuntu 24.04 image for the Phase 3.5 W5 clean-room install test.
+# Matches the production GPU Docker base OS for Phase 2 Bongo images
+# (nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04) so a CPU-side regression
+# here is a direct precursor to a GPU-side issue.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 \
+      python3-pip \
+      python3-venv \
+      ca-certificates \
+      libssl3 \
+      libstdc++6 \
+      libgcc-s1 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /clean_room

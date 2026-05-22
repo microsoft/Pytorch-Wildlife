@@ -1,0 +1,53 @@
+[package]
+name = "sparrow-engine-server"
+version = "0.1.0"
+edition = "2021"
+description = "Thin HTTP wrapper around sparrow-engine-cpu or sparrow-engine-gpu (Phase C feature-gated) for Docker deployment"
+
+[[bin]]
+name = "sparrow-engine-server"
+path = "src/main.rs"
+
+# Phase 3.8 Phase C Wave 2: compile-time engine dispatch via mutually exclusive
+# `cpu` / `gpu` features. Exactly one MUST be enabled (default = cpu). The
+# `engine_dispatch` module re-exports the chosen engine crate's public surface
+# so the rest of sparrow-engine-server is engine-agnostic. See
+# `docs/design/phase3.8/phase_c/implementation_plan.md` §2.1.
+[features]
+default = ["cpu"]
+cpu = ["dep:sparrow-engine-cpu"]
+gpu = ["dep:sparrow-engine-gpu"]
+
+[dependencies]
+sparrow-engine-cpu = { path = "../sparrow-engine-cpu", optional = true }
+sparrow-engine-gpu = { path = "../sparrow-engine-gpu", optional = true }
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tower-http = { version = "0.6", features = ["trace", "cors", "timeout", "limit", "request-id"] }
+tower = { version = "0.5", features = ["timeout"] }
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tempfile = "3"
+
+# Phase 4.4: argv parsing for `--help` / `--version` / `-h` / `-V` and the
+# `healthcheck` subcommand, before any heavyweight runtime init.
+# See `docs/master_plan.md § Phase 4.4` (MT-4.1-26 + P4-AF-12).
+clap = { version = "4", features = ["derive", "wrap_help"] }
+
+# Phase 4 W3 — inference-log emit pipeline:
+#   uuid    → request_id (UUID v4)
+#   chrono  → RFC3339 millisecond UTC timestamp_utc
+#   sha2    → media_hash (SHA-256 lowercase hex)
+# sparrow-engine-core already pins sha2 = "0.10"; matching the version avoids a
+# duplicate compile of the sha2 crate via cargo's unification.
+uuid   = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+sha2   = "0.10"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["multipart", "json", "rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["full"] }

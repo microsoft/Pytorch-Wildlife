@@ -1,0 +1,21 @@
+[package]
+name = "sparrow-engine-types"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 3.8 — sparrow-engine workspace leaf type crate. Zero ORT/CUDA/nvjpeg deps."
+
+[lib]
+crate-type = ["rlib"]
+# rlib only — sparrow-engine-types never produces a cdylib.
+
+[dependencies]
+serde      = { workspace = true }
+thiserror  = { workspace = true }
+toml       = { workspace = true }
+serde_json = { workspace = true }   # C6 closure: SparrowEngineError::Json(#[from] serde_json::Error)
+
+# Explicitly NO ort, cudarc, nvjpeg-sys, image, ndarray, sha2, etc.
+# Phase A acceptance gate #4 enforces this.
+
+[dev-dependencies]
+tempfile = "3"  # manifest.rs tests use TempDir

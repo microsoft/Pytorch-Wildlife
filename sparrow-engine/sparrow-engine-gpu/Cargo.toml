@@ -1,0 +1,108 @@
+[package]
+name = "sparrow-engine-gpu"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 3.8 — sparrow-engine GPU pipeline: image (nvjpeg + CUDA preprocess + ORT CUDA-EP) and audio (cuFFT + cuBLAS mel + ORT CUDA-EP IoBinding)."
+
+[lib]
+# Phase 3.8 Phase C Wave 4b (2026-05-06): supersedes the v2 N9 closure
+# default-name choice. Both sparrow-engine-cpu and sparrow-engine-gpu now set
+# `[lib] name = "sparrow_engine"` so each crate's cdylib ships as `libsparrow_engine.so` /
+# `sparrow_engine.dll` / `libsparrow_engine.dylib` — preserving Sparrow Studio Local's
+# `[DllImport("sparrow_engine")]` resolution across CPU and GPU bundles
+# (`docs/design/phase3.8/phase_c/implementation_plan.md` §2.2).
+#
+# Workspace co-build caveat: a single `cargo build --workspace` produces
+# two distinct `target/release/libsparrow_engine.so` artifacts that race for the
+# same path. Phase C builds run per-flavor (`cargo build -p sparrow-engine-cpu`
+# vs `cargo build -p sparrow-engine-gpu`) inside isolated Docker stages, wheel
+# invocations, and CLI binary builds — never both in the same target
+# dir. The G5 symbol-diff check (`cargo clean -p sparrow-engine-cpu -p sparrow-engine-gpu`
+# between flavors) enforces this discipline locally.
+name = "sparrow_engine"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+# Phase 3.8 Phase C Wave 4b: mirrors sparrow-engine-cpu's `ffi` feature. Activates
+# cbindgen + csbindgen invocations in build.rs and applies the
+# `exports.map` / `exports.def` symbol filter to the cdylib so only the
+# 32 `sparrow_engine_*` exports (Acceptance Gate G5) are visible.
+ffi = ["dep:cbindgen", "dep:csbindgen"]
+
+[dependencies]
+sparrow-engine-types = { path = "../sparrow-engine-types" }
+sparrow-engine-core  = { path = "../sparrow-engine-core" }
+
+# Phase 3.8 Step 1 Wave 1: vendor cudarc + nvjpeg-sys per final_design §7.
+#
+# `cuda-12080` matches the dev-box nvcc (12.8). cudarc's default features
+# include driver/nvrtc/runtime/cublas/cublaslt/curand/fallback-dynamic-loading.
+# Step 1 + Step 2 use driver+nvrtc+runtime+cublas+cufft (the latter three
+# explicitly listed below); curand + cublaslt are pulled in via defaults
+# but unused. Trimming defaults remains a Phase B/C cleanup once the GPU
+# crate's dependency surface stabilises.
+#
+# Phase 3.8 Step 2 Wave 1 (audio GPU primitives, 2026-05-05): add `cufft`
+# explicitly. `cufft` is NOT in cudarc 0.19.4's default feature set
+# (verified: `vendor/cudarc/Cargo.toml` `default = ["std", "cublas",
+# "cublaslt", "curand", "driver", "runtime", "nvrtc",
+# "fallback-dynamic-loading"]` — `cufft` is absent). `cublas` IS already
+# in default and used by the audio mel-filterbank GEMM (W1.3); listing it
+# here too for explicitness.
+cudarc = { version = "=0.19.4", features = ["cuda-12080", "cufft", "cublas"] }
+nvjpeg-sys = "=0.1.0"
+
+# Image decode CPU fallback (when nvjpeg cannot decode a non-baseline JPEG /
+# corrupt input); reuses the same versions as sparrow-engine-cpu (Cargo's resolver
+# de-dupes across the workspace).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+ndarray = "0.17"
+
+# ORT CUDA EP for IoBinding wrapper. Same pin as sparrow-engine-cpu for ABI compatibility.
+# Wave 1 does NOT exercise inference end-to-end, but the IoBinding wrapper is
+# typed against ort::session::Session.
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "download-binaries", "tls-native-vendored", "cuda"] }
+
+tracing = { version = "0.1", features = ["log"] }
+
+# Phase 3.8 Phase C Wave 4b: ffi.rs (gated on `--features ffi`) parses
+# `EngineConfig` JSON via serde + serde_json and produces JSON output for
+# `sparrow_engine_list_models` / `sparrow_engine_engine_list_models_extended` /
+# `sparrow_engine_engine_model_info`. Mirrors sparrow-engine-cpu's unconditional deps so
+# the FFI surface compiles cleanly when the feature is enabled.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+# Phase 3.8 Phase C Wave 4b: cbindgen + csbindgen generate `sparrow_engine.h` and
+# `NativeMethods.g.cs` from `src/ffi.rs` when `--features ffi` is active.
+# Mirrors `sparrow-engine-cpu/Cargo.toml`. Optional so default workspace builds
+# don't pull in either dependency.
+cbindgen = { version = "0.27", optional = true }
+csbindgen = { version = "1", optional = true }
+
+[dev-dependencies]
+# 100-image corpus parity tests need image-crate decode for the CPU baseline.
+# fast_image_resize matches sparrow-engine-cpu's preprocess implementation exactly.
+fast_image_resize = { version = "5", features = ["image"] }
+# Wave 2 parity tests run sparrow-engine-cpu Engine + detect side-by-side with the
+# sparrow-engine-gpu YoloModel. dev-dep avoids leaking sparrow-engine-cpu into the runtime
+# crate graph (sparrow-engine-gpu must not depend on sparrow-engine-cpu — both consume sparrow-engine-core).
+#
+# Phase 3.8 Phase C Wave 4b (2026-05-06): both sparrow-engine-cpu and sparrow-engine-gpu now
+# set `[lib] name = "sparrow_engine"` so the cdylib filename matches `libsparrow_engine.so`
+# on both flavors. The renamed dev-dep imports as `sparrow_engine_cpu` so cross-engine
+# tests can disambiguate the cpu baseline (`sparrow_engine_cpu::engine::Engine`)
+# from the sparrow-engine-gpu Engine in the current crate (`sparrow_engine::engine::Engine`).
+sparrow_engine_cpu = { path = "../sparrow-engine-cpu", package = "sparrow-engine-cpu" }
+# tracing-subscriber to surface per-stage timings during latency benches when
+# `RUST_LOG=bongo_gpu=trace` is set.
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# Phase 3.8 Step 2 Wave 1 (audio): realfft is the CPU baseline for the
+# cuFFT R2C parity test (`tests/cufft_parity.rs`). Same version as
+# sparrow-engine-core; cargo de-dupes across the workspace.
+realfft = "3"
+# Phase 3.8 Phase C Wave 1: serialize Engine singleton tests so the
+# process-global `ENGINE_EXISTS` flag does not race across `cargo test`'s
+# default thread pool. Mirrors `sparrow-engine-cpu`'s discipline.
+serial_test = "3"

@@ -1,0 +1,38 @@
+[workspace]
+members = ["sparrow-engine-types", "sparrow-engine-core", "sparrow-engine-cpu", "sparrow-engine-gpu",
+           "sparrow-engine-server", "sparrow-engine-cli", "sparrow-engine-python"]
+resolver = "2"
+
+[workspace.dependencies]
+# Phase 3.8 Phase A S10 closure: lift only deps actually shared by 2+ crates.
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "0.8"
+serde_json = "1"
+
+# Phase 3.8 Step 1 Wave 1: pin cudarc + nvjpeg-sys + their transitive deps
+# to sparrow-engine/vendor/ so an upstream-yank cannot break the sparrow-engine-gpu build
+# mid-Wave (R1 in final_design §9). We use `[patch.crates-io]` rather than
+# workspace-wide source replacement because the latter forces vendoring
+# of all 377 transitive crates (~512 MB). Targeted patch keeps the commit
+# at ~10 MB while still insulating the load-bearing pre-alpha deps.
+#
+# Each entry pairs `path` with `version` so cargo verifies the vendored
+# source matches the declared version. Without `version`, cargo accepts
+# any version at the path — a refresh that bumped the source without
+# updating the workspace declaration would silently succeed.
+#
+# Refresh procedure (when bumping cudarc / nvjpeg-sys):
+#   1. Bump version in sparrow-engine-gpu/Cargo.toml + this section's `version` fields.
+#   2. From sparrow-engine/: `cargo vendor` (writes ALL deps).
+#   3. Trim vendor/ to just {cudarc, nvjpeg-sys, libloading, cfg-if,
+#      windows-link}.
+#   4. `cargo build -p sparrow-engine-gpu --release --offline` to confirm cudarc /
+#      nvjpeg-sys come from vendor (other deps may still need the cargo
+#      cache; that's fine — full hermeticity is intentionally not the goal).
+[patch.crates-io]
+cudarc       = { path = "vendor/cudarc",       version = "=0.19.4" }
+nvjpeg-sys   = { path = "vendor/nvjpeg-sys",   version = "=0.1.0" }
+libloading   = { path = "vendor/libloading",   version = "=0.9.0" }
+cfg-if       = { path = "vendor/cfg-if",       version = "=1.0.4" }
+windows-link = { path = "vendor/windows-link", version = "=0.2.1" }

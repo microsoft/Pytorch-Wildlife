@@ -1,0 +1,6 @@
+{
+    global:
+        sparrow_engine_*;
+    local:
+        *;
+};

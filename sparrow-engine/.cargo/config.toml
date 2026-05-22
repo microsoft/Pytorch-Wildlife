@@ -1,0 +1,9 @@
+# Platform-specific ORT features:
+# - Linux: use ORT_LIB_LOCATION + ORT_PREFER_DYNAMIC_LINK=1 (no download)
+# - Windows: download-binaries + tls-native + cuda work out of the box
+
+# Note: Cargo doesn't support per-platform features in Cargo.toml.
+# The workaround is to keep all features in Cargo.toml (for Windows)
+# and override on Linux with env vars:
+#   ORT_LIB_LOCATION=/tmp/ort-lib ORT_PREFER_DYNAMIC_LINK=1
+# The download-binaries feature is skipped when ORT_LIB_LOCATION is set.

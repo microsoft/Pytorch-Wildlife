@@ -1,0 +1,59 @@
+# Stage 1: Build
+FROM rust:bookworm AS builder
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+# Phase 3.8 Phase A: sparrow-engine was carved into 4 workspace crates.
+# Phase 3.8 Phase C Wave 4c (2026-05-06): sparrow-engine-server is built with
+# `--no-default-features --features cpu` to pull in sparrow-engine-cpu only;
+# sparrow-engine-gpu is omitted from the dep graph for this image. The
+# `sparrow-engine-gpu/` source still copies in because Cargo workspace
+# resolution requires every workspace member's manifest, but it is
+# never compiled into the runtime binary.
+# Phase 3.8 Phase C Wave 5 fix (2026-05-06): the workspace grew to 7
+# members during Step 1 W1 (`sparrow-engine-cli` and `sparrow-engine-python`
+# already existed; `vendor/` was added to anchor `[patch.crates-io]`). Copy
+# every member + vendor/ so cargo can resolve the workspace manifest;
+# only `sparrow-engine-server` is compiled by the RUN below.
+COPY sparrow-engine-types/ sparrow-engine-types/
+COPY sparrow-engine-core/ sparrow-engine-core/
+COPY sparrow-engine-cpu/ sparrow-engine-cpu/
+COPY sparrow-engine-gpu/ sparrow-engine-gpu/
+COPY sparrow-engine-server/ sparrow-engine-server/
+COPY sparrow-engine-cli/ sparrow-engine-cli/
+COPY sparrow-engine-python/ sparrow-engine-python/
+COPY vendor/ vendor/
+
+# Download ORT shared library (dynamic linking avoids glibc 2.38+ requirement of static builds)
+ARG ORT_VERSION=1.24.2
+RUN mkdir -p /build/ort-lib && \
+    curl -sL https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz | \
+    tar xz --strip-components=1 -C /build/ort-lib
+
+ENV ORT_LIB_LOCATION=/build/ort-lib/lib
+ENV ORT_PREFER_DYNAMIC_LINK=1
+# Phase 3.8 Phase C Wave 4c: `--no-default-features --features cpu`
+# pins this image to the sparrow-engine-cpu engine flavor (per
+# `docs/design/phase3.8/phase_c/implementation_plan.md` §2.4 + §4 W4c).
+RUN cargo build --release -p sparrow-engine-server --no-default-features --features cpu
+
+# Stage 2: Runtime
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/sparrow-engine-server /usr/local/bin/
+COPY --from=builder /build/ort-lib/lib/libonnxruntime.so* /usr/local/lib/
+RUN ldconfig
+
+RUN groupadd -g 1000 sparrow-engine 2>/dev/null || true && useradd -u 1000 -g 1000 -s /sbin/nologin sparrow-engine 2>/dev/null || true
+USER 1000:1000
+
+ENV SPARROW_ENGINE_MODEL_DIR=/models \
+    SPARROW_ENGINE_BIND_ADDR=0.0.0.0:8080 \
+    SPARROW_ENGINE_LOG_FORMAT=json
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/sparrow-engine-server", "healthcheck"]
+ENTRYPOINT ["/usr/local/bin/sparrow-engine-server"]

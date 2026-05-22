@@ -1,0 +1,64 @@
+# Canonical MD_AudioBirds_V1 audio manifest.
+#
+# MD_AudioBirds_V1 is a binary bird-vs-no-bird detector trained on broadband
+# audio. It runs sliding-window inference (1.0 s windows, 0.3 s stride) over
+# decoded mel spectrograms.
+#
+# `confidence_threshold = 0.9` is the production default. The model returns
+# near-saturated (~1.0) confidence on continuous bird recordings, so a 0.5
+# threshold (the v1 design value) collapses any 60-second clip into a single
+# range covering 0.0–60.0 s. 0.9 keeps the merged-range output meaningful by
+# only emitting ranges where the model is highly confident.
+#
+# This file is a canonical template; production test manifests live under
+# `test_files/sparrow_engine_models/md-audiobirds-v1/` and must carry the same
+# `confidence_threshold` value.
+#
+# FP16 default (Phase 3.8 Step 2 Wave 4 post-STRETCH re-audit, 2026-05-05).
+# The Wave 3 audit verdict (HOLD on FP32) was measured BEFORE Fix A+B+C+D
+# landed. Post-STRETCH re-audit (`docs/research/phase3.8/step2/fp16_audit.md`
+# § "Post-STRETCH re-audit") shows FP16 is 1.71× faster than FP32 (8.52 ms
+# vs 14.55 ms p50 on DUNAS_20230925; both numerical-accuracy and latency
+# §2.2 R2 gates met with substantial headroom). Generate the FP16 ONNX via
+# `uv run --no-project --with onnx --with onnxruntime python
+# sparrow-engine/tools/convert_fp16.py <model_dir>`. To opt out: remove
+# `precision = "fp16"` and `file_fp16 = ...` (engine falls back to FP32).
+
+[model]
+id = "md-audiobirds-v1"
+format = "onnx"
+file = "MD_AudioBirds_V1.onnx"
+file_fp16 = "MD_AudioBirds_V1_fp16.onnx"
+description = "MD_AudioBirds_V1 — binary bird detector (audio, sliding-window mel)"
+
+[preprocessing]
+method = "mel_spectrogram"
+sample_rate = 48000
+n_fft = 2048
+hop_length = 512
+n_mels = 224
+fmin = 0
+fmax = 24000
+top_db = 80
+window = "hann_symmetric"
+# Phase 3.8 Step 2 Wave 0a (F0.8 corrective fix, 2026-05-04): switched
+# mel_scale htk → slaney + filter_norm area → slaney to match
+# `MD_AudioBirds_V1` training (PW Bioacoustics
+# `mel_scale="slaney", norm="slaney"` — verified verbatim in
+# `docs/design/phase3.8/step2/round_02/cameratraps_audit.md`).
+mel_scale = "slaney"
+filter_norm = "slaney"
+
+[inference]
+strategy = "sliding_window"
+segment_duration_s = 1.0
+segment_stride_s = 0.3
+precision = "fp16"
+
+[postprocessing]
+method = "sigmoid"
+confidence_threshold = 0.9
+
+[labels]
+file = "audio_birds_labels.txt"
+format = "name_index_csv"

@@ -1,0 +1,63 @@
+[build-system]
+requires = ["maturin>=1.0"]
+build-backend = "maturin"
+
+# Phase 3.8 Phase C Wave 4a (2026-05-06): dual-flavor wheel source.
+#
+# This pyproject.toml is the **CPU template**. The `build.sh` wrapper
+# in this directory builds either flavor:
+#
+# - CPU wheel: `SPARROW_ENGINE_FLAVOR=cpu ./build.sh`
+#     -> distribution name `sparrow-engine`, runtime dep `onnxruntime>=1.25.1`,
+#        cargo feature `cpu` (pulls in `sparrow-engine-cpu`).
+# - GPU wheel: `SPARROW_ENGINE_FLAVOR=gpu ./build.sh`
+#     -> distribution name `sparrow-engine-gpu`, runtime dep
+#        `onnxruntime-gpu>=1.25.1`, cargo feature `gpu` (pulls in
+#        `sparrow-engine-gpu`). The build script sed-patches a temp copy of
+#        this file before invoking maturin and post-build patches
+#        `Provides-Dist: sparrow-engine` into the GPU wheel's METADATA so pip
+#        refuses to install both wheels into the same env.
+#
+# Both wheels keep `module-name = "sparrow_engine._sparrow_engine_core"` -> Python code
+# always writes `import sparrow_engine` (drop-in replacement).
+#
+# See `docs/design/phase3.8/phase_c/implementation_plan.md` §2.3 +
+# §4 W4a for the design rationale.
+
+[project]
+name = "sparrow-engine"
+version = "0.1.0"
+description = "Camera-trap ML inference engine — Python bindings (sparrow-engine CPU pipeline)"
+requires-python = ">=3.11"
+# Floor bumped 3.10 → 3.11 (2026-05-07): onnxruntime / onnxruntime-gpu
+# 1.24.4+ dropped Python 3.10 (METADATA `Requires-Python: >=3.11`).
+# The `onnxruntime>=1.25.1` dep below cannot resolve on Python 3.10;
+# pip on 3.10 falls back to onnxruntime 1.23.2, which conflicts with
+# our hard dep. Discovered during Phase 4.1 §1.3 manual test (logged
+# at MT-4.1-1).
+#
+# Ceiling pinned `<1.26` (2026-05-10, MT-4.1-14): ORT 1.26.0 rev'd
+# the ELF symbol-version namespace from `VERS_1.25.1` to `VERS_1.26.0`
+# and did NOT keep the older symbols exported. The wheel's
+# `_sparrow_engine_core.cpython-*.so` was built against ORT 1.25.1 via the
+# `ort` crate and DT_NEEDED references `OrtGetApiBase@VERS_1.25.1` —
+# loading `libonnxruntime.so.1` from `onnxruntime` / `onnxruntime-gpu`
+# 1.26.0 fails at `import sparrow_engine` time with
+# `version 'VERS_1.25.1' not found`. Pinning `<1.26` keeps the resolver
+# on ABI-compatible runtimes until the `ort` Rust crate is bumped to a
+# version that targets ORT 1.26's symbol namespace.
+#
+# CPU wheel runtime: sparrow_engine links against `libonnxruntime.so.1` at
+# runtime via ORT's load-dynamic mechanism. The `onnxruntime>=1.25.1`
+# pip dependency below provides the shared library.
+# GPU wheel substitutes `onnxruntime-gpu>=1.25.1` (sed-patched by
+# build.sh).
+dependencies = ["onnxruntime>=1.25.1,<1.26"]
+
+[tool.maturin]
+# CPU template: `extension-module` always on; `cpu` activates the
+# `sparrow-engine-cpu` path-dep. The build.sh script overrides the cargo
+# feature list to `extension-module,gpu` for the GPU wheel.
+features = ["extension-module", "cpu"]
+python-source = "python"
+module-name = "sparrow_engine._sparrow_engine_core"

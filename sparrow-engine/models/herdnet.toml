@@ -1,0 +1,46 @@
+# Canonical HerdNet overhead manifest (Phase 3.5 S3, MT-9 fix).
+#
+# HerdNet is an overhead (top-down) counting model: it emits heatmap peaks that
+# project to dots at the centroid of each detection, not bounding boxes. The
+# `subtype = "overhead"` hint promotes `ModelType::Detector` to
+# `ModelType::OverheadDetector` so `viz::render` dispatches to the dot path.
+#
+# This file is a canonical template for HerdNet onboarding. Production test
+# manifests live under `test_files/sparrow_engine_models/herdnet-general-2022/` and
+# should add the same `subtype = "overhead"` line as a follow-up.
+#
+# FP16 default (Phase 3.8 Step 1, audit 2026-05-03). Generate the FP16 ONNX
+# via `sparrow-engine/tools/convert_fp16.py <model_dir>` (default `--block-op Resize`
+# is sufficient — no duplicate Cast nodes observed). Audit data:
+# `docs/research/phase3.8/step1/fp16_audit.md`. To opt out: remove
+# `precision = "fp16"` and `file_fp16 = ...` (engine falls back to FP32).
+
+[model]
+id = "herdnet-general-2022"
+format = "onnx"
+file = "herdnet.onnx"
+file_fp16 = "herdnet_fp16.onnx"
+subtype = "overhead"
+description = "HerdNet (General Dataset 2022) — overhead / aerial wildlife counting"
+
+[preprocessing]
+method = "resize"
+input_size = [512, 512]
+layout = "nchw"
+normalization = "imagenet"
+
+[inference]
+strategy = "tiled"
+tile_size = [512, 512]
+tile_overlap = 0
+precision = "fp16"
+
+[postprocessing]
+method = "heatmap_peaks"
+peak_threshold = 0.2
+adaptive = false
+point_to_box_half_size = 10
+
+[labels]
+file = "herdnet_labels.txt"
+format = "name_index_csv"

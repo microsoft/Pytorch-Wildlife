@@ -1,0 +1,28 @@
+[package]
+name = "sparrow-engine-core"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 3.8 — sparrow-engine workspace device-agnostic core. Zero ORT/CUDA/nvjpeg deps."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+sparrow-engine-types = { path = "../sparrow-engine-types" }
+serde_json  = { workspace = true }
+toml        = { workspace = true }
+
+# Pure-Rust utility deps (NOT lifted to workspace per S10 — single-consumer)
+ndarray   = "0.17"        # postprocess
+image     = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+ab_glyph  = "0.2"         # viz
+sha2      = "0.10"        # hash
+hound     = "3.5"         # audio decode
+realfft   = "3"           # audio FFT
+rubato    = "0.14"        # audio resample
+tracing   = { version = "0.1", features = ["log"] }  # warn! on broken manifest skip in catalog.rs
+
+[dev-dependencies]
+tempfile = "3"
+
+# Explicitly NO ort, cudarc, nvjpeg-sys, fast_image_resize.

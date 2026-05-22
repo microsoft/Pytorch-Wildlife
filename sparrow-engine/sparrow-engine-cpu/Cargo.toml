@@ -1,0 +1,53 @@
+[package]
+name = "sparrow-engine-cpu"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 3.8 — sparrow-engine CPU pipeline."
+
+[lib]
+name = "sparrow_engine"
+# Phase 3.8 Phase A S7 closure: cdylib UNCONDITIONAL. Without --features ffi
+# the cdylib still builds but emits zero sparrow_engine_* symbols (the rlib's pub fns
+# are NOT in exports.map's `sparrow_engine_*; local: *;` filter).
+crate-type = ["rlib", "cdylib"]
+
+[features]
+ffi = ["dep:cbindgen", "dep:csbindgen"]
+
+[dependencies]
+sparrow-engine-types = { path = "../sparrow-engine-types" }
+sparrow-engine-core  = { path = "../sparrow-engine-core" }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+fast_image_resize = { version = "5", features = ["image"] }
+ndarray = "0.17"
+# Use system ORT shared library (set ORT_LIB_LOCATION to the directory containing libonnxruntime.so).
+# The pre-built static lib from ort-sys requires glibc 2.38+; Ubuntu 22.04 has glibc 2.35.
+# On Linux without libssl-dev: use ORT_LIB_LOCATION + ORT_PREFER_DYNAMIC_LINK=1
+# On Windows: download-binaries works out of the box
+# Phase 4.1 MT-4.1-2 (2026-05-07): drop "cuda" from ort features so the
+# CPU flavor is strictly CPU at the binary level. With "cuda" enabled, the
+# CPU CLI / CPU wheel could opportunistically use CUDA EP whenever the
+# runtime libonnxruntime exposed it (e.g., GPU ORT loaded via setup.sh's
+# LD_LIBRARY_PATH), producing the misleading "CPU wheel reports cuda:0"
+# behavior. Strict separation: sparrow-engine-cpu = CPU only; sparrow-engine-gpu = CUDA only
+# (mirrors sparrow-engine-gpu's `Device::Auto|Cpu => Cuda(0)` coercion).
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "download-binaries", "tls-native-vendored"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Phase 3.8 Phase A M2 + v2 N12 closure: explicit declaration with `log`
+# feature, UNCONDITIONAL. Bridges tracing events to the log facade for
+# pyo3-log integration in sparrow-engine-python without forcing pyo3 into sparrow-engine-cpu.
+tracing = { version = "0.1", features = ["log"] }
+
+[build-dependencies]
+cbindgen = { version = "0.27", optional = true }
+csbindgen = { version = "1", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+serial_test = "3"
+# Phase 3.8 Phase A audit-fix R1: needed by tests/integration_tracing_bridge.rs
+# which installs a Box<dyn log::Log> recorder to verify the
+# `tracing = { features = ["log"] }` bridge declared above.
+log = "0.4"

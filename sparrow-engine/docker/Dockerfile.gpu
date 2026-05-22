@@ -1,0 +1,85 @@
+# Untested -- requires nvidia-docker2 or CDI (NVIDIA Container Device Interface)
+# at runtime; the build itself only needs libnvjpeg.so for the link step
+# (vendored nvjpeg-sys emits `cargo:rustc-link-lib=dylib=nvjpeg`).
+
+# Stage 0: pull libnvjpeg.so + cudnn header-less runtime libs from the
+# NVIDIA CUDA devel image so the rust:bookworm builder can satisfy the
+# `-lnvjpeg` link directive without rebasing the entire builder onto
+# the much larger CUDA image.
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04 AS cuda-runtime
+
+# Stage 1: Build
+#
+# Phase 3.8 Phase C Wave 4c (2026-05-06): the GPU image links the
+# `sparrow-engine-gpu` engine via `--features gpu`, which pulls in `cudarc`
+# (NVRTC + driver + cuFFT + cuBLAS) and `nvjpeg-sys`. `cudarc 0.19.4`
+# uses `fallback-dynamic-loading` (no CUDA at compile time), but
+# `nvjpeg-sys` 0.1.0 emits `cargo:rustc-link-lib=dylib=nvjpeg` and the
+# linker resolves that to `libnvjpeg.so` at the time it produces the
+# sparrow-engine-gpu cdylib. W5 fix (2026-05-06): copy the runtime-shipped
+# `libnvjpeg.so.12` from the cuda-runtime stage into the rust builder
+# and create the `.so` symlink the linker needs. This stays on
+# `rust:bookworm` rather than rebasing onto `nvidia/cuda:devel` to
+# keep the build image small.
+FROM rust:bookworm AS builder
+WORKDIR /build
+COPY --from=cuda-runtime /usr/local/cuda-12.6/targets/x86_64-linux/lib/libnvjpeg.so.12 /usr/local/cuda-runtime/lib/libnvjpeg.so.12
+RUN ln -s /usr/local/cuda-runtime/lib/libnvjpeg.so.12 /usr/local/cuda-runtime/lib/libnvjpeg.so
+ENV LIBRARY_PATH=/usr/local/cuda-runtime/lib
+COPY Cargo.toml Cargo.lock ./
+# Phase 3.8 Phase A: sparrow-engine was carved into 4 workspace crates.
+# Phase 3.8 Phase C Wave 4c: sparrow-engine-server is built with
+# `--no-default-features --features gpu` to pull in sparrow-engine-gpu only;
+# sparrow-engine-cpu is omitted from the dep graph for this image. All
+# workspace members still copy in because Cargo workspace resolution
+# requires every member's manifest.
+# Phase 3.8 Phase C Wave 5 fix (2026-05-06): workspace grew to 7 members
+# during Step 1 W1 + `vendor/` for `[patch.crates-io]`. Copy every
+# member + vendor/ so cargo resolves the manifest; only `sparrow-engine-server`
+# is compiled by the RUN below.
+COPY sparrow-engine-types/ sparrow-engine-types/
+COPY sparrow-engine-core/ sparrow-engine-core/
+COPY sparrow-engine-cpu/ sparrow-engine-cpu/
+COPY sparrow-engine-gpu/ sparrow-engine-gpu/
+COPY sparrow-engine-server/ sparrow-engine-server/
+COPY sparrow-engine-cli/ sparrow-engine-cli/
+COPY sparrow-engine-python/ sparrow-engine-python/
+COPY vendor/ vendor/
+
+ARG ORT_VERSION=1.24.2
+RUN mkdir -p /build/ort-lib && \
+    curl -sL https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz | \
+    tar xz --strip-components=1 -C /build/ort-lib
+
+ENV ORT_LIB_LOCATION=/build/ort-lib/lib
+ENV ORT_PREFER_DYNAMIC_LINK=1
+# Phase 3.8 Phase C Wave 4c: `--no-default-features --features gpu`
+# pins this image to the sparrow-engine-gpu engine flavor (per
+# `docs/design/phase3.8/phase_c/implementation_plan.md` §2.4 + §4 W4c).
+RUN cargo build --release -p sparrow-engine-server --no-default-features --features gpu
+
+# Stage 2: Runtime with CUDA
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/sparrow-engine-server /usr/local/bin/
+COPY --from=builder /build/ort-lib/lib/libonnxruntime.so* /usr/local/lib/
+# Copy CUDA execution provider if present in the ORT release
+COPY --from=builder /build/ort-lib/lib/libonnxruntime_providers_cuda.so* /usr/local/lib/
+COPY --from=builder /build/ort-lib/lib/libonnxruntime_providers_shared.so* /usr/local/lib/
+RUN ldconfig
+
+RUN groupadd -g 1000 sparrow-engine 2>/dev/null || true && useradd -u 1000 -g 1000 -s /sbin/nologin sparrow-engine 2>/dev/null || true
+USER 1000:1000
+
+ENV SPARROW_ENGINE_MODEL_DIR=/models \
+    SPARROW_ENGINE_BIND_ADDR=0.0.0.0:8080 \
+    SPARROW_ENGINE_LOG_FORMAT=json \
+    SPARROW_ENGINE_DEVICE=cuda:0
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/sparrow-engine-server", "healthcheck"]
+ENTRYPOINT ["/usr/local/bin/sparrow-engine-server"]

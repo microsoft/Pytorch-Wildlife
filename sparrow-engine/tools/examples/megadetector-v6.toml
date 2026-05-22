@@ -1,0 +1,40 @@
+schema_version = "1.0"
+
+[model]
+id              = "megadetector-v6"
+name            = "MegaDetector v6"
+type            = "detection"
+format          = "onnx"
+version         = "6.0.0"
+license         = "MIT"
+description     = "General-purpose camera trap animal detector trained with RT-DETR. Detects animals, persons, and vehicles."
+tags            = ["camera-trap", "detection", "megadetector", "general"]
+file            = "megadetector_v6.onnx"
+sha256          = "0000000000000000000000000000000000000000000000000000000000000000"
+file_size_bytes = 87_400_000
+input_format    = "NCHW"
+input_shape     = [-1, 3, 640, 640]
+opset_version   = 17
+labels_file     = "labels.txt"
+
+[model.preprocessing]
+type        = "image_letterbox"
+resize      = [640, 640]
+scale       = 255.0
+color_space = "RGB"
+pad_value   = 114
+
+[model.postprocessing]
+type                   = "rtdetr_topk"
+topk                   = 300
+default_conf_threshold = 0.2
+
+[model.labels]
+"0" = "animal"
+"1" = "person"
+"2" = "vehicle"
+
+[model.provenance]
+producer_name    = "pytorch"
+producer_version = "2.5.1"
+ir_version       = 10

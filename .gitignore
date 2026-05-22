@@ -1,28 +1,104 @@
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-dist/
-build/
-*.egg
-.eggs/
+# Rust
+target/
+# Per-flavor target dirs (Phase 3.8 Phase C "two flavors never co-located"
+# invariant; see docs/review/phase4-manual-test/round_01/setup.sh + CLAUDE.md
+# "From Phase 3.8 (Phase A + Step 1 + Step 2 + Phase C)").
+target-cpu/
+target-gpu/
+*.d
 *.so
-.env
-.venv
-env/
-venv/
-.tox/
-.coverage
-htmlcov/
+*.dll
+*.dylib
+*.rlib
+
+# Python (build tools)
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+.mypy_cache/
 .pytest_cache/
-*.log
-.DS_Store
-Thumbs.db
-Brewfile
-site/
-archive/
-*.code-workspace
+
+# Dependencies
+node_modules/
+
+# Model artifacts
+*.onnx
 *.pt
 *.pth
-*.ckpt
-*.cache
+*.bin
+*.safetensors
+*.tflite
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+
+# Build & logs
+dist/
+build/
+*.log
+
+# Project-specific
+prompts_responses/
+sparrow-studio-server/
+
+# Claude Code sandbox artifacts
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.gitconfig
+.github/*
+!.github/workflows/
+.npmrc
+.yarnrc
+.yarnrc.yml
+bunfig.toml
+package.json
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Generated test outputs (golden baselines, comparisons)
+test_outputs/
+
+# Top-level test_files/ — local model fixtures and ad-hoc test artifacts.
+# Tracked content removed 2026-05-16; files stay on disk for local runs but
+# are not carried in the repo.
+/test_files/
+
+# Phase 3.8 Step 2 Wave 0c bench-generated synthetic audio fixtures.
+# Regenerated deterministically by `scripts/bench_audio_breakdown.py` from a
+# fixed seed; do not commit (5.5 MB at 60 s, exceeds the <1 MB fixture cap).
+sparrow-engine/test_files/audio_bench/
+
+# uv package manager lock files (libraries only — commit for applications)
+uv.lock
+
+# Claude Code agent runtime state — entire .claude/ tree (worktree clones,
+# locks, stale Claude-era agent-memory carried over from the pre-Copilot-CLI
+# transition). Untracked from main 2026-05-16; lives on disk for legacy
+# reference but no longer carried in the repo.
+/.claude/
+
+# Copilot CLI session state + worktree locks.
+.copilot/
+
+# Pre-tool-use hook discipline + anti-drift artifacts (session-local).
+lead-discipline-violations.log
+hook-anti-drift.log
+.anti-drift-active

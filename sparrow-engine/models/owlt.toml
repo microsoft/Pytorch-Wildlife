@@ -1,0 +1,45 @@
+# Canonical OWL-T overhead manifest (Phase 3.5 S3, MT-9 fix).
+#
+# OWL-T is a single-output heatmap model for overhead wildlife detection; like
+# HerdNet it emits centroids, not bboxes. The `subtype = "overhead"` hint
+# promotes `ModelType::Detector` to `ModelType::OverheadDetector` so
+# `viz::render` dispatches to the dot path.
+#
+# Production test manifests live under `test_files/sparrow_engine_models/owl-t/` and
+# should add the same `subtype = "overhead"` line as a follow-up.
+#
+# FP16 default (Phase 3.8 Step 1, audit 2026-05-03). Generate the FP16 ONNX
+# via `sparrow-engine/tools/convert_fp16.py <model_dir>` (default `--block-op Resize`
+# is sufficient — no duplicate Cast nodes observed). Audit data:
+# `docs/research/phase3.8/step1/fp16_audit.md`. To opt out: remove
+# `precision = "fp16"` and `file_fp16 = ...` (engine falls back to FP32).
+
+[model]
+id = "owl-t"
+format = "onnx"
+file = "owlt.onnx"
+file_fp16 = "owlt_fp16.onnx"
+subtype = "overhead"
+description = "OWL-T — overhead wildlife single-output heatmap detector"
+
+[preprocessing]
+method = "resize"
+input_size = [512, 512]
+layout = "nchw"
+normalization = "unit"
+
+[inference]
+strategy = "tiled"
+tile_size = [512, 512]
+tile_overlap = 160
+precision = "fp16"
+
+[postprocessing]
+method = "heatmap_peaks"
+peak_threshold = 0.2
+adaptive = true
+point_to_box_half_size = 10
+
+[labels]
+file = "owlt_labels.txt"
+format = "name_index_csv"
