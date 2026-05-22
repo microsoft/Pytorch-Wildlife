@@ -35,7 +35,7 @@ tag="${1:-}"
 [[ "$tag" =~ ^[A-Za-z0-9._-]+$ ]] || die "tag must match [A-Za-z0-9._-]+"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(git -C "$script_dir/../.." rev-parse --show-toplevel 2>/dev/null)" || die "script must run inside the bongo_dev repository"
+repo_root="$(git -C "$script_dir/../.." rev-parse --show-toplevel 2>/dev/null)" || die "script must run inside the sparrow-engine-dev repository"
 cd "$repo_root"
 
 ort_crate_version="$(extract_ort_crate_version)"
