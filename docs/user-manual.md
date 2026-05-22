@@ -37,37 +37,34 @@ Plain definitions before the first technical sentence.
 
 ## Top-level overview
 
-```
-                       sparrow-engine (Rust workspace, 7 crates)                                                       
-                                   │                                                                                   
-       ┌───────────────────────────┼───────────────────────────┐                                                       
-       │                           │                           │                                                       
-       v                           v                           v                                                       
-  sparrow-engine-types               sparrow-engine-core                  sparrow-engine-cpu / sparrow-engine-gpu      
-  (shared data              (shared logic              (engine flavors,                                                
-   types — no               — no ORT, no               each ships libsparrow_engine.so                                 
-   ORT, no CUDA)             CUDA)                      with 32 sparrow_engine_* exports)                              
-                                                              │                                                        
-                              ┌───────────────────────────────┼───────────────────────┐                                
-                              │                               │                       │                                
-                              v                               v                       v                                
-                        sparrow-engine-server               sparrow-engine-cli                    sparrow-engine-python
-                        (HTTP API, 15 routes)      (CLI binary)                 (Python wheel)                         
-                              │                               │                       │                                
-                              │  ┌────────────────────────────┼───────────────────┐   │                                
-                              │  │                                                │   │                                
-                              v  v                                                v   v                                
-                         Sparrow Studio Web                              Sparrow Studio Local                          
-                         (Flask + workers, Docker)                       (Avalonia / .NET desktop;                     
-                                                                         loads sparrow_engine.dll via P/Invoke)        
+```mermaid
+flowchart TB
+    WS["sparrow-engine<br/>(Rust workspace, 7 crates)"]
+    TYPES["sparrow-engine-types<br/>(shared data types;<br/>no ORT, no CUDA)"]
+    CORE["sparrow-engine-core<br/>(shared logic;<br/>no ORT, no CUDA)"]
+    FLAV["sparrow-engine-cpu / sparrow-engine-gpu<br/>(engine flavors; each ships<br/>libsparrow_engine.so with 32<br/>sparrow_engine_* exports)"]
+    SRV["sparrow-engine-server<br/>(HTTP API, 15 routes)"]
+    CLI["sparrow-engine-cli<br/>(CLI binary)"]
+    PY["sparrow-engine-python<br/>(Python wheel)"]
+    SW["Sparrow Studio Web<br/>(Flask + workers, Docker)"]
+    SL["Sparrow Studio Local<br/>(Avalonia / .NET desktop;<br/>loads sparrow_engine.dll<br/>via P/Invoke)"]
 
-Five ways to call Sparrow Engine:                                                                                      
-  CLI binary · Python wheel · HTTP SDK (sparrow-engine-client) · HTTP API (sparrow-engine-server) · Native DLL (C ABI) 
-
-Two device flavors, never co-located in one binary:                                                                    
-  cpu  → ORT CPU EP only,  Python wheel "sparrow-engine",     CLI binary "spe"                                         
-  gpu  → ORT CUDA EP added, Python wheel "sparrow-engine-gpu", CLI binary "spe-gpu"                                    
+    WS --> TYPES
+    WS --> CORE
+    WS --> FLAV
+    FLAV --> SRV
+    FLAV --> CLI
+    FLAV --> PY
+    SRV --> SW
+    CLI --> SL
+    PY --> SL
 ```
+
+**Five ways to call Sparrow Engine**: CLI binary · Python wheel · HTTP SDK (`sparrow-engine-client`) · HTTP API (`sparrow-engine-server`) · Native DLL (C ABI).
+
+**Two device flavors, never co-located in one binary**:
+- `cpu` → ORT CPU EP only; Python wheel `sparrow-engine`; CLI binary `spe`
+- `gpu` → ORT CUDA EP added; Python wheel `sparrow-engine-gpu`; CLI binary `spe-gpu`
 
 Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparrow_engine.so` — Sparrow Studio Local's `[DllImport("sparrow_engine")]` resolves either flavor.
 
@@ -77,21 +74,16 @@ Both flavors export the same 32 `sparrow_engine_*` symbols and ship as `libsparr
 
 ### Section overview
 
-```
-                  ┌──────────────────────────────────────┐                                
-                  │              sparrow-engine            │                              
-                  │  Loads ONNX models, runs inference.  │                                
-                  │  That's it. No annotation, no        │                                
-                  │  training, no storage, no registry.  │                                
-                  └──────────────────┬───────────────────┘                                
-                                     │                                                    
-       ┌─────────────────────────────┼─────────────────────────────┐                      
-       │                             │                             │                      
-       v                             v                             v                      
-   Sparrow Studio              sparrow-data sibling        sparrow-ops sibling            
-   (consumer; uses             (DEFERRED — data            (DEFERRED — registry,          
-    sparrow-engine's HTTP API            substrate, ingestion,        drift Tier-3, CI/CD,
-    and native DLL)             logging, snapshots)          monitoring)                  
+```mermaid
+flowchart TB
+    SE["**sparrow-engine**<br/>Loads ONNX models, runs inference.<br/>That's it. No annotation, no training,<br/>no storage, no registry."]
+    STUDIO["Sparrow Studio<br/>(consumer; uses sparrow-engine's<br/>HTTP API and native DLL)"]
+    DATA["sparrow-data sibling<br/>(DEFERRED — data substrate,<br/>ingestion, logging, snapshots)"]
+    OPS["sparrow-ops sibling<br/>(DEFERRED — registry,<br/>drift Tier-3, CI/CD, monitoring)"]
+
+    SE --> STUDIO
+    SE --> DATA
+    SE --> OPS
 ```
 
 **Why**: Sparrow Engine exists so wildlife-conservation teams can run camera-trap and bioacoustic models fast, in production, without re-implementing inference per consumer.
