@@ -1,0 +1,38 @@
+=== Round 2 verification — post-fixer-merge ===
+Generated: 2026-05-23T04:16:34Z
+HEAD:
+8961144 impl(perch2-phase-c): round 2 clippy fix on cpu FFI integration test (fixer merge)
+3cb46d8 impl(perch2-phase-c): round 2 fixer artifacts + csbindgen regen
+ce8edf1 fix(sparrow-engine-cpu): clippy needless_borrows on integration_ffi_symbols line 103
+
+ORT_LIB_LOCATION=/home/miao/.cache/uv/archive-v0/BaDqXHV4fDZ-TDVBW8t7C/onnxruntime/capi
+ORT_PREFER_DYNAMIC_LINK=1
+
+=== TEST cpu --lib ===
+
+running 69 tests
+.....................................................................
+test result: ok. 69 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+
+
+=== TEST cpu --features ffi --test integration_ffi_symbols ===
+
+running 2 tests
+..
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+=== CLIPPY cpu --features ffi --all-targets ===
+EXIT=0
+
+=== CLIPPY gpu --lib ===
+EXIT=0
+
+=== CLIPPY server ===
+EXIT=0
+
+=== CLIPPY cli ===
+EXIT=0
+
+=== CLIPPY python --no-default-features --features cpu --lib ===
+EXIT=0
