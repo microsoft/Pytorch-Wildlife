@@ -7,3 +7,4 @@
 {"round":1,"agent":"inquisitor","file":"ffi-v2-audio-gpu","action":"verified","report_anchor":"round_01/inquisitor_review.md#ffi-v2-audio-gpu"}
 {"round":1,"agent":"inquisitor","file":"server-audio-classes","action":"verified","report_anchor":"round_01/inquisitor_review.md#server-audio-classes"}
 {"round":1,"agent":"inquisitor","file":"python-audio-classes","action":"verified","report_anchor":"round_01/inquisitor_review.md#python-audio-classes"}
+{"round":2,"agent":"fixer-ffi-cpu-r2","file":"ffi-v2-audio-cpu","action":"fixed","commit":"ce8edf1a52c9b2b168daffa1fbf58f0c9eb42641","signature":"cdylib_exports_match_exports_def","report_anchor":"round_02/fixer-ffi-cpu-r2_report.md#ffi-v2-audio-cpu"}
