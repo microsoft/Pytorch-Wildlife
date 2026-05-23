@@ -91,6 +91,7 @@ fn audio_manifest_engine_config_reexports_resolve_at_crate_root() {
         start_time_s: 0.0,
         end_time_s: 1.0,
         confidence: 0.5,
+        classes: Vec::new(),
     };
     let _adr: sparrow_engine::AudioDetectResult = sparrow_engine::AudioDetectResult {
         segments: vec![],

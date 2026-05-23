@@ -1,0 +1,193 @@
+=== verification.txt ===
+Generated: 2026-05-23T03:54:37Z
+
+=== cargo test -p sparrow-engine-types --lib ===
+test types::phase_a_r1_types_tests::model_subtype_as_str_and_display_table ... ok
+test types::phase_a_r1_types_tests::model_subtype_default_is_standard ... ok
+test types::phase_a_r1_types_tests::model_type_as_str_table_driven ... ok
+test types::phase_a_r1_types_tests::model_type_display_matches_as_str ... ok
+test types::phase_a_r1_types_tests::pixel_format_discriminants_are_stable_for_ffi ... ok
+
+test result: ok. 117 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+=== cargo test -p sparrow-engine-core --lib ===
+test hash::phase_a_r1_hash::hash_large_file_matches_one_shot_digest ... ok
+test preprocess_audio::phase_a_r1_preprocess_audio::mel_spectrogram_zero_input_yields_constant_floor ... ok
+test preprocess_audio::tests::test_mel_spectrogram_output_shape ... ok
+test preprocess_audio::phase_a_r1_preprocess_audio::mel_spectrogram_top_db_saturation_caps_floor ... ok
+test viz::tests::render_no_pixel_size_heuristic_regression ... ok
+
+test result: ok. 178 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+
+
+=== cargo test -p sparrow-engine-cpu --lib ===
+test engine::tests::test_model_handle_manifest_accessor ... ok
+test engine::tests::test_resolve_device_auto_returns_cpu ... ok
+test engine::tests::test_unload_does_not_remove_replacement ... ok
+test engine::tests::unload_pipeline_not_found ... ok
+test preprocess::tests::test_preprocess_letterbox_metadata ... ok
+
+test result: ok. 69 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+
+=== cargo test -p sparrow-engine-cpu --features ffi --test integration_ffi_symbols ===
+     Running tests/integration_ffi_symbols.rs (target/debug/deps/integration_ffi_symbols-5604071d905bdc35)
+
+running 2 tests
+test ffi_link_smoke_for_sample_symbols ... ok
+test cdylib_exports_match_exports_def ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+=== cargo test -p sparrow-engine-cpu --test integration_perch2 -- --ignored ===
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.54s
+     Running tests/integration_perch2.rs (target/debug/deps/integration_perch2-626bcddde5d18f4c)
+
+running 1 test
+Perch 2: 2 segments, duration 10.00s, sr=32000 Hz, process=476 ms
+Window 0 top-5:
+  idx=  335  p=0.5280  label=Alarm
+  idx=13497  p=0.0315  label=Telephone
+  idx= 1542  p=0.0174  label=Bell
+  idx=14462  p=0.0157  label=Wind
+  idx=14344  p=0.0141  label=Vehicle
+Window 1 top-5:
+  idx=  335  p=0.2410  label=Alarm
+  idx=14462  p=0.0328  label=Wind
+  idx=14344  p=0.0224  label=Vehicle
+  idx= 5160  p=0.0207  label=Fire
+  idx=13497  p=0.0180  label=Telephone
+test perch2_detects_two_5s_windows_with_top5_classes_on_10s_clip ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 3.03s
+
+
+=== cargo test -p sparrow-engine-server --lib ===
+test handlers::pipelines_mgmt::tests::pipeline_toml_escapes_basic_string_values ... ok
+test discover::tests::discover_catalog_excludes_bad_manifest_and_bad_pipeline ... ok
+test discover::tests::discover_catalog_excludes_pipeline_with_audio_classifier_after_image_classifier ... ok
+test discover::tests::discover_catalog_excludes_pipeline_colliding_with_model_directory ... ok
+test handlers::pipelines_mgmt::tests::pipeline_management_endpoints_preserve_validation_and_error_contracts ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+=== cargo test -p sparrow-engine-cli --lib ===
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+error: no library targets found in package `sparrow-engine-cli`
+
+=== cargo test -p sparrow-engine-cli --bin spe ===
+test tests::test_resolve_audio_inputs_wav_only ... ok
+test tests::test_resolve_model_dir_default ... ok
+test tests::test_resolve_model_dir_env ... ok
+test tests::test_resolve_model_dir_explicit ... ok
+test tests::test_resolve_inputs_directory_expansion ... ok
+test tests::test_resolve_inputs_non_recursive_skips_subdirs ... ok
+test tests::validate_pipeline_ids_defers_unknown_ids_to_load_path ... ok
+test tests::test_resolve_inputs_single_file ... ok
+test tests::test_resolve_inputs_recursive ... ok
+test tests::test_visualize_requires_output_dir ... ok
+test tests::validate_pipeline_ids_rejects_known_incompatible_pair ... ok
+test tests::test_resolve_inputs_sorted ... ok
+
+test result: ok. 59 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+=== cargo test -p sparrow-engine-python --lib --no-default-features ===
+
+error[E0282]: type annotations needed for `(_, _)`
+    --> sparrow-engine-python/src/lib.rs:1298:15
+     |
+1298 |         .map(|(p, r)| (p.as_path(), r))
+     |               ^^^^^^   - type must be known at this point
+     |
+help: consider giving this closure parameter an explicit type, where the placeholders `_` are specified
+     |
+1298 |         .map(|(p, r): (_, _)| (p.as_path(), r))
+     |                     ++++++++
+
+Some errors have detailed explanations: E0282, E0432.
+For more information about an error, try `rustc --explain E0282`.
+error: could not compile `sparrow-engine-python` (lib test) due to 4 previous errors
+
+=== cargo test -p sparrow-engine-python --no-default-features --features cpu (workaround) ===
+Note: test.sh uses bare --no-default-features which is a pre-existing baseline bug after Phase C added cpu/gpu features.
+test tests::visualize_pipeline_result_uses_detector_model_type ... ok
+test tests::viz_output_extension_is_always_lowercase ... ok
+test tests::viz_output_extension_jpeg_yields_jpg ... ok
+test tests::viz_output_extension_png_yields_png ... ok
+test tests::viz_output_extension_unknown_format_falls_back_to_png ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+=== clippy -p sparrow-engine-cpu --features ffi ===
+   Compiling cbindgen v0.27.0
+    Checking ort v2.0.0-rc.12
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+error: the borrowed expression implements the required traits
+   --> sparrow-engine-cpu/tests/integration_ffi_symbols.rs:103:15
+    |
+103 |         .args(&["-D", "--defined-only"])
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^ help: change this to: `["-D", "--defined-only"]`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#needless_borrows_for_generic_args
+    = note: `-D clippy::needless-borrows-for-generic-args` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::needless_borrows_for_generic_args)]`
+
+error: could not compile `sparrow-engine-cpu` (test "integration_ffi_symbols") due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+
+=== clippy -p sparrow-engine-server ===
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+    Checking hyper-rustls v0.27.8
+    Checking sparrow-engine-types v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-types)
+   Compiling ort-sys v2.0.0-rc.12
+    Checking reqwest v0.12.28
+    Checking ort v2.0.0-rc.12
+    Checking sparrow-engine-core v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-core)
+    Checking sparrow-engine-server v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.79s
+
+=== clippy -p sparrow-engine-cli ===
+    Checking ort v2.0.0-rc.12
+    Checking bitstream-io v4.9.0
+    Checking av1-grain v0.2.5
+    Checking rav1e v0.8.1
+    Checking ravif v0.13.0
+    Checking image v0.25.10
+    Checking sparrow-engine-core v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-core)
+    Checking fast_image_resize v5.5.0
+    Checking sparrow-engine-cli v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.53s
+
+=== clippy -p sparrow-engine-python --no-default-features --features cpu ===
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+    Checking tracing v0.1.44
+    Checking sparrow-engine-core v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-core)
+    Checking sparrow-engine-python v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-python)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.73s
+
+=== clippy -p sparrow-engine-gpu --lib --features ffi ===
+   Compiling openssl v0.10.76
+    Checking sparrow-engine-core v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-core)
+   Compiling tempfile v3.27.0
+   Compiling cbindgen v0.27.0
+   Compiling native-tls v0.2.18
+   Compiling ureq v3.3.0
+   Compiling ort-sys v2.0.0-rc.12
+   Compiling sparrow-engine-gpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-gpu)
+    Checking ort v2.0.0-rc.12
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.95s

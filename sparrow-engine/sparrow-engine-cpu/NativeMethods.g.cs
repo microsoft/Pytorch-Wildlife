@@ -176,6 +176,17 @@ namespace SparrowEngine.Native
         internal static extern SparrowEngineAudioResult* sparrow_engine_detect_audio(void* model, byte* audio_path, SparrowEngineAudioDetectOpts* opts);
 
         /// <summary>
+        ///  Run audio detection on a WAV file with V2 top-K classes. Returns null on error.
+        ///
+        ///  # Safety
+        ///  - `model` must be a valid model pointer (audio model with mel spectrogram preprocessing).
+        ///  - `audio_path` must be a valid, non-null, null-terminated UTF-8 path to a WAV file.
+        ///  - `opts` may be null (use defaults).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_detect_audio_v2", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern SparrowEngineAudioResult_v2* sparrow_engine_detect_audio_v2(void* model, byte* audio_path, SparrowEngineAudioDetectOpts* opts);
+
+        /// <summary>
         ///  Run audio detection with per-segment streaming callback.
         ///  The callback is invoked on each detected segment as it is produced,
         ///  allowing the caller to update progress incrementally.
@@ -199,6 +210,15 @@ namespace SparrowEngine.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "sparrow_engine_audio_result_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void sparrow_engine_audio_result_free(SparrowEngineAudioResult* ptr);
+
+        /// <summary>
+        ///  Free a `SparrowEngineAudioResult_v2` returned by `sparrow_engine_detect_audio_v2`.
+        ///
+        ///  # Safety
+        ///  `ptr` must be a pointer returned by `sparrow_engine_detect_audio_v2`, or null.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_audio_result_v2_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void sparrow_engine_audio_result_v2_free(SparrowEngineAudioResult_v2* ptr);
 
         /// <summary>
         ///  Free a `SparrowEngineDetections` returned by `sparrow_engine_detect` or `sparrow_engine_detect_raw`.
@@ -484,6 +504,47 @@ namespace SparrowEngine.Native
     internal unsafe partial struct SparrowEngineAudioResult
     {
         public SparrowEngineAudioSegment* data;
+        public nuint len;
+        public float duration_s;
+        public uint sample_rate;
+        public float processing_time_ms;
+    }
+
+    /// <summary>
+    ///  V2 (Perch 2 + future multi-class classifiers): per-class entry for top-K output.
+    ///  `label` is a borrowed pointer into the result's CString arena; valid until the
+    ///  SparrowEngineAudioResult_v2 is freed via sparrow_engine_audio_result_v2_free.
+    ///  `label` may be null when the model has no label for this index.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineAudioClass
+    {
+        public uint class_idx;
+        public byte* label;
+        public float probability;
+    }
+
+    /// <summary>
+    ///  V2 audio segment: same V1 fields plus a top-K classes array.
+    ///  `classes` is a borrowed pointer into the result; valid for the lifetime of the result.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineAudioSegment_v2
+    {
+        public float start_time_s;
+        public float end_time_s;
+        public float confidence;
+        public SparrowEngineAudioClass* classes;
+        public nuint classes_len;
+    }
+
+    /// <summary>
+    ///  V2 audio detection result. Free with sparrow_engine_audio_result_v2_free.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineAudioResult_v2
+    {
+        public SparrowEngineAudioSegment_v2* data;
         public nuint len;
         public float duration_s;
         public uint sample_rate;

@@ -2,7 +2,7 @@
 //!
 //! Phase 3.8 Phase C Wave 4b: structurally identical to
 //! `sparrow-engine-cpu/src/ffi.rs` — both crates set `[lib] name = "sparrow_engine"` and
-//! produce a `libsparrow_engine.so` cdylib with the same 32 `sparrow_engine_*` exported
+//! produce a `libsparrow_engine.so` cdylib with the same 34 `sparrow_engine_*` exported
 //! symbols. The two cdylibs ship in distinct release artifacts (Docker
 //! images, Python wheels, CLI bundles) and are NEVER linked into the same
 //! process, so the `pub type SparrowEngine = c_void;` alias and the FFI
@@ -154,6 +154,38 @@ pub struct SparrowEngineAudioSegment {
 #[repr(C)]
 pub struct SparrowEngineAudioResult {
     pub data: *const SparrowEngineAudioSegment,
+    pub len: usize,
+    pub duration_s: f32,
+    pub sample_rate: u32,
+    pub processing_time_ms: f32,
+}
+
+/// V2 (Perch 2 + future multi-class classifiers): per-class entry for top-K output.
+/// `label` is a borrowed pointer into the result's CString arena; valid until the
+/// SparrowEngineAudioResult_v2 is freed via sparrow_engine_audio_result_v2_free.
+/// `label` may be null when the model has no label for this index.
+#[repr(C)]
+pub struct SparrowEngineAudioClass {
+    pub class_idx: u32,
+    pub label: *const c_char,
+    pub probability: f32,
+}
+
+/// V2 audio segment: same V1 fields plus a top-K classes array.
+/// `classes` is a borrowed pointer into the result; valid for the lifetime of the result.
+#[repr(C)]
+pub struct SparrowEngineAudioSegment_v2 {
+    pub start_time_s: f32,
+    pub end_time_s: f32,
+    pub confidence: f32,
+    pub classes: *const SparrowEngineAudioClass,
+    pub classes_len: usize,
+}
+
+/// V2 audio detection result. Free with sparrow_engine_audio_result_v2_free.
+#[repr(C)]
+pub struct SparrowEngineAudioResult_v2 {
+    pub data: *const SparrowEngineAudioSegment_v2,
     pub len: usize,
     pub duration_s: f32,
     pub sample_rate: u32,
@@ -538,6 +570,92 @@ fn audio_result_to_c(result: AudioDetectResult) -> *mut SparrowEngineAudioResult
 struct AudioResultWithOwner {
     header: SparrowEngineAudioResult,
     _owner: AudioResultOwned,
+}
+
+struct AudioResultV2Owned {
+    _labels: Vec<CString>,
+    _classes: Vec<SparrowEngineAudioClass>,
+    segments: Vec<SparrowEngineAudioSegment_v2>,
+}
+
+fn audio_result_v2_to_c(result: AudioDetectResult) -> *mut SparrowEngineAudioResult_v2 {
+    let total_class_count = result.segments.iter().map(|s| s.classes.len()).sum();
+
+    let mut labels = Vec::new();
+    let mut label_indices = Vec::with_capacity(result.segments.len());
+    for segment in &result.segments {
+        let mut segment_label_indices = Vec::with_capacity(segment.classes.len());
+        for class in &segment.classes {
+            if let Some(label) = &class.label {
+                labels.push(CString::new(label.replace('\0', "")).unwrap_or_default());
+                segment_label_indices.push(Some(labels.len() - 1));
+            } else {
+                segment_label_indices.push(None);
+            }
+        }
+        label_indices.push(segment_label_indices);
+    }
+
+    let mut classes = Vec::with_capacity(total_class_count);
+    for (segment_idx, segment) in result.segments.iter().enumerate() {
+        for (class_idx, class) in segment.classes.iter().enumerate() {
+            let label = label_indices[segment_idx][class_idx]
+                .map(|idx| labels[idx].as_ptr())
+                .unwrap_or(ptr::null());
+            classes.push(SparrowEngineAudioClass {
+                class_idx: class.class_idx,
+                label,
+                probability: class.probability,
+            });
+        }
+    }
+
+    let mut segments = Vec::with_capacity(result.segments.len());
+    let mut class_offset = 0;
+    for segment in &result.segments {
+        let classes_len = segment.classes.len();
+        let classes_ptr = if classes_len == 0 {
+            ptr::null()
+        } else {
+            // The class arena is fully built before segment pointers are taken.
+            unsafe { classes.as_ptr().add(class_offset) }
+        };
+        segments.push(SparrowEngineAudioSegment_v2 {
+            start_time_s: segment.start_time_s,
+            end_time_s: segment.end_time_s,
+            confidence: segment.confidence,
+            classes: classes_ptr,
+            classes_len,
+        });
+        class_offset += classes_len;
+    }
+
+    let owned = AudioResultV2Owned {
+        _labels: labels,
+        _classes: classes,
+        segments,
+    };
+
+    let mut combined = Box::new(AudioResultV2WithOwner {
+        header: SparrowEngineAudioResult_v2 {
+            data: ptr::null(),
+            len: owned.segments.len(),
+            duration_s: result.duration_s,
+            sample_rate: result.sample_rate,
+            processing_time_ms: result.processing_time_ms,
+        },
+        _owner: owned,
+    });
+    combined.header.data = combined._owner.segments.as_ptr();
+
+    let ptr = Box::into_raw(combined);
+    ptr as *mut SparrowEngineAudioResult_v2
+}
+
+#[repr(C)]
+struct AudioResultV2WithOwner {
+    header: SparrowEngineAudioResult_v2,
+    _owner: AudioResultV2Owned,
 }
 
 // ===========================================================================
@@ -1218,6 +1336,46 @@ pub unsafe extern "C" fn sparrow_engine_detect_audio(
     }
 }
 
+/// Run audio detection on a WAV file with V2 top-K classes. Returns null on error.
+///
+/// # Safety
+/// - `model` must be a valid model pointer (audio model with mel spectrogram preprocessing).
+/// - `audio_path` must be a valid, non-null, null-terminated UTF-8 path to a WAV file.
+/// - `opts` may be null (use defaults).
+#[no_mangle]
+pub unsafe extern "C" fn sparrow_engine_detect_audio_v2(
+    model: *const SparrowEngineModel,
+    audio_path: *const c_char,
+    opts: *const SparrowEngineAudioDetectOpts,
+) -> *mut SparrowEngineAudioResult_v2 {
+    clear_last_error();
+    let result = std::panic::catch_unwind(AssertUnwindSafe(
+        || -> Result<*mut SparrowEngineAudioResult_v2, String> {
+            if model.is_null() {
+                return Err("model pointer is null".to_string());
+            }
+            let handle = &*(model as *const ModelHandle);
+            let path_str = cstr_to_str(audio_path)?;
+            let input = AudioInput::FilePath(PathBuf::from(path_str));
+            let a_opts = audio_detect_opts_from_c(opts);
+            let result = crate::detect_audio::detect_audio(handle, &input, &a_opts)
+                .map_err(|e| e.to_string())?;
+            Ok(audio_result_v2_to_c(result))
+        },
+    ));
+    match result {
+        Ok(Ok(ptr)) => ptr,
+        Ok(Err(e)) => {
+            set_last_error(e);
+            ptr::null_mut()
+        }
+        Err(_panic) => {
+            set_last_error("internal error: panic in sparrow_engine_detect_audio_v2".to_string());
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Callback type for streaming audio detection.
 /// Called once per segment that exceeds the confidence threshold.
 /// `user_data` is passed through from the caller (opaque context pointer).
@@ -1300,6 +1458,24 @@ pub unsafe extern "C" fn sparrow_engine_audio_result_free(ptr: *mut SparrowEngin
     }));
     if result.is_err() {
         set_last_error("internal error: panic in sparrow_engine_audio_result_free".to_string());
+    }
+}
+
+/// Free a `SparrowEngineAudioResult_v2` returned by `sparrow_engine_detect_audio_v2`.
+///
+/// # Safety
+/// `ptr` must be a pointer returned by `sparrow_engine_detect_audio_v2`, or null.
+#[no_mangle]
+pub unsafe extern "C" fn sparrow_engine_audio_result_v2_free(ptr: *mut SparrowEngineAudioResult_v2) {
+    clear_last_error();
+    if ptr.is_null() {
+        return;
+    }
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        drop(Box::from_raw(ptr as *mut AudioResultV2WithOwner));
+    }));
+    if result.is_err() {
+        set_last_error("internal error: panic in sparrow_engine_audio_result_v2_free".to_string());
     }
 }
 
@@ -1824,6 +2000,78 @@ pub unsafe extern "C" fn sparrow_engine_engine_list_models_extended(
                 "internal error: panic in sparrow_engine_engine_list_models_extended".to_string(),
             );
             ptr::null_mut()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{AudioClass, AudioSegment};
+
+    #[test]
+    fn audio_result_v2_to_c_preserves_top_k_classes() {
+        let result = AudioDetectResult {
+            segments: vec![
+                AudioSegment {
+                    start_time_s: 1.0,
+                    end_time_s: 2.5,
+                    confidence: 0.9,
+                    classes: vec![
+                        AudioClass {
+                            class_idx: 7,
+                            label: Some("owl\0night".to_string()),
+                            probability: 0.9,
+                        },
+                        AudioClass {
+                            class_idx: 3,
+                            label: None,
+                            probability: 0.2,
+                        },
+                    ],
+                },
+                AudioSegment {
+                    start_time_s: 3.0,
+                    end_time_s: 4.0,
+                    confidence: 0.0,
+                    classes: Vec::new(),
+                },
+            ],
+            duration_s: 10.0,
+            sample_rate: 48_000,
+            processing_time_ms: 12.5,
+        };
+
+        let ptr = audio_result_v2_to_c(result);
+        assert!(!ptr.is_null());
+
+        unsafe {
+            let header = &*ptr;
+            assert_eq!(header.len, 2);
+            assert_eq!(header.duration_s, 10.0);
+            assert_eq!(header.sample_rate, 48_000);
+            assert_eq!(header.processing_time_ms, 12.5);
+            assert!(!header.data.is_null());
+
+            let segments = std::slice::from_raw_parts(header.data, header.len);
+            assert_eq!(segments[0].start_time_s, 1.0);
+            assert_eq!(segments[0].end_time_s, 2.5);
+            assert_eq!(segments[0].confidence, 0.9);
+            assert_eq!(segments[0].classes_len, 2);
+            assert!(!segments[0].classes.is_null());
+
+            let classes = std::slice::from_raw_parts(segments[0].classes, segments[0].classes_len);
+            assert_eq!(classes[0].class_idx, 7);
+            assert_eq!(CStr::from_ptr(classes[0].label).to_str().unwrap(), "owlnight");
+            assert_eq!(classes[0].probability, 0.9);
+            assert_eq!(classes[1].class_idx, 3);
+            assert!(classes[1].label.is_null());
+            assert_eq!(classes[1].probability, 0.2);
+
+            assert_eq!(segments[1].classes_len, 0);
+            assert!(segments[1].classes.is_null());
+
+            sparrow_engine_audio_result_v2_free(ptr);
         }
     }
 }

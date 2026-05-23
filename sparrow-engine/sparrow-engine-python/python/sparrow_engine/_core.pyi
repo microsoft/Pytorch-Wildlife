@@ -50,10 +50,16 @@ class PipelineResult:
     detections: list[PipelineDetection]
     def __len__(self) -> int: ...
 
+class AudioClass:
+    class_idx: int
+    label: Optional[str]
+    probability: float
+
 class AudioSegment:
     start_time_s: float
     end_time_s: float
     confidence: float
+    classes: list[AudioClass]
 
 class AudioResult:
     model_id: str

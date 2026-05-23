@@ -23,7 +23,7 @@ use crate::types::{ClassifyOpts, ClassifyResult, ImageInput};
 pub(crate) fn validate_vision_classifier(manifest: &ModelManifest) -> Result<()> {
     if matches!(
         manifest.preprocess_method,
-        PreprocessMethod::MelSpectrogram { .. }
+        PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. }
     ) {
         return Err(SparrowEngineError::IsAudioModel {
             id: manifest.id.clone(),

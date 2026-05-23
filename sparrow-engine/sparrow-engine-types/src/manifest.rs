@@ -37,6 +37,13 @@ pub enum PreprocessMethod {
         mel_scale: String,
         filter_norm: String,
     },
+    /// Raw audio windowing for audio models whose mel front-end is in-graph
+    /// (e.g., Perch 2). Decode + resample to `sample_rate`, then slice into
+    /// fixed-size `window_samples`-long windows (no STFT, no filterbank).
+    RawAudio {
+        sample_rate: u32,
+        window_samples: u32,
+    },
 }
 
 /// Tensor layout expected by the model.
@@ -154,7 +161,18 @@ impl PreprocessMethod {
             PreprocessMethod::Letterbox => "letterbox",
             PreprocessMethod::Resize => "resize",
             PreprocessMethod::MelSpectrogram { .. } => "mel_spectrogram",
+            PreprocessMethod::RawAudio { .. } => "raw_audio",
         }
+    }
+
+    /// True for any audio preprocessing method. Used to gate manifest field
+    /// requirements (image fields like `input_size`/`layout`/`normalization`
+    /// are not required for audio models).
+    pub fn is_audio(&self) -> bool {
+        matches!(
+            self,
+            PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. }
+        )
     }
 }
 
@@ -374,6 +392,10 @@ struct RawPreprocessing {
     window: Option<String>,
     mel_scale: Option<String>,
     filter_norm: Option<String>,
+    // Raw-audio-specific fields (required for raw_audio).
+    /// Number of samples per inference window (= segment_duration_s × sample_rate).
+    /// Required for `raw_audio`. For Perch 2: 160000 = 5 s × 32 kHz.
+    window_samples: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -478,11 +500,26 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
     }
 
     // -- Parse preprocessing --
-    let is_audio = raw.preprocessing.method == "mel_spectrogram";
+    let is_audio = matches!(raw.preprocessing.method.as_str(), "mel_spectrogram" | "raw_audio");
 
     let preprocess_method = match raw.preprocessing.method.as_str() {
         "letterbox" => PreprocessMethod::Letterbox,
         "resize" => PreprocessMethod::Resize,
+        "raw_audio" => {
+            let raw_err = |name: &str| {
+                SparrowEngineError::InvalidManifest(format!("raw_audio requires '{name}' field"))
+            };
+            PreprocessMethod::RawAudio {
+                sample_rate: raw
+                    .preprocessing
+                    .sample_rate
+                    .ok_or_else(|| raw_err("sample_rate"))?,
+                window_samples: raw
+                    .preprocessing
+                    .window_samples
+                    .ok_or_else(|| raw_err("window_samples"))?,
+            }
+        }
         "mel_spectrogram" => {
             let mel_err = |name: &str| {
                 SparrowEngineError::InvalidManifest(format!("mel_spectrogram requires '{name}' field"))
@@ -601,6 +638,38 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
                  to match MD_AudioBirds_V1 training; update the manifest)",
                 filter_norm
             )));
+        }
+    }
+
+    // -- Validate raw-audio numeric fields --
+    if let PreprocessMethod::RawAudio {
+        sample_rate,
+        window_samples,
+    } = &preprocess_method
+    {
+        if *sample_rate == 0 {
+            return Err(SparrowEngineError::InvalidManifest(
+                "sample_rate must be > 0".to_string(),
+            ));
+        }
+        if *window_samples == 0 {
+            return Err(SparrowEngineError::InvalidManifest(
+                "window_samples must be > 0".to_string(),
+            ));
+        }
+        // Consistency check: window_samples should equal
+        // segment_duration_s × sample_rate. Allow ±1 sample for rounding
+        // (e.g. a `segment_duration_s = 5.0` × `sample_rate = 32000` strictly
+        // = 160000 samples; declaring 160001 is a manifest bug).
+        if let Some(seg_dur) = raw.inference.segment_duration_s {
+            let expected = (seg_dur * (*sample_rate as f32)).round() as i64;
+            let actual = *window_samples as i64;
+            if (expected - actual).abs() > 1 {
+                return Err(SparrowEngineError::InvalidManifest(format!(
+                    "window_samples ({actual}) does not match segment_duration_s × sample_rate \
+                     ({seg_dur} × {sample_rate} = {expected}); allowed tolerance is ±1 sample"
+                )));
+            }
         }
     }
 
