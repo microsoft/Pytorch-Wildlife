@@ -1,12 +1,12 @@
 //
 // Phase 3.8 Phase A S7 closure: when `--features ffi` is on, the cdylib must
-// expose all 32 symbols listed in `exports.def`. Without `--features ffi` the
+// expose all 34 symbols listed in `exports.def`. Without `--features ffi` the
 // cdylib still builds but emits zero `sparrow_engine_*` symbols (the `sparrow_engine_*; local: *;`
 // filter in `exports.map` plus the absence of `pub mod ffi` produce that).
 //
 // Two test approaches:
-//   1. Compile-time link smoke test — declares `extern "C"` for 5 symbols and
-//      forces a use, so the test binary fails to link if those exports
+//   1. Compile-time link smoke test — references 5 symbols through the Rust
+//      `ffi` module, so the test binary fails to compile if those exports
 //      disappear from the rlib's `pub fn ffi::*` surface.
 //   2. nm shell-out — reads exports.def, runs `nm -D --defined-only` on
 //      `target/release/libsparrow_engine.so`, and asserts every `sparrow_engine_*` symbol is
@@ -19,31 +19,22 @@
 #![cfg(feature = "ffi")]
 
 // -----------------------------------------------------------------------------
-// Test 1: link-smoke — 5 sample FFI exports must be reachable as `extern "C"`
-// fn pointers. We don't CALL them (that requires Engine + ORT), only verify
-// the Rust compiler can resolve the symbols at link time.
+// Test 1: link-smoke — 5 sample FFI exports must be reachable through
+// `sparrow_engine::ffi`. We don't CALL them (that requires Engine + ORT), only
+// verify the Rust compiler can resolve the symbols at compile time.
 // -----------------------------------------------------------------------------
 
 #[test]
 fn ffi_link_smoke_for_sample_symbols() {
-    // We name 5 of the 32 symbols. If any disappear from `sparrow-engine-cpu/src/ffi.rs`
-    // (e.g., a refactor accidentally drops `#[no_mangle]`), the test binary
-    // fails to link. We pin a function-pointer reference so the linker has a
-    // reason to keep them.
-    use std::ffi::c_char;
-    use std::os::raw::c_void;
+    // We name 5 of the 34 symbols. If any disappear from `sparrow-engine-cpu/src/ffi.rs`
+    // (e.g., a refactor accidentally drops `#[no_mangle]` or `pub`), this test
+    // fails to compile. We pin a function-pointer reference so the compiler has
+    // a reason to resolve them.
+    use sparrow_engine::ffi::{
+        sparrow_engine_engine_free, sparrow_engine_engine_new, sparrow_engine_free_string,
+        sparrow_engine_health, sparrow_engine_last_error,
+    };
 
-    extern "C" {
-        fn sparrow_engine_engine_new(config_json: *const c_char) -> *mut c_void;
-        fn sparrow_engine_engine_free(engine: *mut c_void);
-        fn sparrow_engine_last_error() -> *const c_char;
-        fn sparrow_engine_free_string(ptr: *mut c_char);
-        fn sparrow_engine_health(engine: *const c_void) -> *mut c_char;
-    }
-
-    // Take function-pointer references — they cannot be null, but reading
-    // their addresses forces the linker to resolve them. We `assert!` on a
-    // trivially true condition to keep the references "used".
     let p1 = sparrow_engine_engine_new as *const ();
     let p2 = sparrow_engine_engine_free as *const ();
     let p3 = sparrow_engine_last_error as *const ();
@@ -147,11 +138,11 @@ fn cdylib_exports_match_exports_def() {
         missing
     );
 
-    // Sanity: count matches (32 per Phase A S7 inventory).
+    // Sanity: count matches (34 per Phase C FFI V2 audio inventory).
     assert_eq!(
         expected.len(),
-        32,
-        "exports.def line count drifted from Phase A baseline (was 32, now {})",
+        34,
+        "exports.def line count drifted from Phase C baseline (was 34, now {})",
         expected.len()
     );
 }
