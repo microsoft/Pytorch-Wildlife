@@ -68,25 +68,63 @@ The downloader verifies SHA-256 per model, is idempotent (skip-if-present unless
 
 This is a **multi-license bundle** — each model ships under its own upstream license. Open each `models/<model_id>/LICENSE.md` after download for the canonical terms.
 
-| Model ID | Task | Input | Output | ONNX | License | Notes |
-|---|---|---|---|---|---|---|
-| `MDV6-yolov10-c` | Detector | 640×640 RGB, letterbox | bboxes, in-graph NMS (animal / person / vehicle) | 9 MB | Ultralytics AGPL-3.0 | MegaDetector v6, compact / fast variant. |
-| `MDV6-yolov10-e` | Detector | 1280×1280 RGB, letterbox | bboxes, in-graph NMS (animal / person / vehicle) | 113 MB | Ultralytics AGPL-3.0 | MegaDetector v6, highest-accuracy variant. |
-| `Species_Net_MDV5a` | Detector | 1280×1280 RGB, letterbox | bboxes (animal / person / vehicle) | 535 MB | Ultralytics AGPL-3.0 | Legacy MegaDetector v5a; kept for projects validated against v5a outputs pre-v6. |
-| `deepfaune-yolo8s` | Detector | 960×960 RGB, letterbox | bboxes (3 cls, MD-style) | 43 MB | AGPL-3.0 ∩ CC-BY-NC-SA 4.0 | DeepFaune detector stage; pairs with `Deepfaune-Europe` / `Deepfaune-New-England` classifiers. |
-| `Deepfaune-Europe` | Classifier | 182×182 RGB crop | softmax, 34 cls | 1.2 GB | CC-BY-NC-SA 4.0 | DeepFaune classifier for European mammals. Downstream of a detector. |
-| `Deepfaune-New-England` | Classifier | 182×182 RGB crop | softmax, 24 cls | 1.2 GB | CC-BY-NC-SA 4.0 | DeepFaune classifier for New England (NA) mammals. Downstream of a detector. |
-| `HerdNet_General_Dataset_2022` | Heatmap detector | 512×512 RGB, resize | point detections, 6 species (+ bg) | 70 MB | MIT | Counts large African mammals (elephants, antelopes, zebras, etc.) in low-altitude aerial / drone imagery. |
-| `OWL` | Heatmap detector | 512×512 RGB, resize, tiled | point detections → fixed-size boxes (animal) | 114 MB | MIT | Tiled detection of small wildlife in large camera-trap / aerial scenes. |
-| `SpeciesNet-Crop` | Classifier | 480×480 RGB crop | softmax, 2498 cls | 214 MB | Apache 2.0 | Google SpeciesNet species classifier; pairs downstream of a detector (e.g. MDv6). |
-| `AI4G-Amazon-V2` | Classifier | 224×224 RGB crop | softmax, 36 cls | 90 MB | MIT | Amazon-basin species, Microsoft AI for Good Lab. |
-| `AI4G-Serengeti` | Classifier | 224×224 RGB crop | softmax, 10 cls | 43 MB | MIT | Serengeti / East African species, Microsoft AI for Good Lab. |
-| `european_mammals` | Detector | 640×480 RGB, letterbox | bboxes, in-graph NMS (31 cls) | 113 MB | Ultralytics AGPL-3.0 | AI for Good Lab regional YOLO. |
-| `north_american_mammals` | Detector | 640×480 RGB, letterbox | bboxes, in-graph NMS (14 cls) | 113 MB | Ultralytics AGPL-3.0 | AI for Good Lab regional YOLO. |
-| `sub_saharan` | Detector | 640×480 RGB, letterbox | bboxes, in-graph NMS (35 cls) | 113 MB | Ultralytics AGPL-3.0 | AI for Good Lab regional YOLO. |
-| `perch-v2` | Audio classifier | 5 s @ 32 kHz raw audio (160000 samples; in-graph mel front-end) | softmax, 14795 cls (birds + non-bird FSD50K) | 391 MB | Apache 2.0 | Google Perch 2 global bird-vocalisation classifier (Conformer encoder). |
+The catalog splits into four families (detectors, heatmap detectors, classifiers, audio). All detectors emit bounding boxes via in-graph NMS; all classifiers consume crops produced by an upstream detector.
 
-**License summary**: Ultralytics AGPL-3.0 (7 models: MDv6 × 2, MDv5a, 3 regional YOLOs, plus `deepfaune-yolo8s` which intersects with CC-BY-NC-SA 4.0) · CC-BY-NC-SA 4.0 (3 models: `deepfaune-yolo8s`, `Deepfaune-Europe`, `Deepfaune-New-England`) · Apache 2.0 (2 models: `SpeciesNet-Crop`, `perch-v2`) · MIT (4 models: `AI4G-Amazon-V2`, `AI4G-Serengeti`, `OWL`, `HerdNet`).
+#### Bounding-box detectors
+
+| Model ID | Resolution | Classes | ONNX | License |
+|---|---|---|---|---|
+| `MDV6-yolov10-c` | 640 × 640 | 3 (animal / person / vehicle) | 9 MB | Ultralytics AGPL-3.0 |
+| `MDV6-yolov10-e` | 1280 × 1280 | 3 (animal / person / vehicle) | 113 MB | Ultralytics AGPL-3.0 |
+| `Species_Net_MDV5a` | 1280 × 1280 | 3 (animal / person / vehicle) | 535 MB | Ultralytics AGPL-3.0 |
+| `deepfaune-yolo8s` | 960 × 960 | 3 (MD-style) | 43 MB | AGPL-3.0 ∩ CC-BY-NC-SA 4.0 |
+| `european_mammals` | 640 × 480 | 31 | 113 MB | Ultralytics AGPL-3.0 |
+| `north_american_mammals` | 640 × 480 | 14 | 113 MB | Ultralytics AGPL-3.0 |
+| `sub_saharan` | 640 × 480 | 35 | 113 MB | Ultralytics AGPL-3.0 |
+
+- MegaDetector v6 (`MDV6-yolov10-c` / `-e`) is the recommended default detector — `-c` for speed, `-e` for accuracy.
+- `Species_Net_MDV5a` is the legacy v5a detector; kept for projects validated against v5a outputs.
+- `deepfaune-yolo8s` is the DeepFaune detector stage, designed to pair with `Deepfaune-Europe` / `Deepfaune-New-England` classifiers.
+- `european_mammals` / `north_american_mammals` / `sub_saharan` are the AI for Good Lab regional YOLO detectors (multi-species per region).
+
+#### Heatmap-based detectors
+
+| Model ID | Resolution | Classes | ONNX | License |
+|---|---|---|---|---|
+| `HerdNet_General_Dataset_2022` | 512 × 512 | 6 species + background | 70 MB | MIT |
+| `OWL` | 512 × 512 (tiled) | 1 (animal) | 114 MB | MIT |
+
+- `HerdNet_General_Dataset_2022` counts large African mammals (elephants, antelopes, zebras, etc.) in low-altitude aerial / drone imagery.
+- `OWL` does tiled detection of small wildlife in large camera-trap or aerial scenes; converts heatmap peaks to fixed-size boxes.
+
+#### Image classifiers (consume crops from a detector)
+
+| Model ID | Crop | Classes | ONNX | License |
+|---|---|---|---|---|
+| `Deepfaune-Europe` | 182 × 182 | 34 | 1.2 GB | CC-BY-NC-SA 4.0 |
+| `Deepfaune-New-England` | 182 × 182 | 24 | 1.2 GB | CC-BY-NC-SA 4.0 |
+| `SpeciesNet-Crop` | 480 × 480 | 2498 | 214 MB | Apache 2.0 |
+| `AI4G-Amazon-V2` | 224 × 224 | 36 | 90 MB | MIT |
+| `AI4G-Serengeti` | 224 × 224 | 10 | 43 MB | MIT |
+
+- `Deepfaune-Europe` / `Deepfaune-New-England` are the DeepFaune classifier stage for European and New England (NA) mammals.
+- `SpeciesNet-Crop` is Google's SpeciesNet classifier; pairs downstream of a detector (e.g. MDv6).
+- `AI4G-Amazon-V2` and `AI4G-Serengeti` are AI for Good Lab regional classifiers for Amazon-basin and Serengeti / East African species.
+
+#### Audio classifiers
+
+| Model ID | Input window | Classes | ONNX | License |
+|---|---|---|---|---|
+| `perch-v2` | 5 s @ 32 kHz raw audio | 14795 | 391 MB | Apache 2.0 |
+
+- `perch-v2` is Google Perch 2, a global bird-vocalisation classifier (Conformer encoder) with an in-graph mel front-end. Takes 160000-sample windows of raw audio; emits softmax over 14795 classes (birds + non-bird FSD50K labels).
+
+#### License summary
+
+- **Ultralytics AGPL-3.0** (7 models): MDv6 × 2, MDv5a, the 3 AI4G regional YOLOs, plus `deepfaune-yolo8s` (which also intersects CC-BY-NC-SA 4.0).
+- **CC-BY-NC-SA 4.0** (3 models): `deepfaune-yolo8s`, `Deepfaune-Europe`, `Deepfaune-New-England`.
+- **Apache 2.0** (2 models): `SpeciesNet-Crop`, `perch-v2`.
+- **MIT** (4 models): `AI4G-Amazon-V2`, `AI4G-Serengeti`, `OWL`, `HerdNet_General_Dataset_2022`.
 
 **Commercial users of YOLO-based detectors** should obtain an [Ultralytics Enterprise License](https://www.ultralytics.com/license).
 
