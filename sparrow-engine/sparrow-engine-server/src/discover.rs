@@ -485,9 +485,12 @@ model = "{classifier}"
     }
 
     // Audio classifier test helper. Mirrors the production audio manifest shape
-    // from `sparrow-engine/models/audiobirds.toml` but with `[postprocessing] method =
-    // "softmax"` so `derive_model_type` returns `ModelType::AudioClassifier`
-    // (see `sparrow-engine-types/src/model_type.rs::derive_model_type`).
+    // from `sparrow-engine/models/perch-v2/manifest.toml` (Perch 2): `raw_audio`
+    // preprocessing + `softmax` postprocessing is the only combination that
+    // `derive_model_type` maps to `ModelType::AudioClassifier`
+    // (see `sparrow-engine-types/src/model_type.rs::derive_model_type` and the
+    // `is_audio` preprocess/postprocess gate in
+    // `sparrow-engine-types/src/manifest.rs::load_manifest`).
     fn write_audio_classifier_manifest(dir: &Path, entry: &str, id: &str) {
         let model_dir = dir.join(entry);
         fs::create_dir_all(&model_dir).unwrap();
@@ -500,22 +503,14 @@ format = "onnx"
 file = "model.onnx"
 
 [preprocessing]
-method = "mel_spectrogram"
-sample_rate = 48000
-n_fft = 1024
-hop_length = 512
-n_mels = 224
-fmin = 0.0
-fmax = 24000.0
-top_db = 80.0
-window = "hann_symmetric"
-mel_scale = "slaney"
-filter_norm = "slaney"
+method = "raw_audio"
+sample_rate = 32000
+window_samples = 160000
 
 [inference]
 strategy = "sliding_window"
-segment_duration_s = 1.0
-segment_stride_s = 0.3
+segment_duration_s = 5.0
+segment_stride_s = 5.0
 
 [postprocessing]
 method = "softmax"
