@@ -158,6 +158,29 @@ pub struct AudioSamples {
 /// them.
 pub fn load_audio(input: &AudioInput, config: &AudioPreprocessConfig) -> Result<AudioSamples> {
     config.validate()?;
+    if config.sample_rate == 0 {
+        return Err(SparrowEngineError::InvalidManifest(
+            "audio config sample_rate must be greater than 0".to_string(),
+        ));
+    }
+    load_audio_at_sample_rate(input, config.sample_rate)
+}
+
+/// Load audio and resample to the given target sample rate.
+///
+/// Slimmer sibling of [`load_audio`] used by raw-audio (non-mel) classifier
+/// preprocessing paths (e.g. Perch 2). Skips the mel-spectrogram config
+/// validation in [`AudioPreprocessConfig::validate`] — callers that need it
+/// should call [`load_audio`].
+pub fn load_audio_at_sample_rate(
+    input: &AudioInput,
+    target_sample_rate: u32,
+) -> Result<AudioSamples> {
+    if target_sample_rate == 0 {
+        return Err(SparrowEngineError::InvalidManifest(
+            "target_sample_rate must be greater than 0".to_string(),
+        ));
+    }
     let t_decode = Instant::now();
     let (samples, sr) = match input {
         AudioInput::FilePath(path) => decode_wav(path)?,
@@ -175,11 +198,6 @@ pub fn load_audio(input: &AudioInput, config: &AudioPreprocessConfig) -> Result<
             "audio sample_rate must be greater than 0".to_string(),
         ));
     }
-    if config.sample_rate == 0 {
-        return Err(SparrowEngineError::InvalidManifest(
-            "audio config sample_rate must be greater than 0".to_string(),
-        ));
-    }
     tracing::info!(
         stage = "audio.decode",
         duration_ns = t_decode.elapsed().as_nanos() as u64,
@@ -190,29 +208,24 @@ pub fn load_audio(input: &AudioInput, config: &AudioPreprocessConfig) -> Result<
     // Phase 3.8 Step 2 perf-fix B (post Wave-4 triage): for SR-matched
     // input (the production case for DUNAS — 48 kHz native), move the
     // already-decoded `samples` directly without a `to_vec()` clone.
-    // The previous `resample(&samples, sr, sr)` did `samples.to_vec()`
-    // — an 11.5 MB memcpy that the profile harness clocked at ~5 ms
-    // median on the DUNAS_20230925 fixture. Eliminating the clone is
-    // bit-identical (move semantics) and brings `audio.resample` to
-    // sub-millisecond when no resample is needed.
     let t_resample = Instant::now();
-    let resampled = if sr == config.sample_rate {
+    let resampled = if sr == target_sample_rate {
         samples
     } else {
-        resample(&samples, sr, config.sample_rate)?
+        resample(&samples, sr, target_sample_rate)?
     };
     tracing::info!(
         stage = "audio.resample",
         duration_ns = t_resample.elapsed().as_nanos() as u64,
         from_sr = sr,
-        to_sr = config.sample_rate,
+        to_sr = target_sample_rate,
         out_samples = resampled.len(),
     );
-    let duration_s = resampled.len() as f32 / config.sample_rate as f32;
+    let duration_s = resampled.len() as f32 / target_sample_rate as f32;
 
     Ok(AudioSamples {
         data: resampled,
-        sample_rate: config.sample_rate,
+        sample_rate: target_sample_rate,
         duration_s,
     })
 }

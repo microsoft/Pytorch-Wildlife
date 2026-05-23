@@ -33,11 +33,11 @@ pub(crate) fn validate_vision_detector(manifest: &ModelManifest) -> Result<()> {
     }
     if matches!(
         manifest.preprocess_method,
-        PreprocessMethod::MelSpectrogram { .. }
+        PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. }
     ) {
         return Err(SparrowEngineError::IsAudioModel {
             id: manifest.id.clone(),
-            method: "mel_spectrogram".to_string(),
+            method: manifest.preprocess_method.as_str().to_string(),
         });
     }
     Ok(())

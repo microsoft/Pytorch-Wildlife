@@ -66,7 +66,7 @@ use sparrow_engine_types::error::{SparrowEngineError, Result};
 use sparrow_engine_types::manifest::{
     self, InferenceStrategy, ModelManifest, PostprocessMethod, Precision, PreprocessMethod,
 };
-use sparrow_engine_types::{AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment};
+use sparrow_engine_types::{AudioClass, AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment};
 use cudarc::cufft::sys as cufft_sys;
 use cudarc::driver::{CudaContext, CudaSlice, CudaStream, DeviceRepr, ValidAsZeroBits};
 
@@ -1334,6 +1334,15 @@ fn compute_segment_offsets(
 fn extract_audio_params(manifest: &ModelManifest) -> Result<(u32, f32, f32, f32)> {
     let sample_rate = match &manifest.preprocess_method {
         PreprocessMethod::MelSpectrogram { sample_rate, .. } => *sample_rate,
+        PreprocessMethod::RawAudio { .. } => {
+            return Err(SparrowEngineError::InvalidManifest(format!(
+                "AudioModel (GPU): manifest '{}' uses preprocess = raw_audio. \
+                 GPU raw_audio inference is not yet implemented — use the CPU \
+                 wheel/binary (`spe` not `spe-gpu`, `import sparrow_engine` from the \
+                 CPU wheel) or open an issue for the GPU raw_audio path.",
+                manifest.id
+            )));
+        }
         other => {
             return Err(SparrowEngineError::NotAnAudioModel {
                 id: manifest.id.clone(),
@@ -1393,6 +1402,11 @@ pub(crate) fn collect_segments(
                 start_time_s: start_s,
                 end_time_s: end_s,
                 confidence,
+                classes: vec![AudioClass {
+                    class_idx: 0,
+                    label: None,
+                    probability: confidence,
+                }],
             };
             if let Some(cb) = on_segment.as_deref_mut() {
                 cb(&seg);

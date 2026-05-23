@@ -66,9 +66,9 @@ fn synthetic_spectrogram(w: u32, h: u32) -> DynamicImage {
 fn ramp_segments(duration_s: f32) -> Vec<AudioSegment> {
     let third = duration_s / 3.0;
     vec![
-        AudioSegment { start_time_s: 0.0, end_time_s: third, confidence: 0.3 },
-        AudioSegment { start_time_s: third, end_time_s: 2.0 * third, confidence: 0.6 },
-        AudioSegment { start_time_s: 2.0 * third, end_time_s: duration_s, confidence: 0.95 },
+        AudioSegment { start_time_s: 0.0, end_time_s: third, confidence: 0.3, classes: Vec::new() },
+        AudioSegment { start_time_s: third, end_time_s: 2.0 * third, confidence: 0.6, classes: Vec::new() },
+        AudioSegment { start_time_s: 2.0 * third, end_time_s: duration_s, confidence: 0.95, classes: Vec::new() },
     ]
 }
 

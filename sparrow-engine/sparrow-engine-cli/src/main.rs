@@ -944,6 +944,7 @@ fn segments_to_overlap_mean_slots(
             start_time_s: slot as f32 * step_s,
             end_time_s: ((slot + 1) as f32 * step_s).min(duration_s),
             confidence: mean,
+            classes: Vec::new(),
         });
     }
     result
@@ -2964,6 +2965,7 @@ mod tests {
             start_time_s: start,
             end_time_s: end,
             confidence: conf,
+            classes: Vec::new(),
         }
     }
 

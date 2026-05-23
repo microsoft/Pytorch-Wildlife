@@ -153,12 +153,38 @@ pub enum AudioInput {
 // Audio detection
 // ---------------------------------------------------------------------------
 
+/// A single classification slot inside an `AudioSegment`. Phase 4.2+ unified
+/// audio model: every audio segment carries a top-K list of `AudioClass`
+/// entries (K=1 for binary detectors like MD_AudioBirds_V1, K≥1 for
+/// multi-class classifiers like Perch 2).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioClass {
+    /// Index into `manifest.labels` (0-based).
+    pub class_idx: u32,
+    /// Resolved label string from `labels.txt`. `None` when the model has no
+    /// labels file (e.g. legacy binary detectors that pre-date label files).
+    pub label: Option<String>,
+    /// Softmax probability (for classifiers) or sigmoid confidence (for
+    /// binary detectors). Always in `[0, 1]`.
+    pub probability: f32,
+}
+
 /// A single detected audio segment.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// `confidence` is the top-class probability and is preserved for backward
+/// compatibility with all existing readers; it equals `classes[0].probability`
+/// when `classes` is non-empty. `classes` carries the full top-K list (sorted
+/// descending by probability) for multi-class classifiers; for binary
+/// detectors `classes` is a 1-entry vec or empty (when no labels file is
+/// present).
+#[derive(Debug, Clone, PartialEq)]
 pub struct AudioSegment {
     pub start_time_s: f32,
     pub end_time_s: f32,
     pub confidence: f32,
+    /// Top-K class candidates for this segment, sorted by probability desc.
+    /// Empty for legacy binary detectors with no labels file.
+    pub classes: Vec<AudioClass>,
 }
 
 /// Full audio detection output from a single `detect_audio()` call.
@@ -172,8 +198,9 @@ pub struct AudioDetectResult {
 
 /// Merged-segment range output from `detect_audio::merge_segments`.
 ///
-/// `class` is reserved for future multiclass audio models; for binary
-/// detectors (MD_AudioBirds_V1, the Phase 1 default) it is always `None`.
+/// `class` carries the resolved label string when class-aware merging is in
+/// effect (multi-class classifiers). For binary detectors with no labels file
+/// it is `None`.
 ///
 /// Phase 3.8 Phase A note: this lived in the legacy audio-detection module but
 /// was hoisted to `sparrow-engine-types` (Commit 2 widening) because `sparrow-engine-core`'s
@@ -396,13 +423,18 @@ mod phase_a_r1_types_tests {
     }
 
     #[test]
-    fn audio_segment_partial_eq_and_copy() {
+    fn audio_segment_partial_eq_and_clone() {
         let a = AudioSegment {
             start_time_s: 0.0,
             end_time_s: 3.0,
             confidence: 0.9,
+            classes: vec![AudioClass {
+                class_idx: 0,
+                label: Some("bird".to_string()),
+                probability: 0.9,
+            }],
         };
-        let b = a; // Copy
+        let b = a.clone();
         assert_eq!(a, b);
     }
 }

@@ -37,20 +37,22 @@ pub use sparrow_engine_types::AudioRange;
 // Validation helpers
 // ---------------------------------------------------------------------------
 
-/// Validate that a manifest represents an audio model (mel
-/// preprocessing). Mirrors the up-front check inside
-/// `sparrow_engine_cpu::detect_audio::prepare_audio_detection`.
+/// Validate that a manifest represents an audio model that the GPU flavor
+/// supports. Currently: mel-spectrogram only. RawAudio (e.g. Perch 2) loads
+/// fine in the CPU flavor but is not yet wired to GPU — explicit reject here.
 pub(crate) fn validate_audio_model(manifest: &ModelManifest) -> Result<()> {
-    if !matches!(
-        manifest.preprocess_method,
-        PreprocessMethod::MelSpectrogram { .. }
-    ) {
-        return Err(SparrowEngineError::NotAnAudioModel {
+    match &manifest.preprocess_method {
+        PreprocessMethod::MelSpectrogram { .. } => Ok(()),
+        PreprocessMethod::RawAudio { .. } => Err(SparrowEngineError::InvalidManifest(format!(
+            "detect_audio (GPU): manifest '{}' uses preprocess = raw_audio. \
+             GPU raw_audio inference is not yet implemented — use the CPU wheel/binary.",
+            manifest.id
+        ))),
+        other => Err(SparrowEngineError::NotAnAudioModel {
             id: manifest.id.clone(),
-            method: manifest.preprocess_method.as_str().to_string(),
-        });
+            method: other.as_str().to_string(),
+        }),
     }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -217,16 +219,19 @@ mod tests {
                 start_time_s: 0.0,
                 end_time_s: 1.0,
                 confidence: 0.5,
+            classes: Vec::new(),
             },
             AudioSegment {
                 start_time_s: 1.0,
                 end_time_s: 2.0,
                 confidence: 0.7,
+            classes: Vec::new(),
             },
             AudioSegment {
                 start_time_s: 5.0,
                 end_time_s: 6.0,
                 confidence: 0.6,
+            classes: Vec::new(),
             },
         ];
         let ranges = merge_segments(&segs, 0.5);

@@ -80,10 +80,11 @@ pub fn preprocess(image: &ImageInput, config: &PreprocessConfig) -> Result<Prepr
             &config.normalization,
         )?,
         PreprocessMethod::Resize => resize_direct(&rgb, target_w, target_h)?,
-        PreprocessMethod::MelSpectrogram { .. } => {
-            return Err(crate::error::SparrowEngineError::InvalidManifest(
-                "MelSpectrogram preprocessing cannot be used with image preprocess()".to_string(),
-            ));
+        PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. } => {
+            return Err(crate::error::SparrowEngineError::InvalidManifest(format!(
+                "{} preprocessing cannot be used with image preprocess()",
+                config.method.as_str()
+            )));
         }
     };
 
@@ -92,7 +93,9 @@ pub fn preprocess(image: &ImageInput, config: &PreprocessConfig) -> Result<Prepr
     let tensor_norm = match config.method {
         PreprocessMethod::Letterbox => Normalization::None,
         PreprocessMethod::Resize => config.normalization,
-        PreprocessMethod::MelSpectrogram { .. } => unreachable!(),
+        PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. } => {
+            unreachable!()
+        }
     };
 
     // 3. Layout conversion (+ normalization for resize path)

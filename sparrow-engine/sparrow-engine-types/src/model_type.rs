@@ -28,6 +28,12 @@ pub fn derive_model_type(
         (PreprocessMethod::MelSpectrogram { .. }, PostprocessMethod::Softmax) => {
             ModelType::AudioClassifier
         }
+        (PreprocessMethod::RawAudio { .. }, PostprocessMethod::Sigmoid { .. }) => {
+            ModelType::AudioDetector
+        }
+        (PreprocessMethod::RawAudio { .. }, PostprocessMethod::Softmax) => {
+            ModelType::AudioClassifier
+        }
         (_, PostprocessMethod::Softmax) => ModelType::Classifier,
         _ => ModelType::Detector,
     };
@@ -59,6 +65,14 @@ mod phase_a_r1_model_type_tests {
             window: "hann".to_string(),
             mel_scale: "slaney".to_string(),
             filter_norm: "slaney".to_string(),
+        }
+    }
+
+    /// Canonical placeholder RawAudio constructor (Perch-2-style: 5 s @ 32 kHz).
+    fn raw_audio() -> PreprocessMethod {
+        PreprocessMethod::RawAudio {
+            sample_rate: 32000,
+            window_samples: 160000,
         }
     }
 
@@ -208,7 +222,7 @@ mod phase_a_r1_model_type_tests {
 
     #[test]
     fn cartesian_full_matrix_no_panic_and_no_unknown_variants() {
-        // Exhaustive cartesian: 3 preprocess × 5 postprocess × 2 subtype = 30 combos.
+        // Exhaustive cartesian: 4 preprocess × 5 postprocess × 2 subtype = 40 combos.
         // The point of this test is twofold:
         //   1) every combo derives without panicking,
         //   2) every result is one of the 5 known ModelType variants (sanity for refactor regressions).
@@ -216,6 +230,7 @@ mod phase_a_r1_model_type_tests {
             PreprocessMethod::Letterbox,
             PreprocessMethod::Resize,
             mel(),
+            raw_audio(),
         ];
         let postprocesses: Vec<PostprocessMethod> = vec![
             PostprocessMethod::YoloE2e,
@@ -244,6 +259,24 @@ mod phase_a_r1_model_type_tests {
                 }
             }
         }
-        assert_eq!(combo_count, 3 * 5 * 2);
+        assert_eq!(combo_count, 4 * 5 * 2);
+    }
+
+    #[test]
+    fn audio_classifier_when_raw_audio_plus_softmax() {
+        assert_eq!(
+            derive_model_type(&raw_audio(), &PostprocessMethod::Softmax, ModelSubtype::Standard),
+            ModelType::AudioClassifier,
+            "RawAudio + Softmax should derive AudioClassifier (Perch 2)"
+        );
+    }
+
+    #[test]
+    fn audio_detector_when_raw_audio_plus_sigmoid() {
+        assert_eq!(
+            derive_model_type(&raw_audio(), &sigmoid(), ModelSubtype::Standard),
+            ModelType::AudioDetector,
+            "RawAudio + Sigmoid should derive AudioDetector"
+        );
     }
 }

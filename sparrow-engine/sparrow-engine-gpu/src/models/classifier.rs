@@ -464,11 +464,12 @@ impl ClassifierModel {
         // 1. Validate model type.
         if matches!(
             manifest.preprocess_method,
-            PreprocessMethod::MelSpectrogram { .. }
+            PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. }
         ) {
             return Err(SparrowEngineError::InvalidManifest(format!(
-                "ClassifierModel::load: manifest '{}' is an audio model (preprocess = mel_spectrogram), expected vision classifier",
-                manifest.id
+                "ClassifierModel::load: manifest '{}' is an audio model (preprocess = {}), expected vision classifier",
+                manifest.id,
+                manifest.preprocess_method.as_str(),
             )));
         }
         if !matches!(manifest.postprocess_method, PostprocessMethod::Softmax) {
@@ -776,14 +777,15 @@ impl ClassifierModel {
                     self.manifest.id
                 )));
             }
-            PreprocessMethod::MelSpectrogram { .. } => {
+            PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. } => {
                 // Defense-in-depth: load() rejects audio manifests at validation
                 // time (B6 / S-NEW-3). Aligned to `InvalidManifest` for variant
                 // consistency with the other classify() defense-in-depth arms
                 // (Phase 3.8 Step 1 audit-fix R3 M8 cleanup).
                 return Err(SparrowEngineError::InvalidManifest(format!(
-                    "ClassifierModel::classify: manifest '{}' has audio preprocess (mel_spectrogram) — rejected at load",
-                    self.manifest.id
+                    "ClassifierModel::classify: manifest '{}' has audio preprocess ({}) — rejected at load",
+                    self.manifest.id,
+                    self.manifest.preprocess_method.as_str(),
                 )));
             }
         };
