@@ -188,6 +188,41 @@ typedef struct SparrowEngineAudioDetectOpts {
 } SparrowEngineAudioDetectOpts;
 
 /**
+ * V2 (Perch 2 + future multi-class classifiers): per-class entry for top-K output.
+ * `label` is a borrowed pointer into the result's CString arena; valid until the
+ * SparrowEngineAudioResult_v2 is freed via sparrow_engine_audio_result_v2_free.
+ * `label` may be null when the model has no label for this index.
+ */
+typedef struct SparrowEngineAudioClass {
+  uint32_t class_idx;
+  const char *label;
+  float probability;
+} SparrowEngineAudioClass;
+
+/**
+ * V2 audio segment: same V1 fields plus a top-K classes array.
+ * `classes` is a borrowed pointer into the result; valid for the lifetime of the result.
+ */
+typedef struct SparrowEngineAudioSegment_v2 {
+  float start_time_s;
+  float end_time_s;
+  float confidence;
+  const struct SparrowEngineAudioClass *classes;
+  uintptr_t classes_len;
+} SparrowEngineAudioSegment_v2;
+
+/**
+ * V2 audio detection result. Free with sparrow_engine_audio_result_v2_free.
+ */
+typedef struct SparrowEngineAudioResult_v2 {
+  const struct SparrowEngineAudioSegment_v2 *data;
+  uintptr_t len;
+  float duration_s;
+  uint32_t sample_rate;
+  float processing_time_ms;
+} SparrowEngineAudioResult_v2;
+
+/**
  * Callback type for streaming audio detection.
  * Called once per segment that exceeds the confidence threshold.
  * `user_data` is passed through from the caller (opaque context pointer).
@@ -405,6 +440,18 @@ struct SparrowEngineAudioResult *sparrow_engine_detect_audio(const SparrowEngine
                                                              const struct SparrowEngineAudioDetectOpts *opts);
 
 /**
+ * Run audio detection on a WAV file with V2 top-K classes. Returns null on error.
+ *
+ * # Safety
+ * - `model` must be a valid model pointer (audio model with mel spectrogram preprocessing).
+ * - `audio_path` must be a valid, non-null, null-terminated UTF-8 path to a WAV file.
+ * - `opts` may be null (use defaults).
+ */
+struct SparrowEngineAudioResult_v2 *sparrow_engine_detect_audio_v2(const SparrowEngineModel *model,
+                                                                   const char *audio_path,
+                                                                   const struct SparrowEngineAudioDetectOpts *opts);
+
+/**
  * Run audio detection with per-segment streaming callback.
  * GPU callback cadence is post-detect: the full chunk loop completes first,
  * then the callback is invoked once for each detected segment in chronological
@@ -431,6 +478,14 @@ struct SparrowEngineAudioResult *sparrow_engine_detect_audio_streaming(const Spa
  * `ptr` must be a pointer returned by `sparrow_engine_detect_audio`, or null.
  */
 void sparrow_engine_audio_result_free(struct SparrowEngineAudioResult *ptr);
+
+/**
+ * Free a `SparrowEngineAudioResult_v2` returned by `sparrow_engine_detect_audio_v2`.
+ *
+ * # Safety
+ * `ptr` must be a pointer returned by `sparrow_engine_detect_audio_v2`, or null.
+ */
+void sparrow_engine_audio_result_v2_free(struct SparrowEngineAudioResult_v2 *ptr);
 
 /**
  * Free a `SparrowEngineDetections` returned by `sparrow_engine_detect` or `sparrow_engine_detect_raw`.

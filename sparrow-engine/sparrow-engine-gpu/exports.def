@@ -14,11 +14,13 @@ EXPORTS
     sparrow_engine_classify
     sparrow_engine_run_pipeline
     sparrow_engine_detect_audio
+    sparrow_engine_detect_audio_v2
     sparrow_engine_detect_audio_streaming
     sparrow_engine_detections_free
     sparrow_engine_classify_result_free
     sparrow_engine_pipeline_result_free
     sparrow_engine_audio_result_free
+    sparrow_engine_audio_result_v2_free
     sparrow_engine_free_string
     sparrow_engine_list_models
     sparrow_engine_health
