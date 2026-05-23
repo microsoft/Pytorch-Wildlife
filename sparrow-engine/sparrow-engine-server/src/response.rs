@@ -142,18 +142,44 @@ pub struct PipelineResponse {
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize)]
+pub struct AudioClassResponse {
+    pub class_idx: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub probability: f32,
+}
+
+#[derive(Serialize)]
 pub struct AudioSegmentResponse {
     pub start_time_s: f32,
     pub end_time_s: f32,
     pub confidence: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classes: Option<Vec<AudioClassResponse>>,
 }
 
 impl From<AudioSegment> for AudioSegmentResponse {
     fn from(s: AudioSegment) -> Self {
+        let classes = if s.classes.len() > 1 {
+            Some(
+                s.classes
+                    .iter()
+                    .map(|c| AudioClassResponse {
+                        class_idx: c.class_idx,
+                        label: c.label.clone(),
+                        probability: c.probability,
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
         Self {
             start_time_s: s.start_time_s,
             end_time_s: s.end_time_s,
             confidence: s.confidence,
+            classes,
         }
     }
 }
@@ -165,6 +191,71 @@ pub struct AudioDetectResponse {
     pub sample_rate: u32,
     pub processing_time_ms: f32,
     pub segments: Vec<AudioSegmentResponse>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine_dispatch::AudioClass;
+
+    fn segment(classes: Vec<AudioClass>) -> AudioSegment {
+        AudioSegment {
+            start_time_s: 0.0,
+            end_time_s: 1.0,
+            confidence: 0.9,
+            classes,
+        }
+    }
+
+    fn audio_class(class_idx: u32, label: &str, probability: f32) -> AudioClass {
+        AudioClass {
+            class_idx,
+            label: Some(label.to_string()),
+            probability,
+        }
+    }
+
+    #[test]
+    fn audio_segment_json_omits_classes_for_empty_class_list() {
+        let value = serde_json::to_value(AudioSegmentResponse::from(segment(Vec::new()))).unwrap();
+
+        assert!(!value.as_object().unwrap().contains_key("classes"));
+    }
+
+    #[test]
+    fn audio_segment_json_omits_classes_for_single_class_binary_path() {
+        let value = serde_json::to_value(AudioSegmentResponse::from(segment(vec![audio_class(
+            0, "bird", 0.9,
+        )])))
+        .unwrap();
+
+        assert!(!value.as_object().unwrap().contains_key("classes"));
+    }
+
+    #[test]
+    fn audio_segment_json_includes_classes_for_multiclass_segments() {
+        let value = serde_json::to_value(AudioSegmentResponse::from(segment(vec![
+            audio_class(0, "sparrow", 0.7),
+            audio_class(1, "warbler", 0.2),
+            audio_class(2, "thrush", 0.1),
+        ])))
+        .unwrap();
+        let classes = value
+            .as_object()
+            .unwrap()
+            .get("classes")
+            .unwrap()
+            .as_array()
+            .unwrap();
+
+        assert_eq!(classes.len(), 3);
+        assert_eq!(classes[0]["class_idx"], 0);
+        assert_eq!(classes[0]["label"], "sparrow");
+        assert!((classes[0]["probability"].as_f64().unwrap() - 0.7).abs() < 1e-6);
+        assert_eq!(classes[2]["class_idx"], 2);
+        assert_eq!(classes[2]["label"], "thrush");
+        assert!((classes[2]["probability"].as_f64().unwrap() - 0.1).abs() < 1e-6);
+    }
 }
 
 // ---------------------------------------------------------------------------
