@@ -2,12 +2,13 @@
 # scripts/download_models.sh — download the sparrow-engine model zoo from Zenodo.
 #
 # Downloads the ONNX model bundles from the public Zenodo record
-# (https://doi.org/10.5281/zenodo.20348979), verifies SHA-256 integrity,
+# (https://doi.org/10.5281/zenodo.20351248, concept DOI 10.5281/zenodo.20348978
+# which always resolves to the latest version), verifies SHA-256 integrity,
 # and unpacks each model into a layout directly loadable by sparrow-engine
 # (i.e. `<dest>/<model_id>/manifest.toml` + `model.onnx` + `labels.txt`).
 #
 # Usage:
-#   bash scripts/download_models.sh                    # all 14 models to ./models/
+#   bash scripts/download_models.sh                    # all 15 models to ./models/
 #   bash scripts/download_models.sh --dest /path       # custom destination dir
 #   bash scripts/download_models.sh MDV6-yolov10-e ... # specific model(s) only
 #   bash scripts/download_models.sh --list             # show available models
@@ -25,11 +26,12 @@
 set -euo pipefail
 
 # ---- Constants ----
-ZENODO_RECORD="${ZENODO_RECORD:-20348979}"
+ZENODO_RECORD="${ZENODO_RECORD:-20351248}"
 ZENODO_DOI="10.5281/zenodo.${ZENODO_RECORD}"
 ZENODO_BASE="https://zenodo.org/records/${ZENODO_RECORD}/files"
 
-# All 14 models published in the v0.1.0 Zenodo bundle.
+# All 15 models published in the v0.2.0 Zenodo bundle.
+# (v0.1.0 had 14; v0.2.0 added perch-v2 — bird vocalization classifier.)
 ALL_MODELS=(
   "MDV6-yolov10-e"
   "MDV6-yolov10-c"
@@ -45,6 +47,7 @@ ALL_MODELS=(
   "AI4G-Serengeti"
   "Deepfaune-Europe"
   "Deepfaune-New-England"
+  "perch-v2"
 )
 
 # ---- Defaults ----
