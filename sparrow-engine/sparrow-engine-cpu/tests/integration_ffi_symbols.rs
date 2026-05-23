@@ -100,7 +100,7 @@ fn cdylib_exports_match_exports_def() {
 
     // Run `nm -D --defined-only <cdylib>` and grep for ` T sparrow_engine_`.
     let nm_out = Command::new("nm")
-        .args(&["-D", "--defined-only"])
+        .args(["-D", "--defined-only"])
         .arg(&cdylib)
         .output()
         .expect("`nm` not found on PATH — cannot verify exports");
