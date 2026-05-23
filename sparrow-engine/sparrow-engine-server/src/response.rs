@@ -208,9 +208,13 @@ mod tests {
     }
 
     fn audio_class(class_idx: u32, label: &str, probability: f32) -> AudioClass {
+        audio_class_opt(class_idx, Some(label), probability)
+    }
+
+    fn audio_class_opt(class_idx: u32, label: Option<&str>, probability: f32) -> AudioClass {
         AudioClass {
             class_idx,
-            label: Some(label.to_string()),
+            label: label.map(str::to_string),
             probability,
         }
     }
@@ -255,6 +259,28 @@ mod tests {
         assert_eq!(classes[2]["class_idx"], 2);
         assert_eq!(classes[2]["label"], "thrush");
         assert!((classes[2]["probability"].as_f64().unwrap() - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn audio_segment_json_preserves_unlabeled_multiclass_entries() {
+        let value = serde_json::to_value(AudioSegmentResponse::from(segment(vec![
+            audio_class_opt(0, Some("sparrow"), 0.7),
+            audio_class_opt(1, None, 0.2),
+            audio_class_opt(2, Some("thrush"), 0.1),
+        ])))
+        .unwrap();
+        let classes = value
+            .as_object()
+            .unwrap()
+            .get("classes")
+            .unwrap()
+            .as_array()
+            .unwrap();
+
+        assert_eq!(classes.len(), 3);
+        assert_eq!(classes[1]["class_idx"], 1);
+        assert!(!classes[1].as_object().unwrap().contains_key("label"));
+        assert!((classes[1]["probability"].as_f64().unwrap() - 0.2).abs() < 1e-6);
     }
 }
 

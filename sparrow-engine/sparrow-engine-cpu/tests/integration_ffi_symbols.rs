@@ -31,6 +31,7 @@ fn ffi_link_smoke_for_sample_symbols() {
     // fails to compile. We pin a function-pointer reference so the compiler has
     // a reason to resolve them.
     use sparrow_engine::ffi::{
+        sparrow_engine_audio_result_v2_free, sparrow_engine_detect_audio_v2,
         sparrow_engine_engine_free, sparrow_engine_engine_new, sparrow_engine_free_string,
         sparrow_engine_health, sparrow_engine_last_error,
     };
@@ -40,11 +41,15 @@ fn ffi_link_smoke_for_sample_symbols() {
     let p3 = sparrow_engine_last_error as *const ();
     let p4 = sparrow_engine_free_string as *const ();
     let p5 = sparrow_engine_health as *const ();
+    let p6 = sparrow_engine_detect_audio_v2 as *const ();
+    let p7 = sparrow_engine_audio_result_v2_free as *const ();
     assert!(!p1.is_null());
     assert!(!p2.is_null());
     assert!(!p3.is_null());
     assert!(!p4.is_null());
     assert!(!p5.is_null());
+    assert!(!p6.is_null());
+    assert!(!p7.is_null());
 }
 
 // -----------------------------------------------------------------------------
@@ -87,7 +92,7 @@ fn cdylib_exports_match_exports_def() {
     let def_path = manifest_dir.join("exports.def");
     let def_content = std::fs::read_to_string(&def_path)
         .unwrap_or_else(|e| panic!("failed to read {:?}: {}", def_path, e));
-    let expected: Vec<String> = def_content
+    let expected: std::collections::BTreeSet<String> = def_content
         .lines()
         .map(|l| l.trim())
         .filter(|l| l.starts_with("sparrow_engine_"))
@@ -112,7 +117,7 @@ fn cdylib_exports_match_exports_def() {
     let stdout = String::from_utf8_lossy(&nm_out.stdout);
 
     // Each line is `<addr> T <name>` for a public text symbol.
-    let actual: std::collections::HashSet<String> = stdout
+    let actual: std::collections::BTreeSet<String> = stdout
         .lines()
         .filter_map(|l| {
             let mut parts = l.split_whitespace();
@@ -127,15 +132,22 @@ fn cdylib_exports_match_exports_def() {
         })
         .collect();
 
-    // Assert every expected symbol is in the cdylib.
-    let mut missing: Vec<&String> = expected.iter().filter(|s| !actual.contains(*s)).collect();
-    missing.sort();
+    let missing: Vec<_> = expected.difference(&actual).cloned().collect();
     assert!(
         missing.is_empty(),
         "{} symbol(s) declared in exports.def but missing from {:?}: {:?}",
         missing.len(),
         cdylib,
         missing
+    );
+
+    let extra: Vec<_> = actual.difference(&expected).cloned().collect();
+    assert!(
+        extra.is_empty(),
+        "{} unexpected sparrow_engine_* symbol(s) exported from {:?}: {:?}",
+        extra.len(),
+        cdylib,
+        extra
     );
 
     // Sanity: count matches (34 per Phase C FFI V2 audio inventory).
@@ -145,6 +157,7 @@ fn cdylib_exports_match_exports_def() {
         "exports.def line count drifted from Phase C baseline (was 34, now {})",
         expected.len()
     );
+    assert_eq!(actual.len(), expected.len());
 }
 
 #[cfg(not(target_os = "linux"))]

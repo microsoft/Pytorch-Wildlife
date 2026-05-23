@@ -25,6 +25,9 @@ mod common;
 
 use std::path::PathBuf;
 
+#[cfg(feature = "ffi")]
+use std::ffi::{CStr, CString};
+
 use sparrow_engine::engine::{Device, EngineConfig};
 use sparrow_engine::{AudioDetectOpts, AudioInput, Engine};
 
@@ -51,8 +54,7 @@ fn perch2_bundle_dir() -> Option<PathBuf> {
 }
 
 fn core_audio_fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../sparrow-engine-core/tests/fixtures/audio")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sparrow-engine-core/tests/fixtures/audio")
 }
 
 #[test]
@@ -174,12 +176,7 @@ fn perch2_detects_two_5s_windows_with_top5_classes_on_10s_clip() {
                 .label
                 .as_ref()
                 .unwrap_or_else(|| panic!("seg {} class {}: expected label", i, k));
-            assert!(
-                !label.is_empty(),
-                "seg {} class {}: label is empty",
-                i,
-                k
-            );
+            assert!(!label.is_empty(), "seg {} class {}: label is empty", i, k);
         }
         assert!(
             topk_sum > 0.0 && topk_sum <= 1.0001,
@@ -219,6 +216,107 @@ fn perch2_detects_two_5s_windows_with_top5_classes_on_10s_clip() {
     drop(engine);
 }
 
+#[cfg(feature = "ffi")]
+unsafe fn ffi_last_error_string() -> String {
+    let ptr = sparrow_engine::ffi::sparrow_engine_last_error();
+    if ptr.is_null() {
+        "<no last error>".to_string()
+    } else {
+        CStr::from_ptr(ptr).to_string_lossy().into_owned()
+    }
+}
+
+#[test]
+#[ignore] // Requires ORT runtime + the 409 MB Perch 2 ONNX bundle (un-staged in CI).
+#[cfg(feature = "ffi")]
+fn perch2_detect_audio_v2_preserves_top5_classes_over_ffi() {
+    let Some(bundle_dir) = perch2_bundle_dir() else {
+        eprintln!(
+            "SKIP: Perch 2 bundle not found. Set SPARROW_ENGINE_PERCH2_BUNDLE or \
+             SPARROW_ENGINE_DEV_ROOT, or stage the bundle at the documented path."
+        );
+        return;
+    };
+    let manifest_path = bundle_dir.join("manifest.toml");
+    let audio_path = core_audio_fixtures_dir().join("medium_10s.wav");
+    assert!(
+        audio_path.exists(),
+        "expected audio fixture at {}",
+        audio_path.display()
+    );
+
+    let config_json = serde_json::json!({
+        "device": "cpu",
+        "inter_threads": 1,
+        "intra_threads": 4,
+        "model_dir": bundle_dir,
+    })
+    .to_string();
+    let config_c = CString::new(config_json).unwrap();
+    let manifest_c = CString::new(manifest_path.to_str().expect("manifest path UTF-8")).unwrap();
+    let audio_c = CString::new(audio_path.to_str().expect("audio path UTF-8")).unwrap();
+
+    unsafe {
+        let engine = sparrow_engine::ffi::sparrow_engine_engine_new(config_c.as_ptr());
+        assert!(
+            !engine.is_null(),
+            "Engine::new failed: {}",
+            ffi_last_error_string()
+        );
+
+        let model = sparrow_engine::ffi::sparrow_engine_load_model(engine, manifest_c.as_ptr());
+        assert!(
+            !model.is_null(),
+            "load model failed: {}",
+            ffi_last_error_string()
+        );
+
+        let result = sparrow_engine::ffi::sparrow_engine_detect_audio_v2(
+            model,
+            audio_c.as_ptr(),
+            std::ptr::null(),
+        );
+        assert!(
+            !result.is_null(),
+            "detect_audio_v2 failed: {}",
+            ffi_last_error_string()
+        );
+
+        let header = &*result;
+        assert_eq!(header.len, 2, "expected two 5s windows");
+        assert!(!header.data.is_null());
+        assert_eq!(header.sample_rate, 32_000);
+
+        let segments = std::slice::from_raw_parts(header.data, header.len);
+        for (i, segment) in segments.iter().enumerate() {
+            assert_eq!(
+                segment.classes_len, 5,
+                "seg {i}: expected top-K = 5 classes, got {}",
+                segment.classes_len
+            );
+            assert!(
+                !segment.classes.is_null(),
+                "seg {i}: classes pointer is null"
+            );
+            let classes = std::slice::from_raw_parts(segment.classes, segment.classes_len);
+            assert!(
+                (segment.confidence - classes[0].probability).abs() < f32::EPSILON,
+                "seg {i}: confidence must equal top-1 probability"
+            );
+            assert!(classes[0].probability >= 0.0 && classes[0].probability <= 1.0);
+            assert!(!classes[0].label.is_null(), "seg {i}: expected top-1 label");
+            let label = CStr::from_ptr(classes[0].label)
+                .to_str()
+                .expect("label UTF-8");
+            assert!(!label.is_empty(), "seg {i}: top-1 label is empty");
+        }
+
+        sparrow_engine::ffi::sparrow_engine_audio_result_v2_free(result);
+        sparrow_engine::ffi::sparrow_engine_unload_model(model);
+        sparrow_engine::ffi::sparrow_engine_engine_free(engine);
+    }
+}
+
 #[test]
 fn perch2_bundle_is_well_formed_if_present() {
     let Some(bundle_dir) = perch2_bundle_dir() else {
@@ -238,7 +336,8 @@ fn perch2_bundle_is_well_formed_if_present() {
     let n_lines = labels.lines().filter(|l| !l.is_empty()).count();
     assert_eq!(n_lines, 14_795, "expected 14795 non-empty label lines");
 
-    let manifest = std::fs::read_to_string(bundle_dir.join("manifest.toml")).expect("read manifest");
+    let manifest =
+        std::fs::read_to_string(bundle_dir.join("manifest.toml")).expect("read manifest");
     assert!(manifest.contains("method = \"raw_audio\""));
     assert!(manifest.contains("sample_rate = 32000"));
     assert!(manifest.contains("window_samples = 160000"));

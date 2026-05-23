@@ -10,7 +10,7 @@ use std::path::{Component, Path};
 use serde::{Deserialize, Serialize};
 
 use crate::drift_metrics::DriftReference;
-use crate::error::{SparrowEngineError, Result};
+use crate::error::{Result, SparrowEngineError};
 use crate::types::ModelSubtype;
 
 // ---------------------------------------------------------------------------
@@ -500,7 +500,10 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
     }
 
     // -- Parse preprocessing --
-    let is_audio = matches!(raw.preprocessing.method.as_str(), "mel_spectrogram" | "raw_audio");
+    let is_audio = matches!(
+        raw.preprocessing.method.as_str(),
+        "mel_spectrogram" | "raw_audio"
+    );
 
     let preprocess_method = match raw.preprocessing.method.as_str() {
         "letterbox" => PreprocessMethod::Letterbox,
@@ -522,7 +525,9 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
         }
         "mel_spectrogram" => {
             let mel_err = |name: &str| {
-                SparrowEngineError::InvalidManifest(format!("mel_spectrogram requires '{name}' field"))
+                SparrowEngineError::InvalidManifest(format!(
+                    "mel_spectrogram requires '{name}' field"
+                ))
             };
             PreprocessMethod::MelSpectrogram {
                 sample_rate: raw
@@ -657,20 +662,6 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
                 "window_samples must be > 0".to_string(),
             ));
         }
-        // Consistency check: window_samples should equal
-        // segment_duration_s × sample_rate. Allow ±1 sample for rounding
-        // (e.g. a `segment_duration_s = 5.0` × `sample_rate = 32000` strictly
-        // = 160000 samples; declaring 160001 is a manifest bug).
-        if let Some(seg_dur) = raw.inference.segment_duration_s {
-            let expected = (seg_dur * (*sample_rate as f32)).round() as i64;
-            let actual = *window_samples as i64;
-            if (expected - actual).abs() > 1 {
-                return Err(SparrowEngineError::InvalidManifest(format!(
-                    "window_samples ({actual}) does not match segment_duration_s × sample_rate \
-                     ({seg_dur} × {sample_rate} = {expected}); allowed tolerance is ±1 sample"
-                )));
-            }
-        }
     }
 
     // -- Parse image-specific fields (required for vision, absent for audio) --
@@ -678,13 +669,17 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
         (None, None, None, None, None)
     } else {
         let input_size = raw.preprocessing.input_size.ok_or_else(|| {
-            SparrowEngineError::InvalidManifest("image models require 'input_size' field".to_string())
+            SparrowEngineError::InvalidManifest(
+                "image models require 'input_size' field".to_string(),
+            )
         })?;
         let layout_str = raw.preprocessing.layout.as_deref().ok_or_else(|| {
             SparrowEngineError::InvalidManifest("image models require 'layout' field".to_string())
         })?;
         let norm_str = raw.preprocessing.normalization.as_deref().ok_or_else(|| {
-            SparrowEngineError::InvalidManifest("image models require 'normalization' field".to_string())
+            SparrowEngineError::InvalidManifest(
+                "image models require 'normalization' field".to_string(),
+            )
         })?;
 
         let layout = match layout_str {
@@ -780,14 +775,14 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
                     "sliding_window requires 'segment_stride_s' field".to_string(),
                 )
             })?;
-            if segment_duration_s <= 0.0 {
+            if !segment_duration_s.is_finite() || segment_duration_s <= 0.0 {
                 return Err(SparrowEngineError::InvalidManifest(
-                    "segment_duration_s must be > 0".to_string(),
+                    "segment_duration_s must be finite and > 0".to_string(),
                 ));
             }
-            if segment_stride_s <= 0.0 {
+            if !segment_stride_s.is_finite() || segment_stride_s <= 0.0 {
                 return Err(SparrowEngineError::InvalidManifest(
-                    "segment_stride_s must be > 0".to_string(),
+                    "segment_stride_s must be finite and > 0".to_string(),
                 ));
             }
             InferenceStrategy::SlidingWindow {
@@ -801,6 +796,32 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
             )))
         }
     };
+
+    if is_audio && !matches!(inference_strategy, InferenceStrategy::SlidingWindow { .. }) {
+        return Err(SparrowEngineError::InvalidManifest(
+            "audio preprocessing requires inference strategy 'sliding_window'".to_string(),
+        ));
+    }
+
+    if let (
+        PreprocessMethod::RawAudio {
+            sample_rate,
+            window_samples,
+        },
+        InferenceStrategy::SlidingWindow {
+            segment_duration_s, ..
+        },
+    ) = (&preprocess_method, inference_strategy)
+    {
+        let expected = (segment_duration_s * (*sample_rate as f32)).round() as i64;
+        let actual = *window_samples as i64;
+        if (expected - actual).abs() > 1 {
+            return Err(SparrowEngineError::InvalidManifest(format!(
+                "window_samples ({actual}) does not match segment_duration_s × sample_rate \
+                 ({segment_duration_s} × {sample_rate} = {expected}); allowed tolerance is ±1 sample"
+            )));
+        }
+    }
 
     // -- Parse precision (Phase 3.8: FP16 support) --
     let precision = match raw.inference.precision.as_deref() {
@@ -840,7 +861,9 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
                 )
             })?;
             let adaptive = raw.postprocessing.adaptive.ok_or_else(|| {
-                SparrowEngineError::InvalidManifest("heatmap_peaks requires 'adaptive' field".to_string())
+                SparrowEngineError::InvalidManifest(
+                    "heatmap_peaks requires 'adaptive' field".to_string(),
+                )
             })?;
             let point_to_box_half_size =
                 raw.postprocessing.point_to_box_half_size.ok_or_else(|| {
@@ -872,6 +895,20 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
             )))
         }
     };
+
+    if is_audio {
+        match (&preprocess_method, &postprocess_method) {
+            (PreprocessMethod::MelSpectrogram { .. }, PostprocessMethod::Sigmoid { .. })
+            | (PreprocessMethod::RawAudio { .. }, PostprocessMethod::Softmax) => {}
+            _ => {
+                return Err(SparrowEngineError::InvalidManifest(format!(
+                    "unsupported audio preprocess/postprocess combination: preprocessing method '{}' with postprocessing method '{}'",
+                    raw.preprocessing.method,
+                    raw.postprocessing.method
+                )));
+            }
+        }
+    }
 
     // -- Parse labels (optional for binary detectors) --
     let (label_file, label_format) = if let Some(ref labels) = raw.labels {
@@ -1865,6 +1902,54 @@ method = {postmethod}
         )
     }
 
+    /// Build a valid RawAudio model manifest TOML with optional field overrides.
+    fn make_raw_audio_toml(overrides: &[(&str, &str)]) -> String {
+        let mut sample_rate = "32000".to_string();
+        let mut window_samples = "160000".to_string();
+        let mut strategy = r#""sliding_window""#.to_string();
+        let mut inference_extra = "segment_duration_s = 5.0\nsegment_stride_s = 5.0".to_string();
+        let mut postmethod = r#""softmax""#.to_string();
+        let mut post_extra = "".to_string();
+
+        for &(k, v) in overrides {
+            match k {
+                "sample_rate" => sample_rate = v.to_string(),
+                "window_samples" => window_samples = v.to_string(),
+                "strategy" => strategy = v.to_string(),
+                "inference_extra" => inference_extra = v.to_string(),
+                "postmethod" => postmethod = v.to_string(),
+                "post_extra" => post_extra = v.to_string(),
+                _ => panic!("unknown raw audio override key: {k}"),
+            }
+        }
+
+        format!(
+            r#"
+[model]
+id = "perch-test"
+format = "onnx"
+file = "model.onnx"
+
+[preprocessing]
+method = "raw_audio"
+sample_rate = {sample_rate}
+window_samples = {window_samples}
+
+[inference]
+strategy = {strategy}
+{inference_extra}
+
+[postprocessing]
+method = {postmethod}
+{post_extra}
+
+[labels]
+file = "labels.txt"
+format = "one_per_line"
+"#
+        )
+    }
+
     #[test]
     fn test_load_audio_manifest() {
         let toml = make_audio_toml(&[]);
@@ -1916,6 +2001,113 @@ method = {postmethod}
         assert_eq!(manifest.pad_value, None);
         // Binary detector: no labels
         assert_eq!(manifest.label_file, None);
+    }
+
+    #[test]
+    fn test_load_raw_audio_manifest() {
+        let toml = make_raw_audio_toml(&[]);
+        let dir = write_temp_file("manifest.toml", &toml);
+        let manifest = load_manifest(&dir.path().join("manifest.toml")).unwrap();
+
+        assert_eq!(manifest.id, "perch-test");
+        assert!(matches!(
+            manifest.preprocess_method,
+            PreprocessMethod::RawAudio {
+                sample_rate: 32000,
+                window_samples: 160000,
+            }
+        ));
+        assert_eq!(
+            manifest.inference_strategy,
+            InferenceStrategy::SlidingWindow {
+                segment_duration_s: 5.0,
+                segment_stride_s: 5.0,
+            }
+        );
+        assert_eq!(manifest.postprocess_method, PostprocessMethod::Softmax);
+    }
+
+    #[test]
+    fn test_raw_audio_requires_sliding_window() {
+        let toml = make_raw_audio_toml(&[("strategy", r#""single""#), ("inference_extra", "")]);
+        let dir = write_temp_file("manifest.toml", &toml);
+        let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
+        assert!(matches!(err, SparrowEngineError::InvalidManifest(_)));
+        assert!(err.to_string().contains("sliding_window"));
+    }
+
+    #[test]
+    fn test_raw_audio_window_samples_must_match_segment_duration() {
+        let toml = make_raw_audio_toml(&[("window_samples", "159998")]);
+        let dir = write_temp_file("manifest.toml", &toml);
+        let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
+        assert!(matches!(err, SparrowEngineError::InvalidManifest(_)));
+        assert!(err.to_string().contains("window_samples"));
+    }
+
+    #[test]
+    fn test_raw_audio_window_samples_allows_one_sample_rounding() {
+        let toml = make_raw_audio_toml(&[("window_samples", "160001")]);
+        let dir = write_temp_file("manifest.toml", &toml);
+        let manifest = load_manifest(&dir.path().join("manifest.toml")).unwrap();
+        assert!(matches!(
+            manifest.preprocess_method,
+            PreprocessMethod::RawAudio {
+                window_samples: 160001,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_audio_rejects_non_finite_sliding_window_fields() {
+        for (field, value) in [("segment_duration_s", "inf"), ("segment_stride_s", "inf")] {
+            let inference_extra = match field {
+                "segment_duration_s" => {
+                    format!("segment_duration_s = {value}\nsegment_stride_s = 5.0")
+                }
+                "segment_stride_s" => {
+                    format!("segment_duration_s = 5.0\nsegment_stride_s = {value}")
+                }
+                _ => unreachable!(),
+            };
+            let overrides = [("inference_extra", inference_extra.as_str())];
+            let toml = make_raw_audio_toml(&overrides);
+            let dir = write_temp_file("manifest.toml", &toml);
+            let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
+            assert!(matches!(err, SparrowEngineError::InvalidManifest(_)));
+            assert!(err.to_string().contains(field));
+        }
+    }
+
+    #[test]
+    fn test_audio_rejects_unsupported_preprocess_postprocess_pairs() {
+        let cases = [
+            (
+                make_audio_toml(&[("postmethod", r#""softmax""#), ("post_extra", "")]),
+                "unsupported audio",
+            ),
+            (
+                make_raw_audio_toml(&[
+                    ("postmethod", r#""sigmoid""#),
+                    ("post_extra", "confidence_threshold = 0.5"),
+                ]),
+                "unsupported audio",
+            ),
+            (
+                make_raw_audio_toml(&[("postmethod", r#""yolo_e2e""#)]),
+                "unsupported audio",
+            ),
+        ];
+        for (toml, expected) in cases {
+            let dir = write_temp_file("manifest.toml", &toml);
+            let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
+            assert!(matches!(err, SparrowEngineError::InvalidManifest(_)));
+            assert!(
+                err.to_string().contains(expected),
+                "expected {expected:?} in {err}"
+            );
+        }
     }
 
     #[test]
@@ -2076,7 +2268,10 @@ confidence_threshold = 0.2
         match err {
             SparrowEngineError::InvalidManifest(msg) => {
                 assert!(msg.contains("Unknown layout"), "got: {msg}");
-                assert!(msg.contains("bogus"), "error must echo the bad value: {msg}");
+                assert!(
+                    msg.contains("bogus"),
+                    "error must echo the bad value: {msg}"
+                );
             }
             other => panic!("expected InvalidManifest, got {other:?}"),
         }

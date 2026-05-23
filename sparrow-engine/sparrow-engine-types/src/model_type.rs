@@ -175,7 +175,9 @@ mod phase_a_r1_model_type_tests {
         // Letterbox + {YoloE2e, MegadetV5a, HeatmapPeaks, Sigmoid} → Detector when Standard.
         let postprocess_methods: Vec<PostprocessMethod> = vec![
             PostprocessMethod::YoloE2e,
-            PostprocessMethod::MegadetV5a { iou_threshold: 0.45 },
+            PostprocessMethod::MegadetV5a {
+                iou_threshold: 0.45,
+            },
             heatmap(),
             sigmoid(),
         ];
@@ -200,7 +202,9 @@ mod phase_a_r1_model_type_tests {
         // Same matrix as above but Overhead subtype must promote to OverheadDetector.
         let postprocess_methods: Vec<PostprocessMethod> = vec![
             PostprocessMethod::YoloE2e,
-            PostprocessMethod::MegadetV5a { iou_threshold: 0.45 },
+            PostprocessMethod::MegadetV5a {
+                iou_threshold: 0.45,
+            },
             heatmap(),
             sigmoid(),
         ];
@@ -234,7 +238,9 @@ mod phase_a_r1_model_type_tests {
         ];
         let postprocesses: Vec<PostprocessMethod> = vec![
             PostprocessMethod::YoloE2e,
-            PostprocessMethod::MegadetV5a { iou_threshold: 0.45 },
+            PostprocessMethod::MegadetV5a {
+                iou_threshold: 0.45,
+            },
             heatmap(),
             PostprocessMethod::Softmax,
             sigmoid(),
@@ -265,7 +271,11 @@ mod phase_a_r1_model_type_tests {
     #[test]
     fn audio_classifier_when_raw_audio_plus_softmax() {
         assert_eq!(
-            derive_model_type(&raw_audio(), &PostprocessMethod::Softmax, ModelSubtype::Standard),
+            derive_model_type(
+                &raw_audio(),
+                &PostprocessMethod::Softmax,
+                ModelSubtype::Standard
+            ),
             ModelType::AudioClassifier,
             "RawAudio + Softmax should derive AudioClassifier (Perch 2)"
         );
@@ -276,7 +286,7 @@ mod phase_a_r1_model_type_tests {
         assert_eq!(
             derive_model_type(&raw_audio(), &sigmoid(), ModelSubtype::Standard),
             ModelType::AudioDetector,
-            "RawAudio + Sigmoid should derive AudioDetector"
+            "RawAudio + Sigmoid derives AudioDetector for legacy direct callers but is rejected by manifest validation"
         );
     }
 }

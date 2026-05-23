@@ -96,7 +96,10 @@ fn validate_pipeline_ids_from_available(
 
     match (detector_type, classifier_type) {
         (Some(detector), Some(classifier)) => {
-            sparrow_engine::pipeline_compat::validate_pipeline_compat(Some(detector), Some(classifier))
+            sparrow_engine::pipeline_compat::validate_pipeline_compat(
+                Some(detector),
+                Some(classifier),
+            )
         }
         _ => Ok(()),
     }
@@ -1067,7 +1070,10 @@ fn bbox_visualization_model_type() -> ModelType {
     ModelType::Detector
 }
 
-fn visualize_render_opts(model_type: ModelType, show_labels: bool) -> sparrow_engine::viz::RenderOpts {
+fn visualize_render_opts(
+    model_type: ModelType,
+    show_labels: bool,
+) -> sparrow_engine::viz::RenderOpts {
     sparrow_engine::viz::RenderOpts {
         model_type,
         show_labels,
@@ -1268,7 +1274,8 @@ fn export_results(
     }
 
     // Convert all items to native DetectResult.
-    let mut native_entries: Vec<(PathBuf, sparrow_engine::DetectResult)> = Vec::with_capacity(items.len());
+    let mut native_entries: Vec<(PathBuf, sparrow_engine::DetectResult)> =
+        Vec::with_capacity(items.len());
 
     for (path_str, result_obj) in &items {
         let path = PathBuf::from(path_str);
@@ -1281,8 +1288,9 @@ fn export_results(
             let r = r.get();
             let native_pr = pypipeline_to_native(r);
             let path_ref: &Path = &path;
-            let converted =
-                sparrow_engine::export::pipeline_results_to_detect_entries(&[(path_ref, &native_pr)]);
+            let converted = sparrow_engine::export::pipeline_results_to_detect_entries(&[(
+                path_ref, &native_pr,
+            )]);
             for (p, dr) in converted {
                 native_entries.push((p, dr));
             }
@@ -1625,6 +1633,61 @@ mod tests {
         assert_eq!(dst.classes[0].class_idx, 7);
         assert_eq!(dst.classes[0].label.as_deref(), Some("sparrow"));
         assert_eq!(dst.classes[0].probability, 0.91);
+    }
+
+    #[test]
+    fn convert_audio_segment_preserves_top_k_order_and_none_labels() {
+        let src = sparrow_engine::AudioSegment {
+            start_time_s: 0.0,
+            end_time_s: 5.0,
+            confidence: 0.7,
+            classes: vec![
+                sparrow_engine::AudioClass {
+                    class_idx: 10,
+                    label: Some("sparrow".to_owned()),
+                    probability: 0.7,
+                },
+                sparrow_engine::AudioClass {
+                    class_idx: 11,
+                    label: None,
+                    probability: 0.2,
+                },
+                sparrow_engine::AudioClass {
+                    class_idx: 12,
+                    label: Some("warbler".to_owned()),
+                    probability: 0.1,
+                },
+            ],
+        };
+
+        let dst = convert_audio_segment(&src);
+
+        assert_eq!(dst.classes.len(), 3);
+        assert_eq!(dst.confidence, dst.classes[0].probability);
+        assert_eq!(dst.classes[0].class_idx, 10);
+        assert_eq!(dst.classes[0].label.as_deref(), Some("sparrow"));
+        assert_eq!(dst.classes[1].class_idx, 11);
+        assert_eq!(dst.classes[1].label, None);
+        assert_eq!(dst.classes[1].probability, 0.2);
+        assert_eq!(dst.classes[2].class_idx, 12);
+        assert_eq!(dst.classes[2].label.as_deref(), Some("warbler"));
+    }
+
+    #[test]
+    fn convert_audio_segment_preserves_empty_classes() {
+        let src = sparrow_engine::AudioSegment {
+            start_time_s: 0.0,
+            end_time_s: 1.0,
+            confidence: 0.0,
+            classes: Vec::new(),
+        };
+
+        let dst = convert_audio_segment(&src);
+
+        assert_eq!(dst.start_time_s, 0.0);
+        assert_eq!(dst.end_time_s, 1.0);
+        assert_eq!(dst.confidence, 0.0);
+        assert!(dst.classes.is_empty());
     }
 
     // --- convert_model_type ---

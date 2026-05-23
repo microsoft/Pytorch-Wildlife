@@ -365,7 +365,8 @@ struct ClassifyResultOwned {
 
 fn classify_result_to_c(result: ClassifyResult) -> *mut SparrowEngineClassifyResult {
     let mut labels: Vec<CString> = Vec::with_capacity(result.classifications.len());
-    let mut c_cls: Vec<SparrowEngineClassification> = Vec::with_capacity(result.classifications.len());
+    let mut c_cls: Vec<SparrowEngineClassification> =
+        Vec::with_capacity(result.classifications.len());
 
     for cls in &result.classifications {
         let label_c = CString::new(cls.label.replace('\0', "")).unwrap_or_default();
@@ -435,7 +436,8 @@ struct PipelineResultOwned {
 
 fn pipeline_result_to_c(result: PipelineResult) -> *mut SparrowEnginePipelineResult {
     let mut labels: Vec<CString> = Vec::new();
-    let mut c_pipe: Vec<SparrowEnginePipelineDetection> = Vec::with_capacity(result.detections.len());
+    let mut c_pipe: Vec<SparrowEnginePipelineDetection> =
+        Vec::with_capacity(result.detections.len());
 
     for pd in &result.detections {
         // Detection label
@@ -550,8 +552,12 @@ fn audio_result_to_c(result: AudioDetectResult) -> *mut SparrowEngineAudioResult
         },
         _owner: owned,
     });
-    // Point at stable heap location.
-    combined.header.data = combined._owner.segments.as_ptr();
+    // Point at stable heap location when non-empty; expose null for len=0.
+    combined.header.data = if combined._owner.segments.is_empty() {
+        ptr::null()
+    } else {
+        combined._owner.segments.as_ptr()
+    };
 
     let ptr = Box::into_raw(combined);
     ptr as *mut SparrowEngineAudioResult
@@ -637,7 +643,11 @@ fn audio_result_v2_to_c(result: AudioDetectResult) -> *mut SparrowEngineAudioRes
         },
         _owner: owned,
     });
-    combined.header.data = combined._owner.segments.as_ptr();
+    combined.header.data = if combined._owner.segments.is_empty() {
+        ptr::null()
+    } else {
+        combined._owner.segments.as_ptr()
+    };
 
     let ptr = Box::into_raw(combined);
     ptr as *mut SparrowEngineAudioResult_v2
@@ -714,15 +724,18 @@ fn parse_config_json(json_str: &str) -> Result<EngineConfig, String> {
 /// # Safety
 /// `config_json` must be a valid, non-null, null-terminated UTF-8 string.
 #[no_mangle]
-pub unsafe extern "C" fn sparrow_engine_engine_new(config_json: *const c_char) -> *mut SparrowEngine {
+pub unsafe extern "C" fn sparrow_engine_engine_new(
+    config_json: *const c_char,
+) -> *mut SparrowEngine {
     clear_last_error();
-    let result =
-        std::panic::catch_unwind(AssertUnwindSafe(|| -> Result<*mut SparrowEngine, String> {
+    let result = std::panic::catch_unwind(AssertUnwindSafe(
+        || -> Result<*mut SparrowEngine, String> {
             let json_str = cstr_to_str(config_json)?;
             let config = parse_config_json(json_str)?;
             let engine = Engine::new(config).map_err(|e| e.to_string())?;
             Ok(Box::into_raw(Box::new(engine)) as *mut SparrowEngine)
-        }));
+        },
+    ));
     match result {
         Ok(Ok(ptr)) => ptr,
         Ok(Err(e)) => {
@@ -769,8 +782,8 @@ pub unsafe extern "C" fn sparrow_engine_load_model(
     manifest_path: *const c_char,
 ) -> *mut SparrowEngineModel {
     clear_last_error();
-    let result =
-        std::panic::catch_unwind(AssertUnwindSafe(|| -> Result<*mut SparrowEngineModel, String> {
+    let result = std::panic::catch_unwind(AssertUnwindSafe(
+        || -> Result<*mut SparrowEngineModel, String> {
             if engine.is_null() {
                 return Err("engine pointer is null".to_string());
             }
@@ -778,7 +791,8 @@ pub unsafe extern "C" fn sparrow_engine_load_model(
             let path_str = cstr_to_str(manifest_path)?;
             let handle = engine_ref.load_model(path_str).map_err(|e| e.to_string())?;
             Ok(Box::into_raw(Box::new(handle)) as *mut SparrowEngineModel)
-        }));
+        },
+    ));
     match result {
         Ok(Ok(ptr)) => ptr,
         Ok(Err(e)) => {
@@ -809,8 +823,8 @@ pub unsafe extern "C" fn sparrow_engine_load_model_by_id(
     model_id: *const c_char,
 ) -> *mut SparrowEngineModel {
     clear_last_error();
-    let result =
-        std::panic::catch_unwind(AssertUnwindSafe(|| -> Result<*mut SparrowEngineModel, String> {
+    let result = std::panic::catch_unwind(AssertUnwindSafe(
+        || -> Result<*mut SparrowEngineModel, String> {
             if engine.is_null() {
                 return Err("engine pointer is null".to_string());
             }
@@ -820,7 +834,8 @@ pub unsafe extern "C" fn sparrow_engine_load_model_by_id(
                 .get_or_load_model(id)
                 .map_err(|e| e.to_string())?;
             Ok(Box::into_raw(Box::new(handle)) as *mut SparrowEngineModel)
-        }));
+        },
+    ));
     match result {
         Ok(Ok(ptr)) => ptr,
         Ok(Err(e)) => {
@@ -926,7 +941,9 @@ pub unsafe extern "C" fn sparrow_engine_load_pipeline_by_id(
             -1
         }
         Err(_panic) => {
-            set_last_error("internal error: panic in sparrow_engine_load_pipeline_by_id".to_string());
+            set_last_error(
+                "internal error: panic in sparrow_engine_load_pipeline_by_id".to_string(),
+            );
             -1
         }
     }
@@ -1423,7 +1440,9 @@ pub unsafe extern "C" fn sparrow_engine_detect_audio_streaming(
             ptr::null_mut()
         }
         Err(_panic) => {
-            set_last_error("internal error: panic in sparrow_engine_detect_audio_streaming".to_string());
+            set_last_error(
+                "internal error: panic in sparrow_engine_detect_audio_streaming".to_string(),
+            );
             ptr::null_mut()
         }
     }
@@ -1456,7 +1475,9 @@ pub unsafe extern "C" fn sparrow_engine_audio_result_free(ptr: *mut SparrowEngin
 /// # Safety
 /// `ptr` must be a pointer returned by `sparrow_engine_detect_audio_v2`, or null.
 #[no_mangle]
-pub unsafe extern "C" fn sparrow_engine_audio_result_v2_free(ptr: *mut SparrowEngineAudioResult_v2) {
+pub unsafe extern "C" fn sparrow_engine_audio_result_v2_free(
+    ptr: *mut SparrowEngineAudioResult_v2,
+) {
     clear_last_error();
     if ptr.is_null() {
         return;
@@ -1492,7 +1513,9 @@ pub unsafe extern "C" fn sparrow_engine_detections_free(ptr: *mut SparrowEngineD
 /// # Safety
 /// `ptr` must be a pointer returned by `sparrow_engine_classify`, or null.
 #[no_mangle]
-pub unsafe extern "C" fn sparrow_engine_classify_result_free(ptr: *mut SparrowEngineClassifyResult) {
+pub unsafe extern "C" fn sparrow_engine_classify_result_free(
+    ptr: *mut SparrowEngineClassifyResult,
+) {
     clear_last_error();
     if ptr.is_null() {
         return;
@@ -1510,7 +1533,9 @@ pub unsafe extern "C" fn sparrow_engine_classify_result_free(ptr: *mut SparrowEn
 /// # Safety
 /// `ptr` must be a pointer returned by `sparrow_engine_run_pipeline`, or null.
 #[no_mangle]
-pub unsafe extern "C" fn sparrow_engine_pipeline_result_free(ptr: *mut SparrowEnginePipelineResult) {
+pub unsafe extern "C" fn sparrow_engine_pipeline_result_free(
+    ptr: *mut SparrowEnginePipelineResult,
+) {
     clear_last_error();
     if ptr.is_null() {
         return;
@@ -1711,7 +1736,10 @@ pub unsafe extern "C" fn sparrow_engine_hash_result_free(ptr: *mut c_char) {
 /// # Safety
 /// `image` must point to `len` bytes of encoded image data (JPEG/PNG).
 #[no_mangle]
-pub unsafe extern "C" fn sparrow_engine_day_night(image: *const u8, len: usize) -> SparrowEngineDayNightResultC {
+pub unsafe extern "C" fn sparrow_engine_day_night(
+    image: *const u8,
+    len: usize,
+) -> SparrowEngineDayNightResultC {
     clear_last_error();
     let err_result = SparrowEngineDayNightResultC {
         status: -1,
@@ -1880,7 +1908,9 @@ pub unsafe extern "C" fn sparrow_engine_engine_verify_model(
             ptr::null_mut()
         }
         Err(_) => {
-            set_last_error("internal error: panic in sparrow_engine_engine_verify_model".to_string());
+            set_last_error(
+                "internal error: panic in sparrow_engine_engine_verify_model".to_string(),
+            );
             ptr::null_mut()
         }
     }
@@ -2116,6 +2146,103 @@ mod tests {
                     }
                 }
             }
+
+            sparrow_engine_audio_result_v2_free(ptr);
+        }
+    }
+
+    #[test]
+    fn audio_result_to_c_uses_null_data_for_empty_segments() {
+        let result = AudioDetectResult {
+            segments: Vec::new(),
+            duration_s: 0.0,
+            sample_rate: 48_000,
+            processing_time_ms: 0.0,
+        };
+
+        let ptr = audio_result_to_c(result);
+        assert!(!ptr.is_null());
+
+        unsafe {
+            let header = &*ptr;
+            assert_eq!(header.len, 0);
+            assert!(header.data.is_null());
+            sparrow_engine_audio_result_free(ptr);
+        }
+    }
+
+    #[test]
+    fn audio_result_v2_to_c_handles_empty_and_zero_class_segments() {
+        let empty = AudioDetectResult {
+            segments: Vec::new(),
+            duration_s: 0.0,
+            sample_rate: 48_000,
+            processing_time_ms: 0.0,
+        };
+        let empty_ptr = audio_result_v2_to_c(empty);
+        assert!(!empty_ptr.is_null());
+        unsafe {
+            let header = &*empty_ptr;
+            assert_eq!(header.len, 0);
+            assert!(header.data.is_null());
+            sparrow_engine_audio_result_v2_free(empty_ptr);
+        }
+
+        let result = AudioDetectResult {
+            segments: vec![
+                AudioSegment {
+                    start_time_s: 1.0,
+                    end_time_s: 2.5,
+                    confidence: 0.9,
+                    classes: vec![
+                        AudioClass {
+                            class_idx: 7,
+                            label: Some("owl\0night".to_string()),
+                            probability: 0.9,
+                        },
+                        AudioClass {
+                            class_idx: 3,
+                            label: None,
+                            probability: 0.2,
+                        },
+                    ],
+                },
+                AudioSegment {
+                    start_time_s: 3.0,
+                    end_time_s: 4.0,
+                    confidence: 0.0,
+                    classes: Vec::new(),
+                },
+            ],
+            duration_s: 10.0,
+            sample_rate: 48_000,
+            processing_time_ms: 12.5,
+        };
+
+        let ptr = audio_result_v2_to_c(result);
+        assert!(!ptr.is_null());
+
+        unsafe {
+            let header = &*ptr;
+            assert_eq!(header.len, 2);
+            assert!(!header.data.is_null());
+
+            let segments = std::slice::from_raw_parts(header.data, header.len);
+            assert_eq!(segments[0].classes_len, 2);
+            assert!(!segments[0].classes.is_null());
+            let classes = std::slice::from_raw_parts(segments[0].classes, segments[0].classes_len);
+            assert_eq!(classes[0].class_idx, 7);
+            assert_eq!(
+                CStr::from_ptr(classes[0].label).to_str().unwrap(),
+                "owlnight"
+            );
+            assert_eq!(classes[0].probability, 0.9);
+            assert_eq!(classes[1].class_idx, 3);
+            assert!(classes[1].label.is_null());
+            assert_eq!(classes[1].probability, 0.2);
+
+            assert_eq!(segments[1].classes_len, 0);
+            assert!(segments[1].classes.is_null());
 
             sparrow_engine_audio_result_v2_free(ptr);
         }

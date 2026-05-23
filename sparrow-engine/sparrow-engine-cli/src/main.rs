@@ -1510,6 +1510,13 @@ const MD_AUDIOBIRDS_DEFAULT_WINDOW_S: f32 = 1.0;
 /// `[audio.window] stride_s = 0.3` (2026-05-05).
 const MD_AUDIOBIRDS_DEFAULT_STRIDE_S: f32 = 0.3;
 
+fn audio_visualize_output_filter_threshold(
+    cli_threshold: Option<f32>,
+    manifest_threshold: Option<f32>,
+) -> Option<f32> {
+    manifest_threshold.map(|threshold| cli_threshold.unwrap_or(threshold))
+}
+
 fn cmd_detect_audio(
     device_str: &str,
     model_dir: &Option<PathBuf>,
@@ -1544,21 +1551,18 @@ fn cmd_detect_audio(
     ));
     let merge_gap_s = stride_s + 1e-3;
 
-    // When --visualize is set we want layers 02 (segments) and 03 (heatmap)
-    // to render the FULL per-window confidence distribution, not just the
-    // windows that survive the production threshold filter (default 0.9).
-    // Strategy: run inference at threshold=0 so result.segments contains
-    // every sliding-window output; remember the user's intended threshold
-    // (CLI override > manifest default > 0.5) so we can post-filter the
-    // JSON / CSV / merged-range output back to production semantics. The
-    // unfiltered result feeds visualization; the filtered view feeds output.
-    //
-    // Without this dance the heatmap saturates uniform-yellow because every
-    // surviving segment lands in the [0.9, 1.0] band of the inferno LUT.
-    let output_threshold: f32 = args
-        .threshold
-        .unwrap_or_else(|| handle.audio_confidence_threshold().unwrap_or(0.5));
-    let inference_threshold = if args.visualize {
+    // When --visualize is set for thresholded sigmoid detectors, layers 02
+    // (segments) and 03 (heatmap) need the full per-window confidence
+    // distribution. Run those detectors at threshold=0, then post-filter
+    // JSON / CSV / merged-range output back to the user's intended detector
+    // threshold (CLI override > manifest default). Thresholdless softmax
+    // classifiers such as Perch 2 have no production threshold to restore, so
+    // visualization must not add a CLI-only 0.5 output filter.
+    let output_filter_threshold = audio_visualize_output_filter_threshold(
+        args.threshold,
+        handle.audio_confidence_threshold(),
+    );
+    let inference_threshold = if args.visualize && output_filter_threshold.is_some() {
         Some(0.0)
     } else {
         args.threshold
@@ -1597,26 +1601,28 @@ fn cmd_detect_audio(
 
         match detect_audio::detect_audio(&handle, &audio, &opts) {
             Ok(result) => {
-                // When --visualize lowers the inference threshold to 0 we
-                // post-filter to the user's intended threshold so JSON / CSV
-                // / merged-range output preserves production semantics. The
-                // unfiltered `result` still feeds visualization below so the
-                // heatmap shows the FULL confidence distribution (not just
-                // windows surviving the production threshold).
+                // For thresholded detectors, --visualize lowers inference to
+                // 0 and this view restores the intended machine-readable
+                // output threshold. Thresholdless classifiers skip the filter
+                // so visualization does not change printed output cardinality.
                 let output_result;
                 let output_view: &AudioDetectResult = if args.visualize {
-                    output_result = AudioDetectResult {
-                        segments: result
-                            .segments
-                            .iter()
-                            .filter(|s| s.confidence >= output_threshold)
-                            .cloned()
-                            .collect(),
-                        duration_s: result.duration_s,
-                        sample_rate: result.sample_rate,
-                        processing_time_ms: result.processing_time_ms,
-                    };
-                    &output_result
+                    if let Some(output_threshold) = output_filter_threshold {
+                        output_result = AudioDetectResult {
+                            segments: result
+                                .segments
+                                .iter()
+                                .filter(|s| s.confidence >= output_threshold)
+                                .cloned()
+                                .collect(),
+                            duration_s: result.duration_s,
+                            sample_rate: result.sample_rate,
+                            processing_time_ms: result.processing_time_ms,
+                        };
+                        &output_result
+                    } else {
+                        &result
+                    }
                 } else {
                     &result
                 };
@@ -2289,6 +2295,23 @@ mod tests {
             onnx_sha256: None,
             onnx_size_bytes: None,
         }
+    }
+
+    #[test]
+    fn audio_visualize_filter_threshold_only_for_thresholded_detectors() {
+        assert_eq!(
+            audio_visualize_output_filter_threshold(None, Some(0.9)),
+            Some(0.9)
+        );
+        assert_eq!(
+            audio_visualize_output_filter_threshold(Some(0.4), Some(0.9)),
+            Some(0.4)
+        );
+        assert_eq!(audio_visualize_output_filter_threshold(None, None), None);
+        assert_eq!(
+            audio_visualize_output_filter_threshold(Some(0.4), None),
+            None
+        );
     }
 
     #[test]
