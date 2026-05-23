@@ -115,10 +115,10 @@ The catalog splits into four families (detectors, heatmap detectors, classifiers
 
 | Model ID | Input window | Classes | ONNX | License |
 |---|---|---|---|---|
-| `MD_AudioBirds_V1` | 1 s @ 48 kHz, mel spectrogram (0.3 s stride) | 1 (bird vs no-bird) | 81 MB | see note |
+| `MD_AudioBirds_V1` | 1 s @ 48 kHz, mel spectrogram (0.3 s stride) | 1 (bird vs no-bird) | 81 MB | MIT |
 | `perch-v2` | 5 s @ 32 kHz raw audio | 14795 | 391 MB | Apache 2.0 |
 
-- `MD_AudioBirds_V1` is the sparrow-engine default audio detector — a lightweight binary bird-vs-no-bird model used in benchmarks and Phase 4.x manual tests. Sliding-window mel-spectrogram front-end (Slaney mel scale + Slaney filter norm). Ships with an FP16 variant alongside the FP32 ONNX. **Bundle status**: currently lives in `sparrow-engine`'s `test_files/sparrow_engine_models/md-audiobirds-v1/`; not yet staged into the v0.1.0 public Zenodo bundle (needs upstream `LICENSE.md` + `MODEL_CARD.md` sourcing before release).
+- `MD_AudioBirds_V1` is the sparrow-engine default audio detector — a lightweight binary bird-vs-no-bird model used in benchmarks and Phase 4.x manual tests. Sliding-window mel-spectrogram front-end (Slaney mel scale + Slaney filter norm). Ships in the v0.1.0 Zenodo bundle as FP32; the FP16 conversion path is in `sparrow-engine/tools/convert_fp16.py` and is parity-verified against the FP32 reference (Phase 3.8 Step 2 post-STRETCH audit, 2026-05-05).
 - `perch-v2` is Google Perch 2, a global bird-vocalisation classifier (Conformer encoder) with an in-graph mel front-end. Takes 160000-sample windows of raw audio; emits softmax over 14795 classes (birds + non-bird FSD50K labels).
 
 #### License summary
@@ -126,7 +126,7 @@ The catalog splits into four families (detectors, heatmap detectors, classifiers
 - **Ultralytics AGPL-3.0** (7 models): MDv6 × 2, MDv5a, the 3 AI4G regional YOLOs, plus `deepfaune-yolo8s` (which also intersects CC-BY-NC-SA 4.0).
 - **CC-BY-NC-SA 4.0** (3 models): `deepfaune-yolo8s`, `Deepfaune-Europe`, `Deepfaune-New-England`.
 - **Apache 2.0** (2 models): `SpeciesNet-Crop`, `perch-v2`.
-- **MIT** (4 models): `AI4G-Amazon-V2`, `AI4G-Serengeti`, `OWL`, `HerdNet_General_Dataset_2022`.
+- **MIT** (5 models): `AI4G-Amazon-V2`, `AI4G-Serengeti`, `OWL`, `HerdNet_General_Dataset_2022`, `MD_AudioBirds_V1`.
 
 **Commercial users of YOLO-based detectors** should obtain an [Ultralytics Enterprise License](https://www.ultralytics.com/license).
 
