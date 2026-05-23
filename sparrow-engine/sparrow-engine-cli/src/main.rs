@@ -244,6 +244,20 @@ struct DetectAudioArgs {
     /// Diagnostic for verifying window placement and per-window confidence.
     #[arg(long)]
     show_windows: bool,
+    /// Override the sliding-window stride (in seconds). The manifest provides
+    /// a default; this flag is the runtime override. Stride is engine policy:
+    /// it never has to match a model architecture constraint, so any positive
+    /// value is accepted (validated > 0).
+    #[arg(long)]
+    stride: Option<f32>,
+    /// Override the sliding-window segment duration (in seconds). The
+    /// manifest provides a default; this flag is the runtime override.
+    /// Honored by mel-spectrogram audio models with dynamic ONNX time-axis
+    /// (e.g. md-audiobirds-v1). Silently ignored by raw-audio classifiers
+    /// whose ONNX input is fixed-size (e.g. perch-v2's `[batch, 160000]`) —
+    /// the window is an upstream architecture constraint for those models.
+    #[arg(long = "segment-duration")]
+    segment_duration_s: Option<f32>,
 }
 
 #[derive(clap::Args)]
@@ -1529,6 +1543,18 @@ fn cmd_detect_audio(
     }
 
     validate_viz_args(args.visualize, &args.output_dir)?;
+    // Validate user-supplied stride / segment-duration overrides. Match the
+    // sparrow-engine-server policy (`handlers/audio.rs`): finite + positive.
+    if let Some(s) = args.stride {
+        if !s.is_finite() || s <= 0.0 {
+            return Err("--stride must be a finite positive number".into());
+        }
+    }
+    if let Some(d) = args.segment_duration_s {
+        if !d.is_finite() || d <= 0.0 {
+            return Err("--segment-duration must be a finite positive number".into());
+        }
+    }
     let viz_common_prefix = if args.visualize {
         longest_common_prefix(&files)
     } else {
@@ -1540,15 +1566,18 @@ fn cmd_detect_audio(
     let handle = engine.get_or_load_model(model_id)?;
     let audio_config = handle.audio_preprocess_config();
 
-    // Resolve window + stride from the manifest. Falls back to MD_AudioBirds
-    // defaults if the model doesn't expose sliding-window params (e.g., a
-    // future single-shot audio model). The merge-gap is `stride + 1ms` so
-    // strictly-adjacent windows merge while a true silence gap ≥ stride
-    // splits the range.
-    let (window_s, stride_s) = handle.audio_window_stride().unwrap_or((
+    // Resolve window + stride from the manifest, then apply CLI overrides.
+    // The manifest provides defaults; `--stride` / `--segment-duration`
+    // override them at runtime. Falls back to MD_AudioBirds defaults if the
+    // model doesn't expose sliding-window params (e.g., a future single-shot
+    // audio model). The merge-gap is `stride + 1ms` so strictly-adjacent
+    // windows merge while a true silence gap ≥ stride splits the range.
+    let (manifest_window_s, manifest_stride_s) = handle.audio_window_stride().unwrap_or((
         MD_AUDIOBIRDS_DEFAULT_WINDOW_S,
         MD_AUDIOBIRDS_DEFAULT_STRIDE_S,
     ));
+    let window_s = args.segment_duration_s.unwrap_or(manifest_window_s);
+    let stride_s = args.stride.unwrap_or(manifest_stride_s);
     let merge_gap_s = stride_s + 1e-3;
 
     // When --visualize is set for thresholded sigmoid detectors, layers 02
@@ -1570,7 +1599,8 @@ fn cmd_detect_audio(
 
     let opts = AudioDetectOpts {
         confidence_threshold: inference_threshold,
-        ..Default::default()
+        segment_duration_s: args.segment_duration_s,
+        stride_s: args.stride,
     };
 
     let total = files.len();

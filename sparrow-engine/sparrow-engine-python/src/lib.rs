@@ -761,20 +761,48 @@ impl PyEngine {
     }
 
     /// Run audio detection on a list of audio file paths.
-    #[pyo3(signature = (paths, model, threshold=None, progress_callback=None))]
+    ///
+    /// `stride_s` and `segment_duration_s` are runtime overrides for the
+    /// manifest defaults. Stride is always engine-controlled. Segment
+    /// duration is honored by mel-spectrogram audio models with dynamic
+    /// ONNX time-axis (e.g. md-audiobirds-v1); silently ignored by
+    /// raw-audio classifiers whose ONNX input is fixed-size (e.g.
+    /// perch-v2's `[batch, 160000]`) — the window is an upstream
+    /// architecture constraint for those models.
+    #[pyo3(signature = (paths, model, threshold=None, stride_s=None, segment_duration_s=None, progress_callback=None))]
+    #[allow(clippy::too_many_arguments)]
     fn detect_audio(
         &self,
         py: Python<'_>,
         paths: Vec<String>,
         model: &str,
         threshold: Option<f32>,
+        stride_s: Option<f32>,
+        segment_duration_s: Option<f32>,
         progress_callback: Option<PyObject>,
     ) -> PyResult<Vec<AudioResult>> {
+        // Validate user overrides up-front, matching sparrow-engine-server
+        // (`handlers/audio.rs`) and the CLI (`detect-audio --stride/--segment-duration`).
+        if let Some(s) = stride_s {
+            if !s.is_finite() || s <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "stride_s must be a finite positive number",
+                ));
+            }
+        }
+        if let Some(d) = segment_duration_s {
+            if !d.is_finite() || d <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "segment_duration_s must be a finite positive number",
+                ));
+            }
+        }
         let engine = &self.engine;
         let model_id = model.to_owned();
         let opts = AudioDetectOpts {
             confidence_threshold: threshold,
-            ..Default::default()
+            segment_duration_s,
+            stride_s,
         };
         let total = paths.len();
 
