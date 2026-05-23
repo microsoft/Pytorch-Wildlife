@@ -1054,7 +1054,7 @@ mod tests {
             start_time_s: 0.0,
             end_time_s: 5.0,
             confidence: 0.9,
-        classes: Vec::new(),
+            classes: Vec::new(),
         }];
         let bad_opts = HeatmapOpts {
             alpha_min: 200,
@@ -1080,7 +1080,7 @@ mod tests {
             start_time_s: 0.0,
             end_time_s: 5.0,
             confidence: 0.9,
-        classes: Vec::new(),
+            classes: Vec::new(),
         }];
         let bad_opts = HeatmapOpts {
             alpha_min: 200,
@@ -1099,7 +1099,7 @@ mod tests {
             start_time_s: 0.0,
             end_time_s: 5.0,
             confidence: 0.9,
-        classes: Vec::new(),
+            classes: Vec::new(),
         }];
         let result = render_audio_heatmap(&spec, &segments, 10.0, &HeatmapOpts::default());
         assert_eq!(result.width(), 200);
@@ -1112,7 +1112,7 @@ mod tests {
                 start_time_s: 2.0,
                 end_time_s: 4.0,
                 confidence: 0.8,
-            classes: Vec::new(),
+                classes: Vec::new(),
             }],
             duration_s: 10.0,
             sample_rate: 48000,
@@ -1132,7 +1132,7 @@ mod tests {
             start_time_s: 15.0, // beyond duration
             end_time_s: 20.0,
             confidence: 0.9,
-        classes: Vec::new(),
+            classes: Vec::new(),
         }];
         let result = render_audio_heatmap(&spec, &segments, 10.0, &HeatmapOpts::default());
         assert_eq!(result.width(), 100);
@@ -1147,7 +1147,7 @@ mod tests {
             start_time_s: 0.0,
             end_time_s: 1.0,
             confidence: 0.0,
-        classes: Vec::new(),
+            classes: Vec::new(),
         }];
         let opts = HeatmapOpts {
             emphasis: Emphasis::Pow(-1.0),
@@ -1165,7 +1165,7 @@ mod tests {
             start_time_s: 0.0,
             end_time_s: 1.0,
             confidence: 0.0,
-        classes: Vec::new(),
+            classes: Vec::new(),
         }];
         let opts = HeatmapOpts {
             emphasis: Emphasis::Pow(-1.0),
