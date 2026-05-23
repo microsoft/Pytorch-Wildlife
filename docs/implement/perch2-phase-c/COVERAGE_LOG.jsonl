@@ -13,3 +13,8 @@
 {"round":2,"agent":"inquisitor","file":"ffi-v2-audio-gpu","action":"verified","report_anchor":"round_02/inquisitor_review.md#ffi-v2-audio-gpu"}
 {"round":2,"agent":"inquisitor","file":"server-audio-classes","action":"verified","report_anchor":"round_02/inquisitor_review.md#server-audio-classes"}
 {"round":2,"agent":"inquisitor","file":"python-audio-classes","action":"verified","report_anchor":"round_02/inquisitor_review.md#python-audio-classes"}
+{"round":3,"agent":"inquisitor","file":"cli-multiclass-display","action":"verified","report_anchor":"round_03/inquisitor_review.md#cli-multiclass-display"}
+{"round":3,"agent":"inquisitor","file":"ffi-v2-audio-cpu","action":"verified","report_anchor":"round_03/inquisitor_review.md#ffi-v2-audio-cpu"}
+{"round":3,"agent":"inquisitor","file":"ffi-v2-audio-gpu","action":"verified","report_anchor":"round_03/inquisitor_review.md#ffi-v2-audio-gpu"}
+{"round":3,"agent":"inquisitor","file":"server-audio-classes","action":"verified","report_anchor":"round_03/inquisitor_review.md#server-audio-classes"}
+{"round":3,"agent":"inquisitor","file":"python-audio-classes","action":"verified","report_anchor":"round_03/inquisitor_review.md#python-audio-classes"}
