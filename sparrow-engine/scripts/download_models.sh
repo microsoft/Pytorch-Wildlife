@@ -2,13 +2,13 @@
 # scripts/download_models.sh — download the sparrow-engine model zoo from Zenodo.
 #
 # Downloads the ONNX model bundles from the public Zenodo record
-# (https://doi.org/10.5281/zenodo.20351248, concept DOI 10.5281/zenodo.20348978
+# (https://doi.org/10.5281/zenodo.20358586, concept DOI 10.5281/zenodo.20348978
 # which always resolves to the latest version), verifies SHA-256 integrity,
 # and unpacks each model into a layout directly loadable by sparrow-engine
 # (i.e. `<dest>/<model_id>/manifest.toml` + `model.onnx` + `labels.txt`).
 #
 # Usage:
-#   bash scripts/download_models.sh                    # all 15 models to ./models/
+#   bash scripts/download_models.sh                    # all 16 models to ./models/
 #   bash scripts/download_models.sh --dest /path       # custom destination dir
 #   bash scripts/download_models.sh MDV6-yolov10-e ... # specific model(s) only
 #   bash scripts/download_models.sh --list             # show available models
@@ -17,7 +17,7 @@
 #
 # After the script completes, point sparrow-engine at the directory:
 #   export SPARROW_ENGINE_MODELS_DIR=$(realpath ./models)
-#   spe list-models     # lists the 14 catalog entries
+#   spe list-models     # lists the 16 catalog entries
 #   spe detect --model MDV6-yolov10-e --image /path/to/image.jpg
 #
 # Override the Zenodo record (e.g. to test a newer version):
@@ -26,12 +26,13 @@
 set -euo pipefail
 
 # ---- Constants ----
-ZENODO_RECORD="${ZENODO_RECORD:-20351248}"
+ZENODO_RECORD="${ZENODO_RECORD:-20358586}"
 ZENODO_DOI="10.5281/zenodo.${ZENODO_RECORD}"
 ZENODO_BASE="https://zenodo.org/records/${ZENODO_RECORD}/files"
 
-# All 15 models published in the v0.2.0 Zenodo bundle.
-# (v0.1.0 had 14; v0.2.0 added perch-v2 — bird vocalization classifier.)
+# All 16 models published in the v0.3.0 Zenodo bundle.
+# (v0.1.0 had 14; v0.2.0 added perch-v2 — bird vocalization classifier;
+#  v0.3.0 added md-audiobirds-v1 — default audio detector, MIT.)
 ALL_MODELS=(
   "MDV6-yolov10-e"
   "MDV6-yolov10-c"
@@ -48,6 +49,7 @@ ALL_MODELS=(
   "Deepfaune-Europe"
   "Deepfaune-New-England"
   "perch-v2"
+  "md-audiobirds-v1"
 )
 
 # ---- Defaults ----
