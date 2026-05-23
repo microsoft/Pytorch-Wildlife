@@ -1,0 +1,33 @@
+# Round 4 file ownership
+
+(Same split as round 3; engine.rs lives in reviewer set.)
+
+## Auditor owns (structural)
+- sparrow-engine/sparrow-engine-cpu/src/detect_audio.rs
+- sparrow-engine/sparrow-engine-gpu/src/detect_audio.rs
+- sparrow-engine/sparrow-engine-core/src/preprocess_audio.rs
+- sparrow-engine/sparrow-engine-core/src/viz.rs
+- sparrow-engine/sparrow-engine-core/tests/audio_heatmap_e2e.rs
+- sparrow-engine/sparrow-engine-gpu/src/models/audio.rs
+- sparrow-engine/sparrow-engine-gpu/src/models/classifier.rs
+
+## Reviewer owns (behavioral)
+- sparrow-engine/sparrow-engine-cli/src/main.rs
+- sparrow-engine/sparrow-engine-cpu/src/classify.rs
+- sparrow-engine/sparrow-engine-cpu/src/detect.rs
+- sparrow-engine/sparrow-engine-cpu/src/engine.rs
+- sparrow-engine/sparrow-engine-cpu/src/ffi.rs
+- sparrow-engine/sparrow-engine-cpu/src/preprocess.rs
+- sparrow-engine/sparrow-engine-cpu/tests/integration_ffi_symbols.rs
+- sparrow-engine/sparrow-engine-cpu/tests/integration_perch2.rs
+- sparrow-engine/sparrow-engine-cpu/tests/integration_reexports.rs
+- sparrow-engine/sparrow-engine-gpu/src/classify.rs
+- sparrow-engine/sparrow-engine-gpu/src/detect.rs
+- sparrow-engine/sparrow-engine-gpu/src/ffi.rs
+- sparrow-engine/sparrow-engine-python/python/sparrow_engine/__init__.py
+- sparrow-engine/sparrow-engine-python/src/lib.rs
+- sparrow-engine/sparrow-engine-server/src/handlers/audio.rs
+- sparrow-engine/sparrow-engine-server/src/response.rs
+- sparrow-engine/sparrow-engine-types/src/manifest.rs
+- sparrow-engine/sparrow-engine-types/src/model_type.rs
+- sparrow-engine/sparrow-engine-types/src/types.rs
