@@ -111,12 +111,14 @@ The catalog splits into four families (detectors, heatmap detectors, classifiers
 - `SpeciesNet-Crop` is Google's SpeciesNet classifier; pairs downstream of a detector (e.g. MDv6).
 - `AI4G-Amazon-V2` and `AI4G-Serengeti` are AI for Good Lab regional classifiers for Amazon-basin and Serengeti / East African species.
 
-#### Audio classifiers
+#### Audio detectors / classifiers
 
 | Model ID | Input window | Classes | ONNX | License |
 |---|---|---|---|---|
+| `MD_AudioBirds_V1` | 1 s @ 48 kHz, mel spectrogram (0.3 s stride) | 1 (bird vs no-bird) | 81 MB | see note |
 | `perch-v2` | 5 s @ 32 kHz raw audio | 14795 | 391 MB | Apache 2.0 |
 
+- `MD_AudioBirds_V1` is the sparrow-engine default audio detector — a lightweight binary bird-vs-no-bird model used in benchmarks and Phase 4.x manual tests. Sliding-window mel-spectrogram front-end (Slaney mel scale + Slaney filter norm). Ships with an FP16 variant alongside the FP32 ONNX. **Bundle status**: currently lives in `sparrow-engine`'s `test_files/sparrow_engine_models/md-audiobirds-v1/`; not yet staged into the v0.1.0 public Zenodo bundle (needs upstream `LICENSE.md` + `MODEL_CARD.md` sourcing before release).
 - `perch-v2` is Google Perch 2, a global bird-vocalisation classifier (Conformer encoder) with an in-graph mel front-end. Takes 160000-sample windows of raw audio; emits softmax over 14795 classes (birds + non-bird FSD50K labels).
 
 #### License summary
