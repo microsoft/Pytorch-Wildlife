@@ -129,6 +129,11 @@
       "path": "sparrow-engine/sparrow-engine-server/src/handlers/audio.rs",
       "categories": [],
       "added_round": 1
+    },
+    {
+      "path": "sparrow-engine/sparrow-engine-cpu/src/engine.rs",
+      "categories": [],
+      "added_round": 2
     }
   ],
   "anti_narrowing_clause": "This ledger is the convergence anchor. New in-scope files may be APPENDED with added_round marker, but no entry may be removed or ignored. Rounds may DISCOVER new in-scope files; rounds may NEVER narrow the scope."

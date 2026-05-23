@@ -1,0 +1,698 @@
+=== VERIFICATION SUMMARY (round 2) ===
+Category: All clean
+- cpu workspace (sparrow-engine-types + sparrow-engine-core + sparrow-engine-cpu): 399 tests pass / 0 fail
+- sparrow-engine-python --lib --no-default-features --features cpu: 32 tests pass / 0 fail
+- Total: 431 tests pass / 0 fail (22 suites)
+- Clippy clean: workspace (excl python), python --features cpu, gpu --all-targets
+- Pre-existing NOT in scope:
+  * `cargo test -p sparrow-engine-python --lib --no-default-features` (without --features cpu) fails compile_error! gate — broken since cpu/gpu feature split (Phase 3.8 Phase C). Workaround: append --features cpu (this lead used the workaround for verification).
+  * `cargo test --workspace --no-run` fails to compile sparrow-engine-gpu/tests/*.rs and examples/*.rs — bisected to pre-R2 (also fails at f92e2c5). Root cause hypothesis: dual `[lib] name = "sparrow_engine"` + sparrow-engine-cpu as dev-dep of sparrow-engine-gpu. Round 1 verification used same workaround (cpu-side test + gpu clippy proxy).
+=== RAW VERIFICATION OUTPUT (cpu test + python test + clippy x3) ===
+
+=== VERIFICATION SUMMARY ===
+(populated after runs)
+
+=== CARGO TEST (cpu workspace flavor: types+core+cpu) ===
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+   Compiling sparrow-engine-types v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-types)
+   Compiling sparrow-engine-core v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.54s
+     Running unittests src/lib.rs (target/debug/deps/sparrow_engine_core-e1099c81f16e290c)
+
+running 178 tests
+test catalog::phase_a_r1_catalog::list_available_models_follows_symlink_to_model_dir ... ok
+test catalog::phase_a_r1_catalog::list_available_models_skips_unloadable_manifest_and_keeps_good_one ... ok
+test catalog::phase_a_r1_catalog::validate_model_id_accepts_reasonable_names ... ok
+test catalog::phase_a_r1_catalog::validate_model_id_rejects_traversal_and_separators ... ok
+test catalog::phase_a_r1_catalog::verify_model_checksum_mismatch_after_byte_flip ... ok
+test catalog::phase_a_r1_catalog::verify_model_no_checksum_when_both_fields_absent ... ok
+test catalog::phase_a_r1_catalog::verify_model_size_mismatch_carries_actual_and_expected ... ok
+test catalog::tests::list_available_models_empty_dir ... ok
+test catalog::tests::list_available_models_finds_models ... ok
+test catalog::tests::validate_model_id_rejects_separators ... ok
+test catalog::tests::verify_checksum_mismatch ... ok
+test catalog::tests::verify_model_not_found ... ok
+test catalog::tests::verify_model_rejects_path_traversal ... ok
+test catalog::tests::verify_no_checksum ... ok
+test catalog::tests::verify_ok ... ok
+test catalog::tests::verify_size_mismatch ... ok
+test catalog::tests::write_checksum_errors_on_missing_model_section ... ok
+test catalog::tests::write_checksum_rejects_path_traversal ... ok
+test catalog::tests::write_checksum_updates_manifest ... ok
+test daynight::phase_a_r1_daynight::jpeg_input_works ... ok
+test daynight::phase_a_r1_daynight::non_uniform_pattern_bt709_weighted_mean ... ok
+test daynight::phase_a_r1_daynight::single_pixel_image ... ok
+test daynight::phase_a_r1_daynight::threshold_strict_inequality_85_vs_86 ... ok
+test daynight::tests::black_is_night ... ok
+test daynight::tests::brightness_function ... ok
+test daynight::tests::invalid_image_data ... ok
+test daynight::tests::just_above_threshold ... ok
+test daynight::tests::threshold_boundary ... ok
+test daynight::tests::white_is_day ... ok
+test export::phase_a_r1_export::csv_escape_doubles_internal_quotes_rfc4180 ... ok
+test export::phase_a_r1_export::csv_escape_plain_passthrough ... ok
+test export::phase_a_r1_export::csv_escape_quotes_field_with_comma ... ok
+test export::phase_a_r1_export::csv_escape_quotes_field_with_newline ... ok
+test export::phase_a_r1_export::to_coco_category_collision_first_seen_wins_across_images ... ok
+test export::phase_a_r1_export::to_csv_header_matches_schema ... ok
+test export::phase_a_r1_export::to_megadet_round_trip_schema_and_bbox_xywh ... ok
+test export::tests::bbox_pixels_conversion ... ok
+test export::tests::bbox_xywh_conversion ... ok
+test export::tests::coco_categories_populated ... ok
+test export::tests::coco_first_seen_label_wins_on_collision ... ok
+test export::tests::coco_json_structure ... ok
+test export::tests::csv_escape_cases ... ok
+test export::tests::csv_escapes_commas_in_path ... ok
+test export::tests::csv_escapes_quotes_in_label ... ok
+test export::tests::csv_header_and_rows ... ok
+test export::tests::empty_results_csv ... ok
+test export::tests::empty_results_megadet ... ok
+test export::tests::megadet_json_structure ... ok
+test export::tests::test_pipeline_to_detect_empty ... ok
+test export::tests::test_pipeline_to_detect_fallback_label ... ok
+test export::tests::test_pipeline_to_detect_with_classification ... ok
+test hash::phase_a_r1_hash::hash_differs_on_single_byte_change ... ok
+test hash::phase_a_r1_hash::hash_known_vector_abc ... ok
+test hash::phase_a_r1_hash::hash_large_file_matches_one_shot_digest ... ok
+test hash::tests::hash_deterministic ... ok
+test hash::tests::hash_file_not_found ... ok
+test hash::tests::hash_hex_length ... ok
+test hash::tests::hash_known_content ... ok
+test pipeline_compat::tests::validate_pipeline_compat_covers_phase_4_2_matrix ... ok
+test pipeline_compat::tests::validate_pipeline_compat_rejects_audio_classifier_combinations ... ok
+test pipeline_compat::tests::validate_pipeline_compat_rejects_bad_slot_types ... ok
+test postprocess::phase_a_r1_postprocess::apply_max_detections_cap_larger_than_len_is_noop ... ok
+test postprocess::phase_a_r1_postprocess::is_local_maximum_2x2_plateau_only_bottom_right_wins ... ok
+test postprocess::phase_a_r1_postprocess::is_local_maximum_corner_pixel_works ... ok
+test postprocess::phase_a_r1_postprocess::owl_adaptive_threshold_formula_invariants ... ok
+test postprocess::phase_a_r1_postprocess::softmax_extreme_logits_stay_finite ... ok
+test postprocess::phase_a_r1_postprocess::softmax_uniform_logits_produces_uniform_distribution ... ok
+test postprocess::phase_a_r1_postprocess::sort_desc_and_cap_none_cap_keeps_all ... ok
+test postprocess::phase_a_r1_postprocess::sort_desc_and_cap_with_nan_does_not_panic ... ok
+test postprocess::phase_a_r1_postprocess::sort_desc_and_cap_zero_cap_yields_empty ... ok
+test postprocess::tests::test_denormalize_clamps ... ok
+test postprocess::tests::test_heatmap_boundary_peaks ... ok
+test postprocess::tests::test_heatmap_peaks_basic ... ok
+test postprocess::tests::test_label_for_id_fallback ... ok
+test postprocess::tests::test_megadet_v5a_confidence_product ... ok
+test postprocess::tests::test_megadet_v5a_cxcywh_to_xyxy_and_nms ... ok
+test postprocess::tests::test_megadet_v5a_rejects_high_confidence_degenerate_normalized_box ... ok
+test postprocess::tests::test_megadet_v5a_rejects_low_confidence_nonpositive_box_geometry ... ok
+test postprocess::tests::test_megadet_v5a_rejects_nonpositive_box_geometry ... ok
+test postprocess::tests::test_megadet_v5a_rejects_scores_outside_unit_interval ... ok
+test postprocess::tests::test_megadet_v5a_silently_skips_low_confidence_degenerate_normalized_box ... ok
+test postprocess::tests::test_owl_adaptive_threshold_basic ... ok
+test postprocess::tests::test_owl_adaptive_threshold_floor ... ok
+test postprocess::tests::test_owl_adaptive_threshold_negative_max ... ok
+test postprocess::tests::test_owl_adaptive_threshold_scales_with_max ... ok
+test postprocess::tests::test_owl_adaptive_threshold_zero_max ... ok
+test postprocess::tests::test_plateau_single_detection ... ok
+test postprocess::tests::test_single_output_heatmap_peak_confidence ... ok
+test postprocess::tests::test_single_output_low_activation_filtered ... ok
+test postprocess::tests::test_softmax_basic ... ok
+test postprocess::tests::test_softmax_default_top_k ... ok
+test postprocess::tests::test_softmax_numerical_stability ... ok
+test postprocess::tests::test_softmax_uniform_distribution ... ok
+test postprocess::tests::test_try_yolo_e2e_rejects_high_confidence_degenerate_normalized_boxes ... ok
+test postprocess::tests::test_try_yolo_e2e_rejects_scores_outside_unit_interval ... ok
+test postprocess::tests::test_try_yolo_e2e_silently_skips_low_confidence_degenerate_normalized_boxes ... ok
+test postprocess::tests::test_yolo_e2e_filters_by_threshold ... ok
+test postprocess::tests::test_yolo_e2e_letterbox_undo ... ok
+test postprocess::tests::test_yolo_e2e_max_detections ... ok
+test postprocess::tests::test_yolo_e2e_normalizes_coords ... ok
+test postprocess::tests::try_postprocessors_reject_malformed_shapes ... ok
+test postprocess::tests::validate_heatmap_maps_rejects_ignored_batches_and_channels ... ok
+test preprocess::tests::decode_encoded_garbage_returns_image_decode ... ok
+test preprocess::tests::decode_filepath_missing_returns_image_file_not_found ... ok
+test preprocess::tests::raw_bgr_swaps_channels ... ok
+test preprocess::tests::raw_buffer_too_small_returns_image_decode ... ok
+test preprocess::tests::raw_rgb_round_trip ... ok
+test preprocess::tests::test_bytes_per_pixel ... ok
+test preprocess::tests::test_decode_raw_bgra ... ok
+test preprocess::tests::test_decode_raw_invalid_stride ... ok
+test preprocess::tests::test_decode_raw_rgb ... ok
+test preprocess::tests::test_decode_raw_with_stride_padding ... ok
+test preprocess_audio::phase_a_r1_preprocess_audio::mel_filterbank_tiny_config_deterministic_and_nonneg ... ok
+test preprocess_audio::phase_a_r1_preprocess_audio::mel_spectrogram_top_db_saturation_caps_floor ... ok
+test preprocess_audio::phase_a_r1_preprocess_audio::mel_spectrogram_zero_input_yields_constant_floor ... ok
+test preprocess_audio::phase_a_r1_preprocess_audio::resample_identity_returns_clone ... ok
+test preprocess_audio::tests::load_audio_rejects_non_finite_raw_samples ... ok
+test preprocess_audio::tests::load_audio_rejects_zero_input_sample_rate ... ok
+test preprocess_audio::tests::preprocess_segment_rejects_filterbank_config_mismatch ... ok
+test preprocess_audio::tests::test_decimate_basic ... ok
+test preprocess_audio::tests::test_decode_wav_int16_fast_path_bit_exact_vs_slow ... ok
+test preprocess_audio::tests::test_decode_wav_int16_fast_path_stereo_downmix ... ok
+test preprocess_audio::tests::test_hann_window ... ok
+test preprocess_audio::tests::test_interpolate_basic ... ok
+test preprocess_audio::tests::test_mel_filterbank_shape ... ok
+test preprocess_audio::tests::test_mel_filterbank_slaney_norm ... ok
+test preprocess_audio::tests::test_mel_spectrogram_output_shape ... ok
+test preprocess_audio::tests::test_mel_spectrogram_short_segment_error ... ok
+test preprocess_audio::tests::test_power_to_db_clamp ... ok
+test preprocess_audio::tests::test_resample_integer_ratio ... ok
+test preprocess_audio::tests::test_resample_passthrough ... ok
+test preprocess_audio::tests::test_stft_known_signal ... ok
+test preprocess_audio::tests::validate_audio_window_params_rejects_invalid_runtime_overrides ... ok
+test stats::phase_a_r1_stats::empty_results_yields_zero_summary ... ok
+test stats::phase_a_r1_stats::overlapping_labels_aggregate_across_images ... ok
+test stats::phase_a_r1_stats::single_empty_image_keeps_per_category_empty ... ok
+test stats::tests::all_nan_confidence_does_not_leak_sentinels ... ok
+test stats::tests::empty_results ... ok
+test stats::tests::mixed_results ... ok
+test stats::tests::nan_confidence_does_not_corrupt_stats ... ok
+test stats::tests::per_category_all_nan_does_not_leak_sentinels ... ok
+test stats::tests::per_category_confidence_min_max_tracks_distribution ... ok
+test stats::tests::single_image_no_detections ... ok
+test viz::phase_a_r1_viz::detections_to_annotations_preserves_all_bbox_fields ... ok
+test viz::phase_a_r1_viz::render_is_byte_deterministic ... ok
+test viz::phase_a_r1_viz::render_opts_default_is_sane ... ok
+test viz::tests::audio_segments_to_annotations_normalizes_time ... ok
+test viz::tests::box_blur_1d_peak_stays_centered ... ok
+test viz::tests::box_blur_1d_uniform_input ... ok
+test viz::tests::detections_to_annotations_preserves_data ... ok
+test viz::tests::heatmap_empty_segments ... ok
+test viz::tests::heatmap_invalid_pow_panics_in_debug - should panic ... ok
+test viz::tests::heatmap_inverted_alpha_panics_in_debug - should panic ... ok
+test viz::tests::heatmap_segment_beyond_duration_no_panic ... ok
+test viz::tests::heatmap_with_segment ... ok
+test viz::tests::inferno_endpoints ... ok
+test viz::tests::inferno_peak_has_g_gt_r_by_small_margin ... ok
+test viz::tests::range_overlay_band_alpha_scales_with_confidence ... ok
+test viz::tests::range_overlay_clamps_out_of_bounds_range ... ok
+test viz::tests::range_overlay_draws_at_correct_x ... ok
+test viz::tests::range_overlay_draws_end_bar_at_duration ... ok
+test viz::tests::range_overlay_empty_ranges_is_noop ... ok
+test viz::tests::range_overlay_preserves_dimensions ... ok
+test viz::tests::range_overlay_zero_duration_is_noop ... ok
+test viz::tests::render_clamps_extreme_finite_bbox ... ok
+test viz::tests::render_dispatches_bbox_for_detector_even_for_tiny_bbox ... ok
+test viz::tests::render_dispatches_dot_for_overhead_detector ... ok
+test viz::tests::render_empty_annotations ... ok
+test viz::tests::render_no_pixel_size_heuristic_regression ... ok
+test viz::tests::render_overhead_dot_respects_point_threshold ... ok
+test viz::tests::render_produces_same_dimensions ... ok
+test viz::tests::render_skips_nonfinite_bbox ... ok
+test viz::tests::viz_text_labels_modify_pixels_above_bbox ... ok
+test viz::tests::viz_text_labels_off_leaves_band_clean ... ok
+test viz::tests::window_lanes_empty_segments_paints_only_base_and_gap ... ok
+test viz::tests::window_lanes_extends_height ... ok
+test viz::tests::window_lanes_idx_modulo_lane_assignment_with_inferno_color ... ok
+test viz::tests::window_lanes_preserves_base_pixels ... ok
+
+test result: ok. 178 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.44s
+
+     Running tests/audio_heatmap_e2e.rs (target/debug/deps/audio_heatmap_e2e-7759b5f7a2ee3af1)
+
+running 3 tests
+test e2e_audio_heatmap_long ... ok
+test e2e_audio_heatmap_medium ... ok
+test e2e_audio_heatmap_short ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+     Running tests/integration_viz_dispatch.rs (target/debug/deps/integration_viz_dispatch-dc0484a2adfc3e56)
+
+running 5 tests
+test invalid_subtype_rejected_at_load ... ok
+test overhead_manifest_loads_with_overhead_subtype ... ok
+test overhead_manifest_promotes_to_overhead_detector_via_catalog ... ok
+test render_dispatch_differs_by_model_type ... ok
+test render_overhead_dot_at_4k_is_not_bbox ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.02s
+
+     Running unittests src/lib.rs (target/debug/deps/sparrow_engine-a70fde710ebb1bd0)
+
+running 69 tests
+test detect::tests::test_dedup_distinct_detections ... ok
+test detect::tests::test_dedup_empty ... ok
+test detect::tests::test_dedup_exact_duplicates ... ok
+test detect::tests::test_dedup_near_duplicates ... ok
+test detect::tests::test_dedup_single ... ok
+test detect_audio::tests::merge_adjacent_stride_windows_into_one_range ... ok
+test detect_audio::tests::merge_empty_input ... ok
+test detect_audio::tests::merge_gap_above_threshold_does_not_merge ... ok
+test detect_audio::tests::merge_gap_just_below_threshold_merges ... ok
+test detect_audio::tests::merge_preserves_end_time_when_later_segment_ends_earlier ... ok
+test detect_audio::tests::merge_single_segment ... ok
+test detect_audio::tests::merge_splits_on_silence_gap ... ok
+test detect_audio::tests::merge_takes_max_confidence ... ok
+test detect_audio::tests::merge_with_class_splits_on_class_change ... ok
+test engine::tests::config_defaults_auto ... ok
+test engine::tests::config_defaults_cpu ... ok
+test engine::tests::config_defaults_gpu ... ok
+test engine::tests::format_shape_display ... ok
+test engine::tests::get_model_handle_not_found ... ok
+test engine::tests::get_model_handle_updates_last_used ... ok
+test engine::tests::get_or_load_reports_poisoned_loading_lock ... ok
+test engine::tests::get_or_load_returns_cached_handle_after_first_load ... ok
+test engine::tests::get_pipeline_not_found ... ok
+test engine::tests::load_model_manifest_not_found ... ok
+test engine::tests::loaded_models_empty_on_new_engine ... ok
+test engine::tests::model_type_from_preprocess_postprocess ... ok
+test engine::tests::reaper_keeps_last_n_protects_even_if_idle ... ok
+test engine::tests::reaper_keeps_model_touched_after_snapshot ... ok
+test engine::tests::reaper_keeps_replacement_generation_after_stale_snapshot ... ok
+test engine::tests::reaper_noop_when_all_recent ... ok
+test engine::tests::reaper_unloads_stale_and_keeps_recent ... ok
+test engine::tests::register_pipeline_manifest_round_trips_and_unloads ... ok
+test engine::tests::singleton_enforcement ... ok
+test engine::tests::test_active_device_auto_resolves_to_cpu ... ok
+test engine::tests::test_active_device_cpu_stays_cpu ... ok
+test engine::tests::test_explicit_cuda_coerces_to_cpu ... ok
+test engine::tests::test_get_model_handles_all_found ... ok
+test engine::tests::test_get_model_handles_reports_missing ... ok
+test engine::tests::test_model_handle_labels_accessor ... ok
+test engine::tests::test_model_handle_manifest_accessor ... ok
+test engine::tests::test_resolve_device_auto_returns_cpu ... ok
+test engine::tests::test_unload_does_not_remove_replacement ... ok
+test engine::tests::touch_last_used_increments_when_clock_has_not_advanced ... ok
+test engine::tests::unload_pipeline_not_found ... ok
+test engine::tests::validate_output_dims_accepts_megadet_static_last_dim_above_five ... ok
+test engine::tests::validate_output_dims_accepts_rank_three_yolo_e2e ... ok
+test engine::tests::validate_output_dims_accepts_rank_two_megadet_static_last_dim_above_five ... ok
+test engine::tests::validate_output_dims_accepts_rank_two_yolo_e2e ... ok
+test engine::tests::validate_output_dims_keeps_yolo_strict_at_six ... ok
+test engine::tests::validate_output_dims_rejects_megadet_static_last_dim_at_or_below_five ... ok
+test engine::tests::validate_output_dims_rejects_rank_two_yolo_e2e_wrong_last ... ok
+test pipeline::tests::adhoc_compat_defers_unknown_ids_to_load_path ... ok
+test pipeline::tests::adhoc_compat_rejects_known_incompatible_pair_before_load ... ok
+test preprocess::phase_a_r2_preprocess::build_tensor_nchw_byte_deterministic_across_calls ... ok
+test preprocess::phase_a_r2_preprocess::build_tensor_nchw_rgb_imagenet_deterministic_and_finite ... ok
+test preprocess::tests::test_channel_order_swap_rgb_vs_bgr ... ok
+test preprocess::tests::test_extreme_aspect_ratio_no_zero_dim ... ok
+test preprocess::tests::test_letterbox_preserves_aspect ... ok
+test preprocess::tests::test_normalize_imagenet ... ok
+test preprocess::tests::test_normalize_none ... ok
+test preprocess::tests::test_normalize_unit ... ok
+test preprocess::tests::test_preprocess_letterbox_metadata ... ok
+test preprocess::tests::test_preprocess_meta_in_result ... ok
+test preprocess::tests::test_preprocess_nchw_shape ... ok
+test preprocess::tests::test_preprocess_nhwc_shape ... ok
+test preprocess::tests::test_preprocess_unit_normalization_range ... ok
+test preprocess::tests::test_resize_direct_shape ... ok
+test preprocess::tests::test_u32_overflow_stride_validation ... ok
+test preprocess::tests::test_zero_size_image_guard ... ok
+
+test result: ok. 69 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.75s
+
+     Running tests/integration_audio.rs (target/debug/deps/integration_audio-998cc1f466d718ce)
+
+running 5 tests
+test audio_golden_loadable ... ok
+test audio_manifest_exists ... ok
+test audio_test_files_exist ... ok
+test audiobirds_default_model_emits_exactly_one_logit_per_segment ... ignored
+test test_audiobirds_detection ... ignored
+
+test result: ok. 3 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_build_idempotency.rs (target/debug/deps/integration_build_idempotency-415c59f461dbd454)
+
+running 3 tests
+test idempotency_missing_dst_copies ... ok
+test idempotency_src_newer_than_dst_copies ... ok
+test idempotency_src_older_than_dst_skips_copy ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_classify.rs (target/debug/deps/integration_classify-210d5203623e90c2)
+
+running 1 test
+test test_speciesnet_classification ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_detect.rs (target/debug/deps/integration_detect-f2ebaf618b4cbb61)
+
+running 2 tests
+test test_deepfaune_detection ... ignored
+test test_mdv6_detection ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_engine_singleton.rs (target/debug/deps/integration_engine_singleton-4d310ffd43ee7619)
+
+running 1 test
+test engine_singleton_at_integration_scope ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_ffi_symbols.rs (target/debug/deps/integration_ffi_symbols-a6b80df9f5d299c8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_perch2.rs (target/debug/deps/integration_perch2-626bcddde5d18f4c)
+
+running 2 tests
+test perch2_bundle_is_well_formed_if_present ... ok
+test perch2_detects_two_5s_windows_with_top5_classes_on_10s_clip ... ignored
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_pipeline_gpu_stress.rs (target/debug/deps/integration_pipeline_gpu_stress-f6f092aa4d7b1f16)
+
+running 1 test
+test test_pipeline_gpu_teardown_stress ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_preprocess_edges.rs (target/debug/deps/integration_preprocess_edges-2996a5afd91ff4e3)
+
+running 4 tests
+test letterbox_1x1_source_produces_valid_tensor ... ok
+test letterbox_square_source_equals_target_zero_pad ... ok
+test letterbox_tall_source_pads_horizontally ... ok
+test letterbox_wide_source_pads_vertically ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
+     Running tests/integration_reexports.rs (target/debug/deps/integration_reexports-7bfeaff648c72602)
+
+running 5 tests
+test audio_manifest_engine_config_reexports_resolve_at_crate_root ... ok
+test bongo_core_submodule_paths_resolve ... ok
+test derive_model_type_reachable_at_crate_root ... ok
+test manifest_submodule_path_resolves ... ok
+test types_reexports_resolve_at_crate_root ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_tiled.rs (target/debug/deps/integration_tiled-cdcb6d5c197fc71c)
+
+running 2 tests
+test test_herdnet_tiled_detection ... ignored
+test test_owl_tiled_detection ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/integration_tracing_bridge.rs (target/debug/deps/integration_tracing_bridge-9c06bc88499a783e)
+
+running 1 test
+test tracing_event_reaches_log_recorder_via_bridge ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/smoke.rs (target/debug/deps/smoke-592545f01ee172fd)
+
+running 4 tests
+test can_load_golden_classification ... ok
+test can_load_golden_detection ... ok
+test golden_dir_exists ... ok
+test test_cameratrap_dir_exists ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/sparrow_engine_types-f531d9351bbf55c9)
+
+running 123 tests
+test device::phase_a_r1_device_tests::device_default_is_auto ... ok
+test device::phase_a_r1_device_tests::device_format_round_trip_auto_cpu_cuda ... ok
+test device::phase_a_r1_device_tests::device_parse_auto_lowercase ... ok
+test device::phase_a_r1_device_tests::device_parse_auto_mixed_case ... ok
+test device::phase_a_r1_device_tests::device_parse_cpu_and_aliases ... ok
+test device::phase_a_r1_device_tests::device_parse_cuda_with_index ... ok
+test device::phase_a_r1_device_tests::device_parse_directml_helpful_message ... ok
+test device::phase_a_r1_device_tests::device_parse_garbage_string_returns_err ... ok
+test device::phase_a_r1_device_tests::device_parse_gpu_aliases_resolve_to_cuda_zero ... ok
+test device::phase_a_r1_device_tests::device_parse_invalid_cuda_index_returns_err ... ok
+test drift_metrics::tests::drift_metrics_default_is_zero ... ok
+test drift_metrics::tests::drift_metrics_includes_psi_when_some ... ok
+test drift_metrics::tests::drift_metrics_omits_psi_when_none ... ok
+test drift_metrics::tests::drift_reference_serializes_with_deterministic_key_order ... ok
+test engine_config::phase_a_r1_engine_config_tests::auto_device_matches_cpu_intra_threads ... ok
+test engine_config::phase_a_r1_engine_config_tests::cpu_device_caps_intra_threads_at_eight_and_at_least_one ... ok
+test engine_config::phase_a_r1_engine_config_tests::cuda_device_uses_one_intra_thread ... ok
+test engine_config::phase_a_r1_engine_config_tests::cuda_device_with_nonzero_index_still_uses_one_intra_thread ... ok
+test engine_config::phase_a_r1_engine_config_tests::engine_config_clone_preserves_all_fields ... ok
+test engine_config::phase_a_r1_engine_config_tests::inter_threads_always_one_regardless_of_device ... ok
+test engine_config::phase_a_r1_engine_config_tests::model_dir_accepts_str_string_pathbuf_and_path_ref ... ok
+test error::phase_a_r1_error_tests::empty_pipeline_displays_clear_message ... ok
+test error::phase_a_r1_error_tests::engine_already_exists_displays_singleton_message ... ok
+test error::phase_a_r1_error_tests::from_io_error_via_question_mark ... ok
+test error::phase_a_r1_error_tests::from_serde_json_error_via_question_mark ... ok
+test error::phase_a_r1_error_tests::from_toml_de_error_via_question_mark ... ok
+test error::phase_a_r1_error_tests::incompatible_pipeline_displays_model_types_and_reason ... ok
+test error::phase_a_r1_error_tests::invalid_stride_displays_numeric_fields ... ok
+test error::phase_a_r1_error_tests::manifest_not_found_displays_path ... ok
+test error::phase_a_r1_error_tests::ort_variant_constructable_with_owned_string ... ok
+test error::phase_a_r1_error_tests::output_shape_mismatch_displays_all_three_fields ... ok
+test inference_log::tests::none_optional_fields_omitted_from_json ... ok
+test inference_log::tests::provenance_some_serializes_with_pointer_fields ... ok
+test inference_log::tests::round_trip_serialize_deserialize_equals ... ok
+test inference_log::tests::schema_version_constant_is_stable ... ok
+test manifest::tests::test_absolute_path_label ... ok
+test manifest::tests::test_audio_invalid_fmax_less_than_fmin ... ok
+test manifest::tests::test_audio_invalid_hop_length_zero ... ok
+test manifest::tests::test_audio_invalid_n_fft_zero ... ok
+test manifest::tests::test_audio_invalid_n_mels_zero ... ok
+test manifest::tests::test_audio_invalid_sample_rate_zero ... ok
+test manifest::tests::test_audio_invalid_stride_zero ... ok
+test manifest::tests::test_audio_n_fft_not_power_of_two ... ok
+test manifest::tests::test_audio_rejects_non_finite_sliding_window_fields ... ok
+test manifest::tests::test_audio_rejects_unsupported_preprocess_postprocess_pairs ... ok
+test manifest::tests::test_audio_unsupported_filter_norm ... ok
+test manifest::tests::test_audio_unsupported_mel_scale ... ok
+test manifest::tests::test_audio_unsupported_window ... ok
+test manifest::tests::test_canonical_overhead_manifests_load ... ok
+test manifest::tests::test_detector_requires_letterbox ... ok
+test manifest::tests::test_empty_model_file ... ok
+test manifest::tests::test_empty_model_id ... ok
+test manifest::tests::test_label_file_not_found ... ok
+test manifest::tests::test_label_path_traversal ... ok
+test manifest::tests::test_layout_nhwc_rejected_with_escape_hatch ... ok
+test manifest::tests::test_layout_unknown_value_still_rejected ... ok
+test manifest::tests::test_legitimate_double_dot_filename ... ok
+test manifest::tests::test_load_audio_manifest ... ok
+test manifest::tests::test_load_labels_index_name_csv ... ok
+test manifest::tests::test_load_labels_name_index_csv ... ok
+test manifest::tests::test_load_labels_name_index_csv_sparse ... ok
+test manifest::tests::test_load_labels_one_per_line ... ok
+test manifest::tests::test_load_raw_audio_manifest ... ok
+test manifest::tests::test_load_real_label_files ... ok
+test manifest::tests::test_load_tiled_manifest ... ok
+test manifest::tests::test_load_valid_pipeline ... ok
+test manifest::tests::test_load_valid_single_shot_manifest ... ok
+test manifest::tests::test_manifest_not_found ... ok
+test manifest::tests::test_manifest_with_drift_reference_round_trips ... ok
+test manifest::tests::test_manifest_with_empty_drift_reference_class_distribution_loads_as_some_empty ... ok
+test manifest::tests::test_manifest_with_empty_provenance_section_loads_as_some_default ... ok
+test manifest::tests::test_manifest_with_provenance_round_trips_all_fields ... ok
+test manifest::tests::test_manifest_without_drift_reference_loads_with_none ... ok
+test manifest::tests::test_manifest_without_provenance_loads_with_none ... ok
+test manifest::tests::test_missing_tiled_fields ... ok
+test manifest::tests::test_pad_value_defaults_to_zero ... ok
+test manifest::tests::test_path_traversal_model_file ... ok
+test manifest::tests::test_phase3_optional_fields_backward_compat ... ok
+test manifest::tests::test_phase3_optional_fields_partial ... ok
+test manifest::tests::test_phase3_optional_fields_roundtrip ... ok
+test manifest::tests::test_pipeline_no_detector ... ok
+test manifest::tests::test_pipeline_two_detectors ... ok
+test manifest::tests::test_precision_default_is_fp32 ... ok
+test manifest::tests::test_precision_fp16_with_file_fp16 ... ok
+test manifest::tests::test_precision_fp16_without_file_fp16_rejected ... ok
+test manifest::tests::test_precision_unknown_value_rejected ... ok
+test manifest::tests::test_raw_audio_requires_sliding_window ... ok
+test manifest::tests::test_raw_audio_window_samples_allows_one_sample_rounding ... ok
+test manifest::tests::test_raw_audio_window_samples_must_match_segment_duration ... ok
+test manifest::tests::test_softmax_classifier_manifest ... ok
+test manifest::tests::test_subtype_missing_defaults_to_standard ... ok
+test manifest::tests::test_subtype_overhead_roundtrip ... ok
+test manifest::tests::test_subtype_standard_explicit ... ok
+test manifest::tests::test_subtype_unknown_value_rejected ... ok
+test manifest::tests::test_tile_overlap_exceeds_tile_size ... ok
+test manifest::tests::test_tiled_tile_size_must_equal_input_size ... ok
+test manifest::tests::test_unsupported_format ... ok
+test manifest::tests::test_wrong_manifest_type ... ok
+test manifest::tests::test_wrong_pipeline_type ... ok
+test manifest::tests::test_zero_input_size ... ok
+test manifest::tests::test_zero_tile_size ... ok
+test model_type::phase_a_r1_model_type_tests::audio_classifier_when_raw_audio_plus_softmax ... ok
+test model_type::phase_a_r1_model_type_tests::audio_detector_when_mel_plus_sigmoid_overhead_does_not_promote ... ok
+test model_type::phase_a_r1_model_type_tests::audio_detector_when_mel_plus_sigmoid_standard ... ok
+test model_type::phase_a_r1_model_type_tests::cartesian_full_matrix_no_panic_and_no_unknown_variants ... ok
+test model_type::phase_a_r1_model_type_tests::classifier_overhead_does_not_promote ... ok
+test model_type::phase_a_r1_model_type_tests::classifier_when_mel_plus_softmax_either_subtype ... ok
+test model_type::phase_a_r1_model_type_tests::classifier_when_softmax_with_image_preprocess ... ok
+test model_type::phase_a_r1_model_type_tests::detector_for_image_preprocess_plus_non_softmax_postprocess ... ok
+test model_type::phase_a_r1_model_type_tests::detector_when_raw_audio_plus_sigmoid_without_overhead_promotion ... ok
+test model_type::phase_a_r1_model_type_tests::mel_plus_yolo_falls_through_to_detector_without_overhead_promotion ... ok
+test model_type::phase_a_r1_model_type_tests::overhead_detector_when_image_detector_combo_with_overhead_subtype ... ok
+test preprocess_meta::phase_a_r1_preprocess_meta_tests::preprocess_config_clone_preserves_fields ... ok
+test preprocess_meta::phase_a_r1_preprocess_meta_tests::preprocess_config_debug_renders_without_panic ... ok
+test preprocess_meta::phase_a_r1_preprocess_meta_tests::preprocess_meta_is_copy_via_assignment ... ok
+test types::phase_a_r1_types_tests::audio_segment_partial_eq_and_clone ... ok
+test types::phase_a_r1_types_tests::bbox_partial_eq_round_trip ... ok
+test types::phase_a_r1_types_tests::detection_clone_preserves_all_fields ... ok
+test types::phase_a_r1_types_tests::model_subtype_as_str_and_display_table ... ok
+test types::phase_a_r1_types_tests::model_subtype_default_is_standard ... ok
+test types::phase_a_r1_types_tests::model_type_as_str_table_driven ... ok
+test types::phase_a_r1_types_tests::model_type_display_matches_as_str ... ok
+test types::phase_a_r1_types_tests::pixel_format_discriminants_are_stable_for_ffi ... ok
+
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+   Doc-tests sparrow_engine_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sparrow_engine
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sparrow_engine_types
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+=== CARGO TEST (sparrow-engine-python --lib --no-default-features) ===
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-python v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-python)
+error: sparrow-engine-python: one of `cpu` or `gpu` must be enabled (default = cpu)
+  --> sparrow-engine-python/src/lib.rs:27:1
+   |
+27 | compile_error!("sparrow-engine-python: one of `cpu` or `gpu` must be enabled (default = cpu)");
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0432]: unresolved import `sparrow_engine`
+  --> sparrow-engine-python/src/engine_dispatch.rs:29:9
+   |
+29 | pub use sparrow_engine::*;
+   |         ^^^^^^^^^^^^^^ help: a similar path exists: `crate::sparrow_engine`
+   |
+   = note: `use` statements changed in Rust 2018; read more at <https://doc.rust-lang.org/edition-guide/rust-2018/module-system/path-clarity.html>
+
+error[E0432]: unresolved imports `crate::engine_dispatch::AudioDetectOpts`, `crate::engine_dispatch::AudioInput`, `crate::engine_dispatch::ClassifyOpts`, `crate::engine_dispatch::DetectOpts`, `crate::engine_dispatch::Device`, `crate::engine_dispatch::Engine`, `crate::engine_dispatch::EngineConfig`, `crate::engine_dispatch::ImageInput`, `crate::engine_dispatch::ModelInfo`, `crate::engine_dispatch::ModelType`
+  --> sparrow-engine-python/src/lib.rs:53:5
+   |
+53 |     AudioDetectOpts, AudioInput, ClassifyOpts, DetectOpts, Device, Engine, EngineConfig,
+   |     ^^^^^^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^  ^^^^^^  ^^^^^^^^^^^^ no `EngineConfig` in `engine_dispatch`
+   |     |                |           |             |           |       |
+   |     |                |           |             |           |       no `Engine` in `engine_dispatch`
+   |     |                |           |             |           no `Device` in `engine_dispatch`
+   |     |                |           |             no `DetectOpts` in `engine_dispatch`
+   |     |                |           no `ClassifyOpts` in `engine_dispatch`
+   |     |                no `AudioInput` in `engine_dispatch`
+   |     no `AudioDetectOpts` in `engine_dispatch`
+54 |     ImageInput, ModelInfo as NativeModelInfo, ModelType,
+   |     ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^ no `ModelType` in `engine_dispatch`
+   |     |           |
+   |     |           no `ModelInfo` in `engine_dispatch`
+   |     no `ImageInput` in `engine_dispatch`
+
+error[E0282]: type annotations needed for `(_, _)`
+    --> sparrow-engine-python/src/lib.rs:1306:15
+     |
+1306 |         .map(|(p, r)| (p.as_path(), r))
+     |               ^^^^^^   - type must be known at this point
+     |
+help: consider giving this closure parameter an explicit type, where the placeholders `_` are specified
+     |
+1306 |         .map(|(p, r): (_, _)| (p.as_path(), r))
+     |                     ++++++++
+
+Some errors have detailed explanations: E0282, E0432.
+For more information about an error, try `rustc --explain E0282`.
+error: could not compile `sparrow-engine-python` (lib test) due to 4 previous errors
+
+=== CARGO TEST (sparrow-engine-python --lib --no-default-features --features cpu) ===
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+   Compiling sparrow-engine-core v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-core)
+   Compiling sparrow-engine-python v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-python)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.24s
+     Running unittests src/lib.rs (target/debug/deps/_sparrow_engine_core-4ce9b323fe4ca3bf)
+/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/target/debug/deps/_sparrow_engine_core-4ce9b323fe4ca3bf: error while loading shared libraries: libpython3.14.so.1.0: cannot open shared object file: No such file or directory
+error: test failed, to rerun pass `-p sparrow-engine-python --lib`
+
+Caused by:
+  process didn't exit successfully: `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/target/debug/deps/_sparrow_engine_core-4ce9b323fe4ca3bf --test-threads=1` (exit status: 127)
+note: test exited abnormally; to see the full output pass --no-capture to the harness.
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+   Compiling sparrow-engine-python v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-python)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.22s
+     Running unittests src/lib.rs (target/debug/deps/_sparrow_engine_core-4ce9b323fe4ca3bf)
+
+running 32 tests
+test tests::convert_audio_segment_maps_classes ... ok
+test tests::convert_audio_segment_preserves_empty_classes ... ok
+test tests::convert_audio_segment_preserves_top_k_order_and_none_labels ... ok
+test tests::convert_bbox_preserves_values ... ok
+test tests::convert_classification_maps_all_fields ... ok
+test tests::convert_detection_maps_all_fields ... ok
+test tests::convert_model_info_maps_fields ... ok
+test tests::convert_model_info_non_default ... ok
+test tests::convert_model_type_all_variants ... ok
+test tests::device_from_str_auto ... ok
+test tests::device_from_str_case_insensitive ... ok
+test tests::device_from_str_cpu ... ok
+test tests::device_from_str_cuda ... ok
+test tests::device_from_str_cuda_0 ... ok
+test tests::device_from_str_cuda_2 ... ok
+test tests::device_from_str_cuda_bad_index ... ok
+test tests::device_from_str_gpu ... ok
+test tests::device_from_str_invalid ... ok
+test tests::device_roundtrip ... ok
+test tests::device_to_string_auto ... ok
+test tests::device_to_string_cpu ... ok
+test tests::device_to_string_cuda_0 ... ok
+test tests::device_to_string_cuda_3 ... ok
+test tests::validate_pipeline_ids_defers_unknown_ids_to_load_path ... ok
+test tests::validate_pipeline_ids_rejects_known_incompatible_pair ... ok
+test tests::visualize_bbox_result_types_keep_bbox_dispatch ... ok
+test tests::visualize_detect_result_uses_detect_model_type ... ok
+test tests::visualize_pipeline_result_uses_detector_model_type ... ok
+test tests::viz_output_extension_is_always_lowercase ... ok
+test tests::viz_output_extension_jpeg_yields_jpg ... ok
+test tests::viz_output_extension_png_yields_png ... ok
+test tests::viz_output_extension_unknown_format_falls_back_to_png ... ok
+
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+=== CARGO CLIPPY --all-targets --workspace --exclude sparrow-engine-python -D warnings ===
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+   Compiling sparrow-engine-gpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-gpu)
+    Checking sparrow-engine-types v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-types)
+    Checking sparrow-engine-core v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-core)
+    Checking sparrow-engine-server v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-server)
+    Checking sparrow-engine-cli v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.58s
+=== CARGO CLIPPY (sparrow-engine-python --features cpu -D warnings) ===
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+    Checking sparrow-engine-types v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-types)
+    Checking sparrow-engine-core v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-core)
+    Checking sparrow-engine-python v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-python)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.64s
+=== CARGO CLIPPY (sparrow-engine-gpu --no-default-features -D warnings) ===
+warning: /home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/Cargo.toml: file `/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spe`
+  * `bin` target `spe-gpu`
+   Compiling sparrow-engine-cpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-cpu)
+   Compiling sparrow-engine-gpu v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-gpu)
+    Checking sparrow-engine-core v0.1.0 (/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine/sparrow-engine-core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.74s
