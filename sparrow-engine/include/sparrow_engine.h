@@ -453,8 +453,16 @@ struct SparrowEngineAudioResult_v2 *sparrow_engine_detect_audio_v2(const Sparrow
 
 /**
  * Run audio detection with per-segment streaming callback.
- * The callback is invoked on each detected segment as it is produced,
- * allowing the caller to update progress incrementally.
+ *
+ * CPU callback cadence is per-segment: the callback is invoked immediately
+ * after each detected segment is produced, allowing the caller to update
+ * progress incrementally.
+ *
+ * Note: the GPU flavor of this symbol fires callbacks post-detect (after the
+ * full chunk loop completes) rather than per-segment. Callers writing
+ * flavor-agnostic UI code should not assume per-segment cadence; see the
+ * matching doc-comment in `sparrow-engine-gpu/src/ffi.rs`.
+ *
  * Returns the complete result (same as `sparrow_engine_detect_audio`).
  *
  * # Safety

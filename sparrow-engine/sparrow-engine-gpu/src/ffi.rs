@@ -1412,9 +1412,16 @@ pub type SparrowEngineAudioSegmentCallback =
     unsafe extern "C" fn(segment: *const SparrowEngineAudioSegment, user_data: *mut c_void);
 
 /// Run audio detection with per-segment streaming callback.
+///
 /// GPU callback cadence is post-detect: the full chunk loop completes first,
 /// then the callback is invoked once for each detected segment in chronological
 /// order. This is not a per-batch progress callback.
+///
+/// Note: the CPU flavor of this symbol fires callbacks per-segment (as each
+/// detected segment is produced) rather than post-detect. Callers writing
+/// flavor-agnostic UI code should not assume post-detect cadence; see the
+/// matching doc-comment in `sparrow-engine-cpu/src/ffi.rs`.
+///
 /// Returns the complete result (same as `sparrow_engine_detect_audio`).
 ///
 /// # Safety
