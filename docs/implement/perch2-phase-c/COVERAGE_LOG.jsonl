@@ -3,3 +3,7 @@
 {"round":1,"agent":"coder-python","file":"python-audio-classes","action":"fixed","items":["python-audio-classes"],"commit":"cec6ed95ed2c2cab872e71e9249651db594d1f09","signature":"AudioClass","report_anchor":"round_01/coder-python_report.md#python-audio-classes"}
 {"round":1,"agent":"coder-ffi-gpu","file":"ffi-v2-audio-gpu","action":"fixed","items":["sparrow_engine_detect_audio_v2"],"commit":"9b73e03","report_anchor":"round_01/coder-ffi-gpu_report.md#ffi-v2-audio-gpu"}
 {"round":1,"agent":"coder-ffi-cpu","file":"ffi-v2-audio-cpu","action":"fixed","commit":"d54d5427c42e0758796b5f750bcb5502f9637580","signature":"sparrow_engine_detect_audio_v2","report_anchor":"coder-ffi-cpu_report.md#ffi-v2-audio-cpu"}
+{"round":1,"agent":"inquisitor","file":"cli-multiclass-display","action":"verified","report_anchor":"round_01/inquisitor_review.md#cli-multiclass-display"}
+{"round":1,"agent":"inquisitor","file":"ffi-v2-audio-gpu","action":"verified","report_anchor":"round_01/inquisitor_review.md#ffi-v2-audio-gpu"}
+{"round":1,"agent":"inquisitor","file":"server-audio-classes","action":"verified","report_anchor":"round_01/inquisitor_review.md#server-audio-classes"}
+{"round":1,"agent":"inquisitor","file":"python-audio-classes","action":"verified","report_anchor":"round_01/inquisitor_review.md#python-audio-classes"}
