@@ -12,11 +12,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ort::session::Session;
 
-use sparrow_engine_types::manifest::{self, ModelManifest, PipelineManifest, PostprocessMethod};
-use sparrow_engine_types::{derive_model_type, SparrowEngineError, ModelInfo, ModelType, Result};
-
-#[cfg(test)]
-use sparrow_engine_types::manifest::PreprocessMethod;
+use sparrow_engine_types::manifest::{
+    self, ModelManifest, PipelineManifest, PostprocessMethod, PreprocessMethod,
+};
+use sparrow_engine_types::{derive_model_type, ModelInfo, ModelType, Result, SparrowEngineError};
 
 // Phase 3.8 Phase A back-compat re-exports: consumers historically imported
 // `sparrow_engine::engine::Device` and `sparrow_engine::engine::EngineConfig`
@@ -910,9 +909,54 @@ fn validate_output_shape(session: &Session, manifest: &ModelManifest) -> Result<
         });
     }
 
-    let first_output = &outputs[0];
-    let shape = output_shape_dims(first_output);
+    let output_names: Vec<&str> = outputs.iter().map(|output| output.name()).collect();
+    let output_index = select_validation_output_index(
+        &output_names,
+        &manifest.preprocess_method,
+        method,
+        &manifest.id,
+    )?;
+    let output = &outputs[output_index];
+    let shape = output_shape_dims(output);
     validate_output_dims(&shape, &manifest.id, method)
+}
+
+fn select_validation_output_index(
+    output_names: &[&str],
+    preprocess: &PreprocessMethod,
+    method: &PostprocessMethod,
+    model_id: &str,
+) -> Result<usize> {
+    if output_names.is_empty() {
+        return Err(SparrowEngineError::OutputShapeMismatch {
+            id: model_id.to_string(),
+            shape: "no outputs".to_string(),
+            method: method.as_str().to_string(),
+        });
+    }
+    if output_names.len() == 1 {
+        return Ok(0);
+    }
+    if matches!(
+        (preprocess, method),
+        (
+            PreprocessMethod::RawAudio { .. },
+            PostprocessMethod::Softmax
+        )
+    ) {
+        return output_names
+            .iter()
+            .position(|name| *name == "label")
+            .ok_or_else(|| SparrowEngineError::OutputShapeMismatch {
+                id: model_id.to_string(),
+                shape: format!(
+                    "multi-output RawAudio+Softmax missing required output named 'label'; outputs [{}]",
+                    output_names.join(", ")
+                ),
+                method: method.as_str().to_string(),
+            });
+    }
+    Ok(0)
 }
 
 fn validate_output_dims(shape: &[i64], model_id: &str, method: &PostprocessMethod) -> Result<()> {
@@ -1172,6 +1216,79 @@ mod tests {
         assert_eq!(format_shape(&[1, -1, 6]), "[1, ?, 6]");
         assert_eq!(format_shape(&[1, 3]), "[1, 3]");
         assert_eq!(format_shape(&[]), "[]");
+    }
+
+    fn raw_audio_preprocess() -> PreprocessMethod {
+        PreprocessMethod::RawAudio {
+            sample_rate: 32_000,
+            window_samples: 160_000,
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn select_validation_output_index_keeps_single_output_raw_softmax() {
+        assert_eq!(
+            select_validation_output_index(
+                &["embedding"],
+                &raw_audio_preprocess(),
+                &PostprocessMethod::Softmax,
+                "model",
+            )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn select_validation_output_index_uses_label_for_multi_output_raw_softmax() {
+        assert_eq!(
+            select_validation_output_index(
+                &["embedding", "spatial_embedding", "spectrogram", "label"],
+                &raw_audio_preprocess(),
+                &PostprocessMethod::Softmax,
+                "perch2",
+            )
+            .unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn select_validation_output_index_rejects_multi_output_raw_softmax_without_label() {
+        let err = select_validation_output_index(
+            &["embedding", "spectrogram"],
+            &raw_audio_preprocess(),
+            &PostprocessMethod::Softmax,
+            "bad-audio",
+        )
+        .unwrap_err();
+
+        match err {
+            SparrowEngineError::OutputShapeMismatch { shape, .. } => {
+                assert!(shape.contains("missing required output named 'label'"));
+                assert!(shape.contains("embedding"));
+                assert!(shape.contains("spectrogram"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn select_validation_output_index_keeps_first_output_for_non_raw_softmax() {
+        assert_eq!(
+            select_validation_output_index(
+                &["scores", "aux"],
+                &PreprocessMethod::Resize,
+                &PostprocessMethod::Softmax,
+                "image-classifier",
+            )
+            .unwrap(),
+            0
+        );
     }
 
     #[test]
