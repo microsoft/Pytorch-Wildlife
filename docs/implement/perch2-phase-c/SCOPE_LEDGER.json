@@ -1,0 +1,68 @@
+{
+  "skill": "implement",
+  "convergence_mode": "editing",
+  "created_round": 1,
+  "created_at": "2026-05-23T03:29:10Z",
+  "repo_root": "/home/miao/repos/PW_refactor/Pytorch-Wildlife",
+  "scope_items": [
+    {
+      "id": "cli-multiclass-display",
+      "type": "subtask",
+      "coder": "coder-cli",
+      "owned_files": [
+        "sparrow-engine/sparrow-engine-cli/src/main.rs"
+      ],
+      "description": "Wire top-K AudioClass info into the spe detect-audio CLI output. Add AudioClassOutput { class_idx: u32, label: Option<String>, probability: f32 } and extend AudioSegmentOutput.classes (Option<Vec> so binary detectors stay backward-compatible: skip the field when classes.len() <= 1; populate when > 1). For merged-range path, switch to merge_segments_with_class with class mapper = |s| s.classes.first().and_then(|c| c.label.clone()) so classifier same-top-1 windows merge correctly. CSV unchanged (back-compat). Update the seg() and AudioSegment struct-literal fixtures in tests/inline tests in main.rs to keep classes: Vec::new() construction valid (already done in earlier turn).",
+      "added_round": 1
+    },
+    {
+      "id": "ffi-v2-audio-cpu",
+      "type": "subtask",
+      "coder": "coder-ffi-cpu",
+      "owned_files": [
+        "sparrow-engine/sparrow-engine-cpu/src/ffi.rs",
+        "sparrow-engine/sparrow-engine-cpu/exports.def",
+        "sparrow-engine/sparrow-engine-cpu/sparrow_engine.h",
+        "sparrow-engine/include/sparrow_engine.h",
+        "sparrow-engine/sparrow-engine-cpu/tests/integration_ffi_symbols.rs"
+      ],
+      "description": "Add FFI V2 for audio detection per the project _v2 ABI-evolution rule (no reserved fields). New repr(C) types: SparrowEngineAudioClass { class_idx: u32, label: *const c_char (nullable), probability: f32 }. SparrowEngineAudioSegment_v2 { start_time_s, end_time_s, confidence, classes: *const SparrowEngineAudioClass, classes_len: usize }. SparrowEngineAudioResult_v2 { data: *const SparrowEngineAudioSegment_v2, len, duration_s, sample_rate, processing_time_ms }. New exports: sparrow_engine_detect_audio_v2(model, audio_path, opts) -> *mut SparrowEngineAudioResult_v2 and sparrow_engine_audio_result_v2_free(ptr). The owner struct must keep label CStrings alive for the lifetime of the result. Keep existing V1 audio FFI unchanged (back-compat). Update exports.def, regenerate sparrow_engine.h (cbindgen runs from build.rs — committing the generated file is the convention; verify by checking the existing checked-in copies match the generated output bit-for-bit). Update integration_ffi_symbols.rs constant: 32 -> 34. Also copy the updated header to include/sparrow_engine.h (or run the same generator pointed there, mirroring the existing checked-in state).",
+      "added_round": 1
+    },
+    {
+      "id": "ffi-v2-audio-gpu",
+      "type": "subtask",
+      "coder": "coder-ffi-gpu",
+      "owned_files": [
+        "sparrow-engine/sparrow-engine-gpu/src/ffi.rs",
+        "sparrow-engine/sparrow-engine-gpu/exports.def",
+        "sparrow-engine/sparrow-engine-gpu/sparrow_engine.h"
+      ],
+      "description": "GPU mirror of FFI V2. Add the same V2 types + sparrow_engine_detect_audio_v2 + sparrow_engine_audio_result_v2_free exports. For RawAudio models, the V2 endpoint must error with the same NotImplementedYet message used everywhere else in the GPU crate (consult sparrow-engine-gpu/src/detect_audio.rs for the exact error site; the V2 should not silently regress to V1 for unsupported preprocess methods). Update exports.def and regenerate sparrow_engine.h via build.rs. Coordinate the V2 type definitions with coder-ffi-cpu so the layouts are bit-identical (use a STATUS BLOCKED-ON=coder-ffi-cpu if needed).",
+      "added_round": 1
+    },
+    {
+      "id": "server-audio-classes",
+      "type": "subtask",
+      "coder": "coder-server",
+      "owned_files": [
+        "sparrow-engine/sparrow-engine-server/src/response.rs",
+        "sparrow-engine/sparrow-engine-server/src/handlers/audio.rs"
+      ],
+      "description": "Additive optional classes field on the audio detect HTTP response (per Phase 4 W2: additive optional fields keep schema 1.0). Add #[derive(Serialize)] AudioClassResponse { class_idx: u32, label: Option<String>, probability: f32 }. Extend AudioSegmentResponse with classes: Option<Vec<AudioClassResponse>> using #[serde(skip_serializing_if = \"Option::is_none\")]; populate Some(vec) when seg.classes.len() > 1, None otherwise (so existing binary-detector consumers see the same JSON shape). Update the From<AudioSegment> impl accordingly. The handlers/audio.rs file just consumes AudioSegmentResponse::from — usually no change needed there beyond the existing .map call.",
+      "added_round": 1
+    },
+    {
+      "id": "python-audio-classes",
+      "type": "subtask",
+      "coder": "coder-python",
+      "owned_files": [
+        "sparrow-engine/sparrow-engine-python/src/lib.rs",
+        "sparrow-engine/sparrow-engine-python/python/sparrow_engine/_core.pyi"
+      ],
+      "description": "Add PyO3 AudioClass class with class_idx (int), label (Optional[str]), probability (float) attributes. Add classes: list[AudioClass] attribute on AudioSegment (always populated as a list, never None — Python idiomatic; empty list for binary detectors with only 1 class collapses to the same readability). Register AudioClass with m.add_class in pymodule init. Update the .pyi stub for AudioClass and AudioSegment.classes. Update __repr__ on AudioSegment if you want classes-aware display (optional). When building the AudioResult from engine output at lib.rs:747, populate classes by mapping s.classes -> AudioClass.",
+      "added_round": 1
+    }
+  ],
+  "anti_narrowing_clause": "This ledger is the convergence anchor. New subtasks may be APPENDED with added_round marker; existing entries may NEVER be removed."
+}
