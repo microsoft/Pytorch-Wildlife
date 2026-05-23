@@ -303,6 +303,34 @@ impl PipelineResult {
     }
 }
 
+/// A single class entry within an AudioSegment's top-K classification output.
+#[pyclass(frozen, module = "sparrow_engine._sparrow_engine_core")]
+#[derive(Clone)]
+pub struct AudioClass {
+    #[pyo3(get)]
+    pub class_idx: u32,
+    #[pyo3(get)]
+    pub label: Option<String>,
+    #[pyo3(get)]
+    pub probability: f32,
+}
+
+#[pymethods]
+impl AudioClass {
+    fn __repr__(&self) -> String {
+        match &self.label {
+            Some(label) => format!(
+                "AudioClass(idx={}, label='{}', p={:.4})",
+                self.class_idx, label, self.probability
+            ),
+            None => format!(
+                "AudioClass(idx={}, label=None, p={:.4})",
+                self.class_idx, self.probability
+            ),
+        }
+    }
+}
+
 /// A single detected audio segment.
 #[pyclass(frozen, module = "sparrow_engine._sparrow_engine_core")]
 #[derive(Clone)]
@@ -313,6 +341,8 @@ pub struct AudioSegment {
     pub end_time_s: f32,
     #[pyo3(get)]
     pub confidence: f32,
+    #[pyo3(get)]
+    pub classes: Vec<AudioClass>,
 }
 
 #[pymethods]
@@ -413,6 +443,23 @@ fn convert_classification(c: &sparrow_engine::Classification) -> Classification 
         label: c.label.clone(),
         label_id: c.label_id,
         confidence: c.confidence,
+    }
+}
+
+fn convert_audio_class(c: &sparrow_engine::AudioClass) -> AudioClass {
+    AudioClass {
+        class_idx: c.class_idx,
+        label: c.label.clone(),
+        probability: c.probability,
+    }
+}
+
+fn convert_audio_segment(s: &sparrow_engine::AudioSegment) -> AudioSegment {
+    AudioSegment {
+        start_time_s: s.start_time_s,
+        end_time_s: s.end_time_s,
+        confidence: s.confidence,
+        classes: s.classes.iter().map(convert_audio_class).collect(),
     }
 }
 
@@ -741,15 +788,7 @@ impl PyEngine {
                             duration_s: r.duration_s,
                             sample_rate: r.sample_rate,
                             processing_time_ms: r.processing_time_ms,
-                            segments: r
-                                .segments
-                                .iter()
-                                .map(|s| AudioSegment {
-                                    start_time_s: s.start_time_s,
-                                    end_time_s: s.end_time_s,
-                                    confidence: s.confidence,
-                                })
-                                .collect(),
+                            segments: r.segments.iter().map(convert_audio_segment).collect(),
                         });
                     }
                     Err(e) => {
@@ -1369,6 +1408,7 @@ fn _sparrow_engine_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ClassifyResult>()?;
     m.add_class::<PipelineDetection>()?;
     m.add_class::<PipelineResult>()?;
+    m.add_class::<AudioClass>()?;
     m.add_class::<AudioSegment>()?;
     m.add_class::<AudioResult>()?;
     m.add_class::<ModelInfo>()?;
@@ -1561,6 +1601,30 @@ mod tests {
         assert_eq!(dst.label, "deer");
         assert_eq!(dst.label_id, 42);
         assert_eq!(dst.confidence, 0.87);
+    }
+
+    // --- convert_audio_segment ---
+
+    #[test]
+    fn convert_audio_segment_maps_classes() {
+        let src = sparrow_engine::AudioSegment {
+            start_time_s: 1.0,
+            end_time_s: 2.5,
+            confidence: 0.91,
+            classes: vec![sparrow_engine::AudioClass {
+                class_idx: 7,
+                label: Some("sparrow".to_owned()),
+                probability: 0.91,
+            }],
+        };
+        let dst = convert_audio_segment(&src);
+        assert_eq!(dst.start_time_s, 1.0);
+        assert_eq!(dst.end_time_s, 2.5);
+        assert_eq!(dst.confidence, 0.91);
+        assert_eq!(dst.classes.len(), 1);
+        assert_eq!(dst.classes[0].class_idx, 7);
+        assert_eq!(dst.classes[0].label.as_deref(), Some("sparrow"));
+        assert_eq!(dst.classes[0].probability, 0.91);
     }
 
     // --- convert_model_type ---
