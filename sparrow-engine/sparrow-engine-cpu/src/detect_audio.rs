@@ -215,8 +215,8 @@ fn prepare_audio_detection(
             })
         }
         PreprocessMethod::RawAudio {
-            sample_rate: _,
             window_samples,
+            ..
         } => {
             let segment_samples = *window_samples as usize;
             let stride_samples = (segment_stride_s * sample_rate as f32).round() as usize;
@@ -369,16 +369,8 @@ fn detect_audio_loop_mel(
     let detector_label = prep.labels.first().cloned();
 
     // Pre-compute all segment offsets (matching Python golden termination logic).
-    let mut offsets = Vec::new();
-    let mut offset = 0usize;
-    while offset < total_samples {
-        offsets.push(offset);
-        let remaining = total_samples - offset;
-        if remaining <= segment_samples {
-            break;
-        }
-        offset += stride_samples;
-    }
+    let offsets =
+        preprocess_audio::compute_segment_offsets(total_samples, segment_samples, stride_samples);
 
     let mut segments = Vec::new();
 
@@ -484,9 +476,12 @@ fn detect_audio_loop_mel(
             let confidence = sigmoid(logit);
 
             if confidence >= threshold {
-                let start_s = seg_offset as f32 / sample_rate as f32;
-                let actual_end = (seg_offset + segment_samples).min(total_samples);
-                let end_s = actual_end as f32 / sample_rate as f32;
+                let (start_s, end_s) = preprocess_audio::segment_time_range(
+                    seg_offset,
+                    segment_samples,
+                    total_samples,
+                    sample_rate,
+                );
                 let seg = AudioSegment {
                     start_time_s: start_s,
                     end_time_s: end_s,
@@ -547,17 +542,10 @@ fn detect_audio_loop_raw(
     let sample_rate = prep.sample_rate;
     let top_k = prep.top_k.min(num_classes).max(1);
 
-    // Pre-compute window offsets (mirrors the mel path's termination logic).
-    let mut offsets = Vec::new();
-    let mut offset = 0usize;
-    while offset < total_samples {
-        offsets.push(offset);
-        let remaining = total_samples - offset;
-        if remaining <= segment_samples {
-            break;
-        }
-        offset += stride_samples;
-    }
+    // Pre-compute window offsets (same termination as the mel path; see
+    // `preprocess_audio::compute_segment_offsets`).
+    let offsets =
+        preprocess_audio::compute_segment_offsets(total_samples, segment_samples, stride_samples);
 
     let mut segments = Vec::with_capacity(offsets.len());
 
@@ -651,9 +639,12 @@ fn detect_audio_loop_raw(
                 .collect();
             let top1_prob = classes.first().map(|c| c.probability).unwrap_or(0.0);
 
-            let start_s = seg_offset as f32 / sample_rate as f32;
-            let actual_end = (seg_offset + segment_samples).min(total_samples);
-            let end_s = actual_end as f32 / sample_rate as f32;
+            let (start_s, end_s) = preprocess_audio::segment_time_range(
+                seg_offset,
+                segment_samples,
+                total_samples,
+                sample_rate,
+            );
             let seg = AudioSegment {
                 start_time_s: start_s,
                 end_time_s: end_s,
@@ -680,6 +671,18 @@ fn detect_audio_loop_raw(
         processing_time_ms: elapsed.as_secs_f32() * 1000.0,
     })
 }
+
+// Local softmax + top-K helpers for the raw-audio classifier path.
+//
+// These intentionally duplicate the math in
+// `sparrow_engine_core::postprocess::try_softmax` because the audio path
+// emits `AudioClass { class_idx, label, probability }`, while `try_softmax`
+// emits `Classification { label_id, label, confidence }`. The two structs
+// are not interchangeable, so a primitive-level dedup would require
+// splitting `try_softmax` into a `softmax_probs(&row) -> Vec<f32>` that
+// both consumers wrap — tracked under the round 1 auditor plan's
+// cross-scope finding #2 (`postprocess.rs` is outside the round 1
+// audit-fix owned-file set).
 
 /// Numerically-stable softmax over a slice of logits.
 fn softmax(logits: &[f32]) -> Vec<f32> {

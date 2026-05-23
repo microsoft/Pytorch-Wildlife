@@ -219,19 +219,19 @@ mod tests {
                 start_time_s: 0.0,
                 end_time_s: 1.0,
                 confidence: 0.5,
-            classes: Vec::new(),
+                classes: Vec::new(),
             },
             AudioSegment {
                 start_time_s: 1.0,
                 end_time_s: 2.0,
                 confidence: 0.7,
-            classes: Vec::new(),
+                classes: Vec::new(),
             },
             AudioSegment {
                 start_time_s: 5.0,
                 end_time_s: 6.0,
                 confidence: 0.6,
-            classes: Vec::new(),
+                classes: Vec::new(),
             },
         ];
         let ranges = merge_segments(&segs, 0.5);

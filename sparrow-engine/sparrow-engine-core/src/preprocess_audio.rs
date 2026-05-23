@@ -296,6 +296,54 @@ pub fn validate_audio_window_params(
     Ok((segment_samples, stride_samples))
 }
 
+/// Enumerate sliding-window start offsets over `total_samples`.
+///
+/// Mirrors the inclusive-tail termination contract used by the audio detect
+/// paths: every offset `< total_samples` is emitted, and iteration stops
+/// after the first offset whose remaining `total_samples - offset` is
+/// `<= segment_samples` (i.e. the last window may be tail-padded by the
+/// caller). Empty input (`total_samples == 0`) returns an empty `Vec`.
+///
+/// Used by `sparrow-engine-cpu::detect_audio` (mel + raw paths) and
+/// `sparrow-engine-gpu::models::audio` (whole-clip + per-batch strategies).
+/// Centralizing here keeps the windowing termination invariant in a single
+/// place — previously each call site carried a hand-rolled copy.
+pub fn compute_segment_offsets(
+    total_samples: usize,
+    segment_samples: usize,
+    stride_samples: usize,
+) -> Vec<usize> {
+    let mut offsets = Vec::new();
+    let mut offset = 0usize;
+    while offset < total_samples {
+        offsets.push(offset);
+        let remaining = total_samples - offset;
+        if remaining <= segment_samples {
+            break;
+        }
+        offset += stride_samples;
+    }
+    offsets
+}
+
+/// Compute the `(start_s, end_s)` time range for a sliding-window segment.
+///
+/// `end_s` clamps the segment end to `total_samples` so a tail-padded window
+/// reports its real (unpadded) end on the time axis — matching the contract
+/// shared by the CPU mel/raw audio detect paths and the GPU `collect_segments`.
+pub fn segment_time_range(
+    seg_offset: usize,
+    segment_samples: usize,
+    total_samples: usize,
+    sample_rate: u32,
+) -> (f32, f32) {
+    let start_s = seg_offset as f32 / sample_rate as f32;
+    let actual_end = (seg_offset + segment_samples).min(total_samples);
+    let end_s = actual_end as f32 / sample_rate as f32;
+    (start_s, end_s)
+}
+
+
 /// Pre-computed mel filterbank matrix for reuse across segments.
 ///
 /// The filterbank depends only on static config parameters (n_mels, n_fft,

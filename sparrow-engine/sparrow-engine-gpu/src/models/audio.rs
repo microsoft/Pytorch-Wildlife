@@ -566,7 +566,7 @@ impl AudioModel {
 
         // Pre-compute segment offsets (matches sparrow-engine-cpu termination logic).
         let segment_offsets =
-            compute_segment_offsets(total_samples, win.segment_samples, win.stride_samples);
+            preprocess_audio::compute_segment_offsets(total_samples, win.segment_samples, win.stride_samples);
         let n_segments = segment_offsets.len();
         // Shared audio option validation guarantees `segment_samples >= n_fft`,
         // so the subtraction below cannot underflow.
@@ -1141,7 +1141,7 @@ impl AudioModel {
         let samples = preprocess_audio::load_audio(audio, &self.config)?;
         let total_samples = samples.data.len();
         let segment_offsets =
-            compute_segment_offsets(total_samples, win.segment_samples, win.stride_samples);
+            preprocess_audio::compute_segment_offsets(total_samples, win.segment_samples, win.stride_samples);
         let n_segments = segment_offsets.len();
         // Shared audio option validation guarantees `segment_samples >= n_fft`,
         // so the subtraction below cannot underflow.
@@ -1309,28 +1309,6 @@ pub(crate) struct WindowParams {
     pub top_db: f32,
 }
 
-/// Mirror of `sparrow-engine-cpu`'s segment-offset enumeration
-/// (`sparrow-engine-cpu/src/detect_audio.rs:204-214`). Returns the absolute sample
-/// offset of every segment start; the last segment may be tail-padded if
-/// `total_samples - last_offset < segment_samples`.
-fn compute_segment_offsets(
-    total_samples: usize,
-    segment_samples: usize,
-    stride_samples: usize,
-) -> Vec<usize> {
-    let mut offsets = Vec::new();
-    let mut offset = 0usize;
-    while offset < total_samples {
-        offsets.push(offset);
-        let remaining = total_samples - offset;
-        if remaining <= segment_samples {
-            break;
-        }
-        offset += stride_samples;
-    }
-    offsets
-}
-
 fn extract_audio_params(manifest: &ModelManifest) -> Result<(u32, f32, f32, f32)> {
     let sample_rate = match &manifest.preprocess_method {
         PreprocessMethod::MelSpectrogram { sample_rate, .. } => *sample_rate,
@@ -1395,9 +1373,12 @@ pub(crate) fn collect_segments(
         }
         let confidence = sigmoid(logit);
         if confidence >= win.threshold {
-            let start_s = seg_offset as f32 / win.sample_rate as f32;
-            let actual_end = (seg_offset + win.segment_samples).min(total_samples);
-            let end_s = actual_end as f32 / win.sample_rate as f32;
+            let (start_s, end_s) = preprocess_audio::segment_time_range(
+                seg_offset,
+                win.segment_samples,
+                total_samples,
+                win.sample_rate,
+            );
             let seg = AudioSegment {
                 start_time_s: start_s,
                 end_time_s: end_s,
@@ -1573,8 +1554,9 @@ mod tests {
 
     #[test]
     fn segment_offsets_match_cpu_loop() {
-        // Mirror sparrow-engine-cpu/src/detect_audio.rs:204-214 termination logic.
-        let offsets = compute_segment_offsets(48000, 48000, 14400);
+        // Cross-check the shared core helper against the documented termination
+        // contract used by both CPU + GPU audio sliding-window code.
+        let offsets = preprocess_audio::compute_segment_offsets(48000, 48000, 14400);
         assert_eq!(
             offsets.len(),
             1,
@@ -1586,12 +1568,12 @@ mod tests {
         // 0, 14400, 28800, 43200, 57600 (the last is partial-tail; CPU
         // breaks AFTER pushing it).
         // 2s @ 48k = 96000 samples.
-        let offsets = compute_segment_offsets(96000, 48000, 14400);
+        let offsets = preprocess_audio::compute_segment_offsets(96000, 48000, 14400);
         assert_eq!(offsets.len(), 5);
         assert_eq!(offsets, vec![0, 14400, 28800, 43200, 57600]);
 
         // Empty audio yields no segments.
-        let offsets = compute_segment_offsets(0, 48000, 14400);
+        let offsets = preprocess_audio::compute_segment_offsets(0, 48000, 14400);
         assert!(offsets.is_empty());
     }
 
