@@ -227,6 +227,25 @@ fn prepare_audio_detection(
                 ));
             }
 
+            // Surface the silent-ignore: raw_audio models bake the window length
+            // into the ONNX (e.g. Perch 2: [batch, 160000] is the Conformer's
+            // learned positional-embedding length, not a re-export quirk). Stride
+            // overrides DO work; segment_duration overrides cannot be honored.
+            // Only warn when the user's override differs from the architectural
+            // window — passing the matching value is consistent intent.
+            if let Some(requested_s) = opts.segment_duration_s {
+                let window_seconds = segment_samples as f32 / sample_rate as f32;
+                if (requested_s - window_seconds).abs() > 1e-3 {
+                    tracing::warn!(
+                        model_id = %manifest.id,
+                        window_samples = segment_samples,
+                        window_seconds,
+                        requested_s,
+                        "segment_duration_s override ignored: raw_audio models have an architecturally fixed window. Stride override still applies."
+                    );
+                }
+            }
+
             let audio_samples =
                 preprocess_audio::load_audio_at_sample_rate(audio, sample_rate)?;
 
