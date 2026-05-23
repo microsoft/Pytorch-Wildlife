@@ -2,7 +2,7 @@
 # scripts/download_models.sh — download the sparrow-engine model zoo from Zenodo.
 #
 # Downloads the ONNX model bundles from the public Zenodo record
-# (https://doi.org/10.5281/zenodo.20358586, concept DOI 10.5281/zenodo.20348978
+# (https://doi.org/10.5281/zenodo.20360316, concept DOI 10.5281/zenodo.20348978
 # which always resolves to the latest version), verifies SHA-256 integrity,
 # and unpacks each model into a layout directly loadable by sparrow-engine
 # (i.e. `<dest>/<model_id>/manifest.toml` + `model.onnx` + `labels.txt`).
@@ -26,13 +26,14 @@
 set -euo pipefail
 
 # ---- Constants ----
-ZENODO_RECORD="${ZENODO_RECORD:-20358586}"
+ZENODO_RECORD="${ZENODO_RECORD:-20360316}"
 ZENODO_DOI="10.5281/zenodo.${ZENODO_RECORD}"
 ZENODO_BASE="https://zenodo.org/records/${ZENODO_RECORD}/files"
 
-# All 16 models published in the v0.3.0 Zenodo bundle.
+# All 16 models published in the v0.4.0 Zenodo bundle.
 # (v0.1.0 had 14; v0.2.0 added perch-v2 — bird vocalization classifier;
-#  v0.3.0 added md-audiobirds-v1 — default audio detector, MIT.)
+#  v0.3.0 added md-audiobirds-v1 — default audio detector, MIT;
+#  v0.4.0 — OWL + HerdNet manifest fix (subtype = "overhead"). No new models.)
 ALL_MODELS=(
   "MDV6-yolov10-e"
   "MDV6-yolov10-c"
