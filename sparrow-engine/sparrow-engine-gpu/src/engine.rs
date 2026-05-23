@@ -664,8 +664,12 @@ impl Engine {
     }
 
     /// Resolve the default model ID for a given model type. Resolution
-    /// order: env var override → manifest `default = true` → unique-of-type.
+    /// order: env var override (type-validated against the catalog) → manifest
+    /// `default = true` → unique-of-type. If the env-var value resolves to a
+    /// model whose `model_type` differs from the requested type, a
+    /// `tracing::warn!` is emitted and resolution falls through to the scan.
     pub fn resolve_default_model(&self, model_type: ModelType) -> Option<String> {
+        let available = self.list_available_models();
         let env_var = match model_type {
             ModelType::Detector | ModelType::OverheadDetector => "SPARROW_ENGINE_DEFAULT_DETECTOR",
             ModelType::Classifier => "SPARROW_ENGINE_DEFAULT_CLASSIFIER",
@@ -674,10 +678,21 @@ impl Engine {
         };
         if let Ok(val) = std::env::var(env_var) {
             if !val.is_empty() {
-                return Some(val);
+                match available.iter().find(|m| m.id == val) {
+                    Some(info) if info.model_type != model_type => {
+                        tracing::warn!(
+                            env_var = env_var,
+                            requested = ?model_type,
+                            resolved = ?info.model_type,
+                            id = %val,
+                            "env var resolved to a model whose type does not match the requested type; \
+                             falling through to manifest scan",
+                        );
+                    }
+                    _ => return Some(val),
+                }
             }
         }
-        let available = self.list_available_models();
         let matching: Vec<&ModelInfo> = available
             .iter()
             .filter(|m| m.model_type == model_type)

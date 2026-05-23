@@ -621,16 +621,23 @@ impl Engine {
     ///
     /// Resolution order:
     /// 1. Environment variable (`SPARROW_ENGINE_DEFAULT_DETECTOR`, `SPARROW_ENGINE_DEFAULT_CLASSIFIER`,
-    ///    `SPARROW_ENGINE_DEFAULT_AUDIO_DETECTOR`, `SPARROW_ENGINE_DEFAULT_AUDIO_CLASSIFIER`)
+    ///    `SPARROW_ENGINE_DEFAULT_AUDIO_DETECTOR`, `SPARROW_ENGINE_DEFAULT_AUDIO_CLASSIFIER`).
+    ///    If the env-var value resolves to a known model whose `model_type` differs
+    ///    from the requested type, a `tracing::warn!` is emitted and resolution falls
+    ///    through to (2). Unknown IDs are returned unchanged so downstream
+    ///    "model not found" errors fire as before.
     /// 2. Manifest with `default = true` matching the requested type
     /// 3. If exactly one model of the requested type exists, use it
     /// 4. `None` otherwise (ambiguous — caller must specify)
     pub fn resolve_default_model(&self, model_type: ModelType) -> Option<String> {
+        let available = self.list_available_models();
+
         // 1. Check env var override.
         let env_var = match model_type {
-            // Standard and overhead detectors share the detector env var: subtype
-            // is a rendering hint, not a product-level taxonomy, and `spe detect`
-            // accepts either.
+            // Standard and overhead detectors share the detector env var, but
+            // the resolved ID is type-validated below: an env var pointing at
+            // an OverheadDetector when a Detector was requested falls through
+            // to the manifest scan rather than silently widening.
             ModelType::Detector | ModelType::OverheadDetector => "SPARROW_ENGINE_DEFAULT_DETECTOR",
             ModelType::Classifier => "SPARROW_ENGINE_DEFAULT_CLASSIFIER",
             ModelType::AudioDetector => "SPARROW_ENGINE_DEFAULT_AUDIO_DETECTOR",
@@ -638,12 +645,23 @@ impl Engine {
         };
         if let Ok(val) = std::env::var(env_var) {
             if !val.is_empty() {
-                return Some(val);
+                match available.iter().find(|m| m.id == val) {
+                    Some(info) if info.model_type != model_type => {
+                        tracing::warn!(
+                            env_var = env_var,
+                            requested = ?model_type,
+                            resolved = ?info.model_type,
+                            id = %val,
+                            "env var resolved to a model whose type does not match the requested type; \
+                             falling through to manifest scan",
+                        );
+                    }
+                    _ => return Some(val),
+                }
             }
         }
 
         // 2. Scan available models.
-        let available = self.list_available_models();
         let matching: Vec<&ModelInfo> = available
             .iter()
             .filter(|m| m.model_type == model_type)
@@ -2097,6 +2115,135 @@ mod tests {
             "labels() Arc strong_count must be >= 2 (handle + engine map share); got {strong}"
         );
 
+        drop(engine);
+    }
+
+    #[test]
+    #[serial]
+    fn resolve_default_model_strict_env_var_falls_through_on_type_mismatch() {
+        // RP-8: SPARROW_ENGINE_DEFAULT_DETECTOR pointing at an OverheadDetector
+        // when a Detector is requested must fall through to the manifest scan
+        // (with a tracing::warn!), not silently widen the env-var result.
+        ENGINE_EXISTS.store(false, Ordering::SeqCst);
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // Standard Detector manifest (letterbox + yolo_e2e).
+        let std_dir = dir.path().join("std-det");
+        std::fs::create_dir(&std_dir).unwrap();
+        std::fs::write(
+            std_dir.join("manifest.toml"),
+            r#"
+[model]
+id = "std-det"
+format = "onnx"
+file = "model.onnx"
+
+[preprocessing]
+method = "letterbox"
+input_size = [640, 640]
+layout = "nchw"
+normalization = "unit"
+
+[inference]
+strategy = "single"
+
+[postprocessing]
+method = "yolo_e2e"
+
+[labels]
+file = "labels.txt"
+format = "one_per_line"
+"#,
+        )
+        .unwrap();
+        std::fs::write(std_dir.join("labels.txt"), "animal\n").unwrap();
+
+        // OverheadDetector manifest (resize + heatmap_peaks + subtype = "overhead").
+        let ovh_dir = dir.path().join("ovh-det");
+        std::fs::create_dir(&ovh_dir).unwrap();
+        std::fs::write(
+            ovh_dir.join("manifest.toml"),
+            r#"
+[model]
+id = "ovh-det"
+format = "onnx"
+file = "model.onnx"
+subtype = "overhead"
+
+[preprocessing]
+method = "resize"
+input_size = [512, 512]
+layout = "nchw"
+normalization = "imagenet"
+
+[inference]
+strategy = "tiled"
+tile_size = [512, 512]
+tile_overlap = 0
+
+[postprocessing]
+method = "heatmap_peaks"
+peak_threshold = 0.2
+adaptive = false
+point_to_box_half_size = 10
+
+[labels]
+file = "labels.txt"
+format = "name_index_csv"
+"#,
+        )
+        .unwrap();
+        std::fs::write(ovh_dir.join("labels.txt"), "0,animal\n").unwrap();
+
+        let config = EngineConfig::new(Device::Cpu, dir.path().to_path_buf());
+        let engine = Engine::new(config).unwrap();
+
+        // Sanity: scan picks up both, with the expected model_types.
+        let available = engine.list_available_models();
+        assert_eq!(available.len(), 2, "scan must find both manifests");
+        let by_id: std::collections::HashMap<_, _> =
+            available.iter().map(|m| (m.id.as_str(), m.model_type)).collect();
+        assert_eq!(by_id["std-det"], ModelType::Detector);
+        assert_eq!(by_id["ovh-det"], ModelType::OverheadDetector);
+
+        // Clear inherited env state from other tests.
+        std::env::remove_var("SPARROW_ENGINE_DEFAULT_DETECTOR");
+
+        // Case 1: env points at OverheadDetector but caller asks for Detector
+        // → falls through to scan, returns the unique standard Detector.
+        std::env::set_var("SPARROW_ENGINE_DEFAULT_DETECTOR", "ovh-det");
+        assert_eq!(
+            engine.resolve_default_model(ModelType::Detector),
+            Some("std-det".to_string()),
+            "env-var widening must NOT bypass type check; falls through to scan",
+        );
+
+        // Case 2: same env var, caller asks for OverheadDetector → match.
+        assert_eq!(
+            engine.resolve_default_model(ModelType::OverheadDetector),
+            Some("ovh-det".to_string()),
+            "env-var resolves cleanly when requested type matches",
+        );
+
+        // Case 3: env points at the standard Detector, caller asks for Detector.
+        std::env::set_var("SPARROW_ENGINE_DEFAULT_DETECTOR", "std-det");
+        assert_eq!(
+            engine.resolve_default_model(ModelType::Detector),
+            Some("std-det".to_string()),
+        );
+
+        // Case 4: env points at an unknown ID — preserve existing behavior
+        // (return the value so downstream "model not found" surfaces the typo).
+        std::env::set_var("SPARROW_ENGINE_DEFAULT_DETECTOR", "no-such-model");
+        assert_eq!(
+            engine.resolve_default_model(ModelType::Detector),
+            Some("no-such-model".to_string()),
+            "unknown env-var IDs pass through unchanged for downstream error surface",
+        );
+
+        // Cleanup.
+        std::env::remove_var("SPARROW_ENGINE_DEFAULT_DETECTOR");
         drop(engine);
     }
 }
