@@ -340,7 +340,11 @@ fn detect_result_to_c(result: DetectResult) -> *mut SparrowEngineDetections {
         _owner: owned,
     });
     // Now that _owner is at its final heap location, point header.data at it.
-    combined.header.data = combined._owner.detections.as_ptr();
+    combined.header.data = if combined._owner.detections.is_empty() {
+        ptr::null()
+    } else {
+        combined._owner.detections.as_ptr()
+    };
 
     let ptr = Box::into_raw(combined);
     // Return pointer to the header, which is the first field.
@@ -412,7 +416,11 @@ fn classify_result_to_c(result: ClassifyResult) -> *mut SparrowEngineClassifyRes
     });
     // Point at stable heap locations.
     combined.header.label = combined._owner._top1_label.as_ptr();
-    combined.header.top_results = combined._owner.top_results.as_ptr();
+    combined.header.top_results = if combined._owner.top_results.is_empty() {
+        ptr::null()
+    } else {
+        combined._owner.top_results.as_ptr()
+    };
 
     let ptr = Box::into_raw(combined);
     ptr as *mut SparrowEngineClassifyResult
@@ -507,7 +515,11 @@ fn pipeline_result_to_c(result: PipelineResult) -> *mut SparrowEnginePipelineRes
     });
     // Point at stable heap locations.
     combined.header.pipeline_id = combined._owner._pipeline_id.as_ptr();
-    combined.header.data = combined._owner.data.as_ptr();
+    combined.header.data = if combined._owner.data.is_empty() {
+        ptr::null()
+    } else {
+        combined._owner.data.as_ptr()
+    };
 
     let ptr = Box::into_raw(combined);
     ptr as *mut SparrowEnginePipelineResult
@@ -2029,6 +2041,67 @@ mod tests {
     use super::*;
     use crate::types::{AudioClass, AudioSegment};
     use std::ffi::CStr;
+
+    #[test]
+    fn detect_result_to_c_uses_null_data_for_empty_detections() {
+        let result = DetectResult {
+            detections: Vec::new(),
+            image_width: 640,
+            image_height: 480,
+            processing_time_ms: 0.0,
+        };
+
+        let ptr = detect_result_to_c(result);
+        assert!(!ptr.is_null());
+
+        unsafe {
+            let header = &*ptr;
+            assert_eq!(header.len, 0);
+            assert!(header.data.is_null());
+            sparrow_engine_detections_free(ptr);
+        }
+    }
+
+    #[test]
+    fn classify_result_to_c_uses_null_top_results_for_empty_classifications() {
+        let result = ClassifyResult {
+            classifications: Vec::new(),
+            image_width: 640,
+            image_height: 480,
+            processing_time_ms: 0.0,
+        };
+
+        let ptr = classify_result_to_c(result);
+        assert!(!ptr.is_null());
+
+        unsafe {
+            let header = &*ptr;
+            assert_eq!(header.top_results_len, 0);
+            assert!(header.top_results.is_null());
+            sparrow_engine_classify_result_free(ptr);
+        }
+    }
+
+    #[test]
+    fn pipeline_result_to_c_uses_null_data_for_empty_detections() {
+        let result = PipelineResult {
+            pipeline_id: "pipe".to_string(),
+            detections: Vec::new(),
+            image_width: 640,
+            image_height: 480,
+            processing_time_ms: 0.0,
+        };
+
+        let ptr = pipeline_result_to_c(result);
+        assert!(!ptr.is_null());
+
+        unsafe {
+            let header = &*ptr;
+            assert_eq!(header.len, 0);
+            assert!(header.data.is_null());
+            sparrow_engine_pipeline_result_free(ptr);
+        }
+    }
 
     #[test]
     fn audio_result_v2_to_c_preserves_top_k_classes_and_labels() {

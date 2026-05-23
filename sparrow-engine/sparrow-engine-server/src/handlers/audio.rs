@@ -25,6 +25,16 @@ pub struct AudioDetectParams {
     pub halt_on_store_failure: bool,
 }
 
+fn drift_label_for_audio_segment(segment: &AudioSegmentResponse, model_id: &str) -> String {
+    segment
+        .classes
+        .as_ref()
+        .and_then(|classes| classes.first())
+        .and_then(|class| class.label.as_ref())
+        .cloned()
+        .unwrap_or_else(|| model_id.to_string())
+}
+
 pub async fn audio_detect(
     State(state): State<AppState>,
     query: Result<Query<AudioDetectParams>, QueryRejection>,
@@ -101,18 +111,14 @@ pub async fn audio_detect(
     };
 
     if params.store {
-        // Audio segments have no per-segment label on binary detectors
-        // (MD_AudioBirds_V1, the Phase 1 default). Use model_id as the
-        // single observed bucket so PSI degenerates cleanly to 0.0
-        // against a matching single-bucket reference.
         let confidences: Vec<f32> = response.segments.iter().map(|s| s.confidence).collect();
-        let labels: Vec<String> = vec![model_id.clone(); response.segments.len()];
-        let drift = crate::drift::compute_drift_metrics(
-            &confidences,
-            1,
-            &labels,
-            drift_reference.as_ref(),
-        );
+        let labels: Vec<String> = response
+            .segments
+            .iter()
+            .map(|s| drift_label_for_audio_segment(s, &model_id))
+            .collect();
+        let drift =
+            crate::drift::compute_drift_metrics(&confidences, 1, &labels, drift_reference.as_ref());
         let value = serde_json::to_value(&response).unwrap_or(serde_json::Value::Null);
         let record = super::build_log_record(
             &state,
@@ -127,4 +133,63 @@ pub async fn audio_detect(
     }
 
     Ok(Json(response))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::response::AudioClassResponse;
+
+    fn segment(classes: Option<Vec<AudioClassResponse>>) -> AudioSegmentResponse {
+        AudioSegmentResponse {
+            start_time_s: 0.0,
+            end_time_s: 1.0,
+            confidence: 0.5,
+            classes,
+        }
+    }
+
+    fn class(label: Option<&str>, probability: f32) -> AudioClassResponse {
+        AudioClassResponse {
+            class_idx: 0,
+            label: label.map(str::to_string),
+            probability,
+        }
+    }
+
+    #[test]
+    fn drift_label_uses_index_zero_class_label_without_resorting() {
+        let segment = segment(Some(vec![
+            class(Some("first"), 0.1),
+            class(Some("second"), 0.9),
+        ]));
+
+        assert_eq!(drift_label_for_audio_segment(&segment, "model"), "first");
+    }
+
+    #[test]
+    fn drift_label_falls_back_when_classes_are_missing_or_empty() {
+        assert_eq!(
+            drift_label_for_audio_segment(&segment(None), "model"),
+            "model"
+        );
+        assert_eq!(
+            drift_label_for_audio_segment(&segment(Some(Vec::new())), "model"),
+            "model"
+        );
+    }
+
+    #[test]
+    fn drift_label_does_not_substitute_lower_ranked_label_when_top1_unlabeled() {
+        let segment = segment(Some(vec![class(None, 0.8), class(Some("second"), 0.2)]));
+
+        assert_eq!(drift_label_for_audio_segment(&segment, "model"), "model");
+    }
+
+    #[test]
+    fn drift_label_preserves_empty_string_label() {
+        let segment = segment(Some(vec![class(Some(""), 0.8)]));
+
+        assert_eq!(drift_label_for_audio_segment(&segment, "model"), "");
+    }
 }

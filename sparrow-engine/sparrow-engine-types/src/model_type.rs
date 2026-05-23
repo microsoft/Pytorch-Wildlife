@@ -21,14 +21,12 @@ pub fn derive_model_type(
     postprocess: &PostprocessMethod,
     subtype: ModelSubtype,
 ) -> ModelType {
+    let is_audio_preprocess = matches!(
+        preprocess,
+        PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. }
+    );
     let base = match (preprocess, postprocess) {
         (PreprocessMethod::MelSpectrogram { .. }, PostprocessMethod::Sigmoid { .. }) => {
-            ModelType::AudioDetector
-        }
-        (PreprocessMethod::MelSpectrogram { .. }, PostprocessMethod::Softmax) => {
-            ModelType::AudioClassifier
-        }
-        (PreprocessMethod::RawAudio { .. }, PostprocessMethod::Sigmoid { .. }) => {
             ModelType::AudioDetector
         }
         (PreprocessMethod::RawAudio { .. }, PostprocessMethod::Softmax) => {
@@ -38,9 +36,9 @@ pub fn derive_model_type(
         _ => ModelType::Detector,
     };
     // Subtype promotion: only a vision Detector is eligible for overhead-dot
-    // rendering. Audio + Classifier ignore the hint.
-    match (base, subtype) {
-        (ModelType::Detector, ModelSubtype::Overhead) => ModelType::OverheadDetector,
+    // rendering. Audio preprocess fallbacks ignore the hint.
+    match (base, subtype, is_audio_preprocess) {
+        (ModelType::Detector, ModelSubtype::Overhead, false) => ModelType::OverheadDetector,
         _ => base,
     }
 }
@@ -108,30 +106,28 @@ mod phase_a_r1_model_type_tests {
     }
 
     #[test]
-    fn audio_classifier_when_mel_plus_softmax_either_subtype() {
+    fn classifier_when_mel_plus_softmax_either_subtype() {
         assert_eq!(
             derive_model_type(&mel(), &PostprocessMethod::Softmax, ModelSubtype::Standard),
-            ModelType::AudioClassifier
+            ModelType::Classifier
         );
-        // Overhead must NOT promote audio classifier.
         assert_eq!(
             derive_model_type(&mel(), &PostprocessMethod::Softmax, ModelSubtype::Overhead),
-            ModelType::AudioClassifier
+            ModelType::Classifier
         );
     }
 
     #[test]
-    fn mel_plus_yolo_falls_through_to_detector() {
-        // Per code: only (Mel,Sigmoid)+(Mel,Softmax) match audio arms; everything
-        // else with Mel falls through to the wildcard Detector arm.
+    fn mel_plus_yolo_falls_through_to_detector_without_overhead_promotion() {
+        // Unsupported audio pre/post pairs fall through to generic model types,
+        // but audio preprocess fallbacks never promote to OverheadDetector.
         assert_eq!(
             derive_model_type(&mel(), &PostprocessMethod::YoloE2e, ModelSubtype::Standard),
             ModelType::Detector
         );
-        // Even more: with Overhead subtype, that base Detector promotes to OverheadDetector.
         assert_eq!(
             derive_model_type(&mel(), &PostprocessMethod::YoloE2e, ModelSubtype::Overhead),
-            ModelType::OverheadDetector
+            ModelType::Detector
         );
     }
 
@@ -279,14 +275,28 @@ mod phase_a_r1_model_type_tests {
             ModelType::AudioClassifier,
             "RawAudio + Softmax should derive AudioClassifier (Perch 2)"
         );
+        assert_eq!(
+            derive_model_type(
+                &raw_audio(),
+                &PostprocessMethod::Softmax,
+                ModelSubtype::Overhead
+            ),
+            ModelType::AudioClassifier,
+            "Overhead hint must be ignored for RawAudio + Softmax"
+        );
     }
 
     #[test]
-    fn audio_detector_when_raw_audio_plus_sigmoid() {
+    fn detector_when_raw_audio_plus_sigmoid_without_overhead_promotion() {
         assert_eq!(
             derive_model_type(&raw_audio(), &sigmoid(), ModelSubtype::Standard),
-            ModelType::AudioDetector,
-            "RawAudio + Sigmoid derives AudioDetector for legacy direct callers but is rejected by manifest validation"
+            ModelType::Detector,
+            "RawAudio + Sigmoid is rejected by manifest validation and should not advertise AudioDetector"
+        );
+        assert_eq!(
+            derive_model_type(&raw_audio(), &sigmoid(), ModelSubtype::Overhead),
+            ModelType::Detector,
+            "Unsupported audio fallbacks must not promote to OverheadDetector"
         );
     }
 }

@@ -1266,7 +1266,8 @@ mod tests {
         );
         assert_eq!(
             derive_model_type(&mel, &PostprocessMethod::Softmax, std_sub),
-            ModelType::AudioClassifier
+            ModelType::Classifier,
+            "MelSpectrogram + Softmax is rejected by manifest validation and should not advertise AudioClassifier"
         );
         // Overhead does NOT promote audio detectors.
         assert_eq!(

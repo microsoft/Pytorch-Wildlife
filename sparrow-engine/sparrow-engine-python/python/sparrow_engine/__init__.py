@@ -12,6 +12,7 @@ from typing import Callable, Optional, Union
 ProgressCallback = Callable[[int, int, str], None]
 
 from sparrow_engine._sparrow_engine_core import (
+    AudioClass,
     AudioResult,
     AudioSegment,
     BBox,
@@ -56,6 +57,7 @@ __all__ = [
     "DetectResult",
     "Classification",
     "ClassifyResult",
+    "AudioClass",
     "AudioSegment",
     "AudioResult",
     "PipelineDetection",
