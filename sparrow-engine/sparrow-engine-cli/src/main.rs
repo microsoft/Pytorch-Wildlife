@@ -373,7 +373,8 @@ struct ClassificationOutput {
 
 /// Per-window audio output (pre-Phase-3.5 default; now opt-in via
 /// `--raw-segments`). Schema: `segments: [{start_time_s, end_time_s,
-/// confidence}]`.
+/// confidence, classes?}]`; `classes` is emitted only for multi-class
+/// classifiers.
 #[derive(Serialize)]
 struct AudioDetectRawOutput {
     file: String,
@@ -384,10 +385,20 @@ struct AudioDetectRawOutput {
 }
 
 #[derive(Serialize)]
+struct AudioClassOutput {
+    class_idx: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
+    probability: f32,
+}
+
+#[derive(Serialize)]
 struct AudioSegmentOutput {
     start_time_s: f32,
     end_time_s: f32,
     confidence: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    classes: Option<Vec<AudioClassOutput>>,
 }
 
 /// Merged-range audio output (Phase 3.5 default; item #6). Schema:
@@ -1732,6 +1743,16 @@ fn write_audio_output_raw(
                         start_time_s: s.start_time_s,
                         end_time_s: s.end_time_s,
                         confidence: s.confidence,
+                        classes: (s.classes.len() > 1).then(|| {
+                            s.classes
+                                .iter()
+                                .map(|c| AudioClassOutput {
+                                    class_idx: c.class_idx,
+                                    label: c.label.clone(),
+                                    probability: c.probability,
+                                })
+                                .collect()
+                        }),
                     })
                     .collect(),
             };
@@ -1766,7 +1787,9 @@ fn write_audio_output_merged(
     format: &OutputFormat,
     merge_gap_s: f32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ranges = detect_audio::merge_segments(&result.segments, merge_gap_s);
+    let ranges = detect_audio::merge_segments_with_class(&result.segments, merge_gap_s, |s| {
+        s.classes.first().and_then(|c| c.label.clone())
+    });
     match format {
         OutputFormat::Json => {
             let output = AudioDetectMergedOutput {
@@ -2969,6 +2992,28 @@ mod tests {
         }
     }
 
+    fn audio_class(class_idx: u32, label: &str, probability: f32) -> engine_dispatch::AudioClass {
+        engine_dispatch::AudioClass {
+            class_idx,
+            label: Some(label.to_string()),
+            probability,
+        }
+    }
+
+    fn seg_with_classes(
+        start: f32,
+        end: f32,
+        classes: Vec<engine_dispatch::AudioClass>,
+    ) -> engine_dispatch::AudioSegment {
+        let confidence = classes.first().map(|c| c.probability).unwrap_or(0.0);
+        engine_dispatch::AudioSegment {
+            start_time_s: start,
+            end_time_s: end,
+            confidence,
+            classes,
+        }
+    }
+
     #[test]
     fn audio_json_default_emits_ranges_not_segments() {
         // Two adjacent windows at 0.3 s stride should merge into one range.
@@ -3030,6 +3075,128 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
         let segs = parsed["segments"].as_array().unwrap();
         assert_eq!(segs.len(), 2, "raw segments preserved verbatim");
+    }
+
+    #[test]
+    fn audio_raw_json_classes_and_class_aware_merge() {
+        let result = fake_audio_result(vec![
+            seg(0.0, 1.0, 0.4),
+            seg_with_classes(1.0, 2.0, vec![audio_class(7, "single", 0.7)]),
+            seg_with_classes(
+                2.0,
+                3.0,
+                vec![
+                    audio_class(11, "species-a", 0.9),
+                    audio_class(12, "species-b", 0.08),
+                ],
+            ),
+        ]);
+        let mut buf = Vec::new();
+        write_audio_output_raw(
+            &mut buf,
+            Path::new("bird.wav"),
+            "perch-v2",
+            &result,
+            &OutputFormat::Json,
+        )
+        .unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        let segments = parsed["segments"].as_array().unwrap();
+        assert!(
+            segments[0].get("classes").is_none(),
+            "empty class list must omit classes: {output}"
+        );
+        assert!(
+            segments[1].get("classes").is_none(),
+            "single-class binary-compatible segment must omit classes: {output}"
+        );
+        let classes = segments[2]["classes"].as_array().unwrap();
+        assert_eq!(classes.len(), 2);
+        assert_eq!(classes[0]["class_idx"], 11);
+        assert_eq!(classes[0]["label"], "species-a");
+        assert!((classes[0]["probability"].as_f64().unwrap() - 0.9).abs() < 1e-6);
+        assert_eq!(classes[1]["class_idx"], 12);
+        assert_eq!(classes[1]["label"], "species-b");
+        assert!((classes[1]["probability"].as_f64().unwrap() - 0.08).abs() < 1e-6);
+
+        let different_top1 = fake_audio_result(vec![
+            seg_with_classes(
+                0.0,
+                1.0,
+                vec![
+                    audio_class(11, "species-a", 0.9),
+                    audio_class(12, "species-b", 0.08),
+                ],
+            ),
+            seg_with_classes(
+                1.2,
+                2.2,
+                vec![
+                    audio_class(13, "species-c", 0.85),
+                    audio_class(11, "species-a", 0.1),
+                ],
+            ),
+        ]);
+        let mut buf = Vec::new();
+        write_audio_output_merged(
+            &mut buf,
+            Path::new("bird.wav"),
+            "perch-v2",
+            &different_top1,
+            &OutputFormat::Json,
+            0.31,
+        )
+        .unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        let ranges = parsed["ranges"].as_array().unwrap();
+        assert_eq!(
+            ranges.len(),
+            2,
+            "adjacent classifier windows with different top-1 labels must not merge: {output}"
+        );
+        assert_eq!(ranges[0]["class"], "species-a");
+        assert_eq!(ranges[1]["class"], "species-c");
+
+        let same_top1 = fake_audio_result(vec![
+            seg_with_classes(
+                0.0,
+                1.0,
+                vec![
+                    audio_class(11, "species-a", 0.9),
+                    audio_class(12, "species-b", 0.08),
+                ],
+            ),
+            seg_with_classes(
+                1.2,
+                2.2,
+                vec![
+                    audio_class(11, "species-a", 0.8),
+                    audio_class(13, "species-c", 0.15),
+                ],
+            ),
+        ]);
+        let mut buf = Vec::new();
+        write_audio_output_merged(
+            &mut buf,
+            Path::new("bird.wav"),
+            "perch-v2",
+            &same_top1,
+            &OutputFormat::Json,
+            0.31,
+        )
+        .unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        let ranges = parsed["ranges"].as_array().unwrap();
+        assert_eq!(
+            ranges.len(),
+            1,
+            "adjacent classifier windows with the same top-1 label must merge: {output}"
+        );
+        assert_eq!(ranges[0]["class"], "species-a");
+        assert!((ranges[0]["end_time_s"].as_f64().unwrap() - 2.2).abs() < 1e-6);
     }
 
     #[test]
