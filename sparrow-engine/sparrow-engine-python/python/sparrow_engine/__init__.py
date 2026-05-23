@@ -197,6 +197,8 @@ def detect_audio(
     model: str,
     threshold: Optional[float] = None,
     recursive: bool = False,
+    stride_s: Optional[float] = None,
+    segment_duration_s: Optional[float] = None,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> list[AudioResult]:
     """Run audio detection on one or more audio files.
@@ -205,12 +207,26 @@ def detect_audio(
     When ``recursive`` is True, directories are traversed recursively.
     Always returns ``list[AudioResult]``, even for a single file.
 
+    ``stride_s`` and ``segment_duration_s`` override the manifest defaults.
+    Stride is always engine-controlled. Segment duration is honored by
+    mel-spectrogram audio models with a dynamic ONNX time-axis (e.g.
+    ``md-audiobirds-v1``); silently ignored by raw-audio classifiers whose
+    ONNX input is fixed-size (e.g. ``perch-v2``'s ``[batch, 160000]``) —
+    the window is an upstream architecture constraint for those models.
+
     If ``progress_callback`` is provided, it is called once per file after
     its inference attempt resolves, with ``(index, total, filename)``.
     ``index`` is 0-based. Raising from the callback aborts the batch.
     """
     paths = _resolve_inputs(input, _AUDIO_EXTS, recursive=recursive)
-    return _get_engine().detect_audio(paths, model, threshold, progress_callback)
+    return _get_engine().detect_audio(
+        paths,
+        model,
+        threshold,
+        stride_s,
+        segment_duration_s,
+        progress_callback,
+    )
 
 
 def pipeline(

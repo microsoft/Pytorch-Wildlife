@@ -100,6 +100,8 @@ class PyEngine:
         paths: list[str],
         model: str,
         threshold: Optional[float] = None,
+        stride_s: Optional[float] = None,
+        segment_duration_s: Optional[float] = None,
         progress_callback: Optional[_ProgressCallback] = None,
     ) -> list[AudioResult]: ...
     def pipeline(
