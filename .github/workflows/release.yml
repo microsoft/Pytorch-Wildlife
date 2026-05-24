@@ -9,7 +9,10 @@ name: Release sparrow-engine wheels
 #   - workflow_dispatch (target: testpypi)       -> build + publish to TestPyPI.
 #   - workflow_dispatch (target: build-only)     -> build only, no publish.
 #
-# CPU wheels: 4 platforms (Linux manylinux_2_28 x86_64, macOS arm64, macOS x86_64, Windows x86_64).
+# CPU wheels: 3 platforms (Linux manylinux_2_28 x86_64, macOS arm64, Windows x86_64).
+# macOS x86_64 (Intel Mac) is NOT in the matrix — no ORT 1.25.1 wheel exists for that
+# platform AND the macos-13 GitHub-hosted runner pool has chronic 25+ min queue latency
+# that blocks every release. Intel-Mac users build from source per `docs/install.md`.
 # GPU wheel: Linux x86_64 inside nvidia/cuda:12.6.3-cudnn-devel-ubuntu24.04 container.
 #
 # GPU PyPI publish is currently gated `if: false`. Phase E (nvjpeg dlopen rewrite)
@@ -172,52 +175,6 @@ jobs:
           path: sparrow-engine/target/wheels/sparrow_engine-*.whl
           if-no-files-found: error
 
-  build-cpu-macos-x86_64:
-    name: Build CPU wheel (macOS x86_64)
-    # NOTE (D4 caveat): no `onnxruntime` 1.25.1 wheel exists for macOS x86_64.
-    # End users on this platform must install onnxruntime via a manual fallback;
-    # documented in `docs/install.md`. Wheel build still succeeds because
-    # `ort/load-dynamic` (RP-3) defers ORT resolution to runtime.
-    runs-on: macos-13
-    env:
-      MACOSX_DEPLOYMENT_TARGET: '10.15'
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Build CPU wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          working-directory: sparrow-engine/sparrow-engine-python
-          command: build
-          target: x86_64-apple-darwin
-          args: >-
-            --release
-            --auditwheel skip
-            --no-default-features
-            --features extension-module
-            --features cpu
-
-      - name: Inspect built wheel
-        run: |
-          ls -la sparrow-engine/target/wheels/
-          for w in sparrow-engine/target/wheels/sparrow_engine-*.whl; do
-            echo "Wheel: $w"
-            case "$w" in
-              *cp311-abi3-macosx_10_15_x86_64*) echo "  OK: abi3 + macosx_10_15_x86_64";;
-              *) echo "  FAIL: expected cp311-abi3-macosx_10_15_x86_64 tag (MACOSX_DEPLOYMENT_TARGET=10.15)"; exit 1;;
-            esac
-          done
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheel-cpu-macos-x86_64
-          path: sparrow-engine/target/wheels/sparrow_engine-*.whl
-          if-no-files-found: error
-
   build-cpu-windows:
     name: Build CPU wheel (Windows x86_64)
     runs-on: windows-latest
@@ -332,7 +289,6 @@ jobs:
     needs:
       - build-cpu-linux
       - build-cpu-macos-arm64
-      - build-cpu-macos-x86_64
       - build-cpu-windows
       - smoke-cpu-linux
     runs-on: ubuntu-latest
@@ -366,7 +322,6 @@ jobs:
     needs:
       - build-cpu-linux
       - build-cpu-macos-arm64
-      - build-cpu-macos-x86_64
       - build-cpu-windows
       - smoke-cpu-linux
     runs-on: ubuntu-latest
