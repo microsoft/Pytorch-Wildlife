@@ -20,7 +20,12 @@ crate-type = ["cdylib", "rlib"]
 # `src/lib.rs` enforces this at compile time.
 sparrow-engine-cpu = { path = "../sparrow-engine-cpu", optional = true }
 sparrow-engine-gpu = { path = "../sparrow-engine-gpu", optional = true }
-pyo3 = "0.25"
+# RP-2 (2026-05-23): `abi3-py311` builds against the stable Python ABI so a
+# single wheel installs on CPython 3.11, 3.12, 3.13, … without per-minor
+# rebuilds. Wheel filename gets the `cp311-abi3` tag; no `libpython` DT_NEEDED
+# on Linux. Floor matches `pyproject.toml`'s `requires-python = ">=3.11"`
+# (which is itself anchored by ORT 1.24.4+ dropping Python 3.10, MT-4.1-1).
+pyo3 = { version = "0.25", features = ["abi3-py311"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # S6: tracing events are emitted to the `log` crate (via the `log` feature) and
 # bridged into Python's `logging` module by `pyo3-log` at module init. This
