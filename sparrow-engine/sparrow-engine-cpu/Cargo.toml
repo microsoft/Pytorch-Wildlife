@@ -45,7 +45,7 @@ ndarray = "0.17"
 # unconditionally with `load-dynamic` and references an `OrtApi` field
 # gated on `api-18`+ (ort 2.0.0-rc.12 quirk: ep/vitis.rs:41 vs
 # ort-sys/src/lib.rs:1620). ORT runtime 1.25.x exposes api-24.
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "download-binaries", "load-dynamic", "api-24", "tls-native-vendored"] }
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "load-dynamic", "api-24"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
