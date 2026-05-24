@@ -68,7 +68,7 @@ ndarray = "0.17"
 # from the pip `onnxruntime-gpu` install. CUDA EP itself
 # (libonnxruntime_providers_cuda.so) is loaded internally by ORT,
 # orthogonal to how ORT itself is loaded.
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "download-binaries", "load-dynamic", "api-24", "tls-native-vendored", "cuda"] }
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "load-dynamic", "api-24", "cuda"] }
 
 tracing = { version = "0.1", features = ["log"] }
 
