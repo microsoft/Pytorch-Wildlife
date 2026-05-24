@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Callable, Optional, Union
@@ -10,6 +11,90 @@ from typing import Callable, Optional, Union
 # file's inference attempt resolves (success or failure), with
 # ``(index, total, filename)`` positional args. ``index`` is 0-based.
 ProgressCallback = Callable[[int, int, str], None]
+
+
+# -------------------------------------------------------------------------
+# RP-3 (2026-05-23): ORT dylib discovery shim.
+#
+# The native `_sparrow_engine_core` cdylib is built with `ort/load-dynamic`,
+# which makes the `ort` crate dlopen `libonnxruntime` at first ORT call
+# rather than DT_NEEDED-linking it at process load. With no env override
+# `ort` falls back to a bare name (`libonnxruntime.so` / `.dylib` /
+# `onnxruntime.dll`) — none of which pip wheels for `onnxruntime` ship
+# directly (pip ships `libonnxruntime.so.X.Y.Z` only on Linux), so an
+# unaided import would dlopen-fail.
+#
+# Fix: locate the versioned ORT dylib inside the user's pip-installed
+# `onnxruntime` (or `onnxruntime-gpu`) and set ``ORT_DYLIB_PATH`` to its
+# absolute path BEFORE the native module is imported. This eliminates the
+# MT-4.1-15 manual ``ln -sf libonnxruntime.so.X.Y.Z libonnxruntime.so.1``
+# workaround that every end user used to have to run by hand.
+#
+# Respects an explicit user override: if ``ORT_DYLIB_PATH`` is already set
+# in the environment (any non-empty value), we leave it alone. This lets
+# users point at a custom-built ORT, a system package, or a manylinux
+# wheel sitting outside `site-packages`.
+# -------------------------------------------------------------------------
+
+def _discover_ort_dylib() -> Optional[str]:
+    """Locate the versioned `libonnxruntime` shipped by pip's onnxruntime.
+
+    Returns the absolute path as a string, or ``None`` if discovery fails
+    (e.g. ``onnxruntime`` not installed, unknown layout). Caller is
+    responsible for the fallback: leaving ``ORT_DYLIB_PATH`` unset lets
+    ``ort`` try its platform-default name and surface a clearer error than
+    a path we guessed wrong.
+    """
+    try:
+        import onnxruntime  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+
+    ort_pkg = Path(onnxruntime.__file__).parent  # .../site-packages/onnxruntime
+    capi = ort_pkg / "capi"
+    if not capi.is_dir():
+        return None
+
+    # ort 2.0.0-rc.12 dlopens via libloading; on each platform it expects
+    # the platform-specific extension. pip wheels ship versioned files:
+    #   Linux   : libonnxruntime.so.X.Y.Z      (e.g. libonnxruntime.so.1.25.1)
+    #   macOS   : libonnxruntime.X.Y.Z.dylib   (e.g. libonnxruntime.1.25.1.dylib)
+    #   Windows : onnxruntime.dll              (no version suffix; ships as-is)
+    if sys.platform == "win32":
+        candidate = capi / "onnxruntime.dll"
+        return str(candidate) if candidate.is_file() else None
+
+    if sys.platform == "darwin":
+        # Match libonnxruntime.<version>.dylib OR libonnxruntime.dylib.
+        # pip's onnxruntime ships the versioned form; bare form is rare.
+        for pattern in ("libonnxruntime.*.dylib", "libonnxruntime.dylib"):
+            matches = sorted(capi.glob(pattern))
+            if matches:
+                return str(matches[-1])  # highest version
+        return None
+
+    # Linux + other ELF platforms.
+    # Glob highest-versioned libonnxruntime.so.X.Y.Z. Fall back to bare .so
+    # only as a last resort (most pip wheels don't ship the unversioned one).
+    matches = sorted(capi.glob("libonnxruntime.so.*"))
+    matches = [m for m in matches if not m.is_symlink()]  # prefer real files
+    if matches:
+        return str(matches[-1])
+    bare = capi / "libonnxruntime.so"
+    return str(bare) if bare.is_file() else None
+
+
+def _configure_ort_dylib_path() -> None:
+    """Populate ``ORT_DYLIB_PATH`` if unset. Idempotent. Silent on failure."""
+    if os.environ.get("ORT_DYLIB_PATH"):
+        return  # respect user override
+    discovered = _discover_ort_dylib()
+    if discovered is not None:
+        os.environ["ORT_DYLIB_PATH"] = discovered
+
+
+_configure_ort_dylib_path()
+
 
 from sparrow_engine._sparrow_engine_core import (
     AudioClass,
