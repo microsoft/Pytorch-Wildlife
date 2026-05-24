@@ -1,0 +1,472 @@
+name: Release sparrow-engine wheels
+
+# RP-11 (Phase C, 2026-05-24): build + publish sparrow-engine / sparrow-engine-gpu
+# Python wheels via maturin.
+#
+# Trigger matrix:
+#   - Tag push `vX.Y.Z` (no hyphen)              -> build + publish to PyPI (production), GPU build only.
+#   - Tag push `vX.Y.Z-<prerelease>` (any -tag)  -> build only (no publish to either index).
+#   - workflow_dispatch (target: testpypi)       -> build + publish to TestPyPI.
+#   - workflow_dispatch (target: build-only)     -> build only, no publish.
+#
+# CPU wheels: 4 platforms (Linux manylinux_2_28 x86_64, macOS arm64, macOS x86_64, Windows x86_64).
+# GPU wheel: Linux x86_64 inside nvidia/cuda:12.6.3-cudnn-devel-ubuntu24.04 container.
+#
+# GPU PyPI publish is currently gated `if: false`. Phase E (nvjpeg dlopen rewrite)
+# must land first to remove the `libnvjpeg.so` DT_NEEDED and verify zero codebase
+# + zero performance regression. Flip the gate in Phase F.
+#
+# OIDC trusted-publisher prerequisites (USER action, not automatable):
+#   - prod PyPI: claim `sparrow-engine` + `sparrow-engine-gpu` names; configure
+#     publisher: repo `microsoft/Pytorch-Wildlife`, workflow `release.yml`,
+#     env `pypi`.
+#   - TestPyPI: same names; env `testpypi`.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Publish target'
+        required: true
+        type: choice
+        options:
+          - build-only
+          - testpypi
+        default: build-only
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Tag-push runs (prod release) MUST NOT cancel each other; manual workflow_dispatch
+  # runs (build-only / TestPyPI) MAY cancel-in-progress so a re-trigger supersedes
+  # a stale run instead of queueing behind it.
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # -------- CPU build matrix --------
+
+  build-cpu-linux:
+    name: Build CPU wheel (Linux manylinux_2_28 x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build CPU wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          manylinux: 2_28
+          working-directory: sparrow-engine/sparrow-engine-python
+          command: build
+          args: >-
+            --release
+            --auditwheel skip
+            --no-default-features
+            --features extension-module
+            --features cpu
+
+      - name: Inspect built wheel
+        run: |
+          ls -la sparrow-engine/target/wheels/
+          # Stable ABI tag must be present (cp311-abi3).
+          for w in sparrow-engine/target/wheels/sparrow_engine-*.whl; do
+            echo "Wheel: $w"
+            case "$w" in
+              *cp311-abi3*manylinux_2_28_x86_64*) echo "  OK: abi3 + manylinux_2_28";;
+              *) echo "  FAIL: expected cp311-abi3-manylinux_2_28_x86_64 tag in filename"; exit 1;;
+            esac
+          done
+
+      - name: Audit wheel (manylinux policy — HARD GATE)
+        run: |
+          python3 -m pip install --user auditwheel
+          for w in sparrow-engine/target/wheels/sparrow_engine-*.whl; do
+            python3 -m auditwheel show "$w"
+            # Hard gate: any external DT_NEEDED beyond the manylinux_2_28 allow-list
+            # (e.g. a future regression that re-introduces libonnxruntime / libnvjpeg /
+            # libpython linkage) must fail this job, not the PyPI upload step.
+            python3 -m auditwheel show "$w" | grep -q 'manylinux_2_28_x86_64' \
+              || { echo "FAIL: wheel $w is not manylinux_2_28_x86_64 compatible"; exit 1; }
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-cpu-linux
+          path: sparrow-engine/target/wheels/sparrow_engine-*.whl
+          if-no-files-found: error
+
+  # -------- CPU Linux abi3 import smoke test (3.11, 3.12, 3.13) --------
+  #
+  # Validates the abi3-py311 promise: one wheel imports on three CPython minors.
+  # Also validates the RP-3 ORT shim path: with onnxruntime present, no manual
+  # symlink should be needed.
+
+  smoke-cpu-linux:
+    name: Smoke test CPU Linux wheel (Python ${{ matrix.python }})
+    needs: build-cpu-linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-cpu-linux
+          path: dist
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install wheel + onnxruntime, run import + init()
+        run: |
+          python -m pip install --upgrade pip
+          # The wheel's runtime dep on onnxruntime>=1.25.1,<1.26 is resolved by pip.
+          python -m pip install dist/sparrow_engine-*.whl
+          python -c "import sparrow_engine; sparrow_engine.init(); print('Smoke OK on', __import__('sys').version)"
+
+  build-cpu-macos-arm64:
+    name: Build CPU wheel (macOS arm64)
+    runs-on: macos-14
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build CPU wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: sparrow-engine/sparrow-engine-python
+          command: build
+          target: aarch64-apple-darwin
+          args: >-
+            --release
+            --auditwheel skip
+            --no-default-features
+            --features extension-module
+            --features cpu
+
+      - name: Inspect built wheel
+        run: |
+          ls -la sparrow-engine/target/wheels/
+          for w in sparrow-engine/target/wheels/sparrow_engine-*.whl; do
+            echo "Wheel: $w"
+            case "$w" in
+              *cp311-abi3-macosx_11_0_arm64*) echo "  OK: abi3 + macosx_11_0_arm64";;
+              *) echo "  FAIL: expected cp311-abi3-macosx_11_0_arm64 tag (MACOSX_DEPLOYMENT_TARGET=11.0)"; exit 1;;
+            esac
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-cpu-macos-arm64
+          path: sparrow-engine/target/wheels/sparrow_engine-*.whl
+          if-no-files-found: error
+
+  build-cpu-macos-x86_64:
+    name: Build CPU wheel (macOS x86_64)
+    # NOTE (D4 caveat): no `onnxruntime` 1.25.1 wheel exists for macOS x86_64.
+    # End users on this platform must install onnxruntime via a manual fallback;
+    # documented in `docs/install.md`. Wheel build still succeeds because
+    # `ort/load-dynamic` (RP-3) defers ORT resolution to runtime.
+    runs-on: macos-13
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '10.15'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build CPU wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: sparrow-engine/sparrow-engine-python
+          command: build
+          target: x86_64-apple-darwin
+          args: >-
+            --release
+            --auditwheel skip
+            --no-default-features
+            --features extension-module
+            --features cpu
+
+      - name: Inspect built wheel
+        run: |
+          ls -la sparrow-engine/target/wheels/
+          for w in sparrow-engine/target/wheels/sparrow_engine-*.whl; do
+            echo "Wheel: $w"
+            case "$w" in
+              *cp311-abi3-macosx_10_15_x86_64*) echo "  OK: abi3 + macosx_10_15_x86_64";;
+              *) echo "  FAIL: expected cp311-abi3-macosx_10_15_x86_64 tag (MACOSX_DEPLOYMENT_TARGET=10.15)"; exit 1;;
+            esac
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-cpu-macos-x86_64
+          path: sparrow-engine/target/wheels/sparrow_engine-*.whl
+          if-no-files-found: error
+
+  build-cpu-windows:
+    name: Build CPU wheel (Windows x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build CPU wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: sparrow-engine/sparrow-engine-python
+          command: build
+          target: x86_64-pc-windows-msvc
+          args: >-
+            --release
+            --auditwheel skip
+            --no-default-features
+            --features extension-module
+            --features cpu
+
+      - name: Inspect built wheel
+        shell: bash
+        run: |
+          ls -la sparrow-engine/target/wheels/
+          for w in sparrow-engine/target/wheels/sparrow_engine-*.whl; do
+            echo "Wheel: $w"
+            case "$w" in
+              *cp311-abi3*win_amd64*) echo "  OK: abi3 + win_amd64";;
+              *) echo "  FAIL: expected cp311-abi3-win_amd64 tag"; exit 1;;
+            esac
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-cpu-windows
+          path: sparrow-engine/target/wheels/sparrow_engine-*.whl
+          if-no-files-found: error
+
+  # -------- GPU build (Phase C: build-only, no publish) --------
+
+  build-gpu-linux:
+    name: Build GPU wheel (Linux x86_64, CUDA 12.6 + cuDNN container)
+    runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.6.3-cudnn-devel-ubuntu24.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install build prerequisites in container
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config \
+            python3.12 python3.12-venv python3.12-dev python3-pip
+          ln -sf /usr/bin/python3.12 /usr/local/bin/python3
+          ln -sf /usr/bin/python3.12 /usr/local/bin/python
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install maturin
+        run: |
+          uv tool install maturin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify libnvjpeg present in container
+        run: |
+          ldconfig -p | grep -i nvjpeg || true
+          find /usr -name 'libnvjpeg*' 2>/dev/null || true
+
+      - name: Build GPU wheel via build.sh
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          cd sparrow-engine/sparrow-engine-python
+          SPARROW_ENGINE_FLAVOR=gpu ./build.sh
+
+      - name: Inspect built wheel
+        run: |
+          ls -la sparrow-engine/target/wheels/
+          for w in sparrow-engine/target/wheels/sparrow_engine_gpu-*.whl; do
+            echo "Wheel: $w"
+            case "$w" in
+              *cp311-abi3*linux_x86_64*) echo "  OK: abi3 + linux_x86_64 (manylinux compliance pending Phase E)";;
+              *) echo "  FAIL: expected cp311-abi3-linux_x86_64 tag"; exit 1;;
+            esac
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-gpu-linux
+          path: sparrow-engine/target/wheels/sparrow_engine_gpu-*.whl
+          if-no-files-found: error
+
+  # -------- TestPyPI publish (workflow_dispatch) --------
+
+  publish-testpypi-cpu:
+    name: Publish CPU wheels to TestPyPI
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    needs:
+      - build-cpu-linux
+      - build-cpu-macos-arm64
+      - build-cpu-macos-x86_64
+      - build-cpu-windows
+      - smoke-cpu-linux
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/sparrow-engine
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-cpu-*
+          path: dist
+          merge-multiple: true
+
+      - name: Show collected dist/
+        run: ls -la dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  # -------- Prod PyPI publish (tag push, non-RC only) --------
+
+  publish-pypi-cpu:
+    name: Publish CPU wheels to PyPI
+    # Only on actual version tags. ANY hyphen in the tag name (`v0.1.0-rc1`,
+    # `v0.1.0-beta1`, `v1.0.0-alpha`, etc.) marks the tag as a prerelease and
+    # skips prod publish. workflow_dispatch also skips this job.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    needs:
+      - build-cpu-linux
+      - build-cpu-macos-arm64
+      - build-cpu-macos-x86_64
+      - build-cpu-windows
+      - smoke-cpu-linux
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/sparrow-engine
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-cpu-*
+          path: dist
+          merge-multiple: true
+
+      - name: Show collected dist/
+        run: ls -la dist/
+
+      - name: Validate tag matches wheel version (PyPI immutability guard)
+        run: |
+          # Strip leading 'v' from tag: refs/tags/v0.1.0 -> 0.1.0
+          tag_version="${GITHUB_REF_NAME#v}"
+          # Extract version from any wheel filename; abi3 wheels share one version.
+          # Wheel filename shape: sparrow_engine-<version>-cp311-abi3-<platform>.whl
+          wheel_version="$(ls dist/sparrow_engine-*.whl | head -1 \
+            | sed -E 's|.*/sparrow_engine-([^-]+)-cp311-abi3-.*|\1|')"
+          echo "Tag version:   $tag_version"
+          echo "Wheel version: $wheel_version"
+          if [ "$tag_version" != "$wheel_version" ]; then
+            echo "FAIL: tag ($tag_version) and wheel ($wheel_version) versions disagree."
+            echo "Bump pyproject.toml [project].version before tagging."
+            exit 1
+          fi
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # -------- GPU publish (GATED until Phase E + F) --------
+
+  publish-pypi-gpu:
+    name: Publish GPU wheel to PyPI
+    # PHASE C GATE: GPU wheel currently has `libnvjpeg.so` DT_NEEDED (via
+    # `nvjpeg-sys` static link) -> manylinux non-compliant -> PyPI rejects.
+    #
+    # Phase E (nvjpeg dlopen rewrite) MUST land before this gate flips. Required
+    # changes in Phase F (not just flipping `if: false`):
+    #   1. Switch `build-gpu-linux` container to a manylinux_2_28-compatible base
+    #      (e.g. `nvidia/cuda:12.6.3-cudnn-devel-rockylinux8`); ubuntu24.04 has
+    #      glibc 2.39 which is too new for manylinux_2_28 (glibc <=2.28 floor).
+    #   2. Tighten the GPU `Inspect built wheel` filename assertion from
+    #      `linux_x86_64` to `manylinux_2_28_x86_64`.
+    #   3. Add an `auditwheel show` hard gate to `build-gpu-linux` analogous to
+    #      the CPU job's gate. The wheel must report manylinux_2_28 with no
+    #      external `libnvjpeg.so` / `libcuda.so` DT_NEEDED beyond the allow-list.
+    #   4. Add a tag-version validation step (copy from publish-pypi-cpu).
+    #   5. Flip THIS condition to:
+    #        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    #      and the corresponding TestPyPI GPU job below.
+    if: false
+    needs:
+      - build-gpu-linux
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/sparrow-engine-gpu
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-gpu-*
+          path: dist
+          merge-multiple: true
+
+      - name: Show collected dist/
+        run: ls -la dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi-gpu:
+    name: Publish GPU wheel to TestPyPI
+    # Same Phase E/F gating as prod publish above.
+    if: false
+    needs:
+      - build-gpu-linux
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/sparrow-engine-gpu
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-gpu-*
+          path: dist
+          merge-multiple: true
+
+      - name: Show collected dist/
+        run: ls -la dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
