@@ -31,7 +31,21 @@ ndarray = "0.17"
 # LD_LIBRARY_PATH), producing the misleading "CPU wheel reports cuda:0"
 # behavior. Strict separation: sparrow-engine-cpu = CPU only; sparrow-engine-gpu = CUDA only
 # (mirrors sparrow-engine-gpu's `Device::Auto|Cpu => Cuda(0)` coercion).
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "download-binaries", "tls-native-vendored"] }
+# RP-3 (2026-05-23): `load-dynamic` makes `ort` dlopen `libonnxruntime`
+# at runtime instead of linking it via DT_NEEDED. End users no longer need
+# the `libonnxruntime.so.1` symlink workaround (MT-4.1-15). Path is taken
+# from `ORT_DYLIB_PATH` env, set by the sparrow_engine Python `__init__.py`
+# from the user's pip-installed `onnxruntime`. `load-dynamic` auto-enables
+# `ort-sys/disable-linking`, which short-circuits the build script before
+# `download-binaries` / `copy-dylibs` activate — both kept here for clarity
+# but become no-ops in this config (ort-sys/build/main.rs:23).
+#
+# `api-24` matches the `ort` crate's recommended default. Required when
+# `load-dynamic` is enabled because the vitis-EP wrapper compiles
+# unconditionally with `load-dynamic` and references an `OrtApi` field
+# gated on `api-18`+ (ort 2.0.0-rc.12 quirk: ep/vitis.rs:41 vs
+# ort-sys/src/lib.rs:1620). ORT runtime 1.25.x exposes api-24.
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "download-binaries", "load-dynamic", "api-24", "tls-native-vendored"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

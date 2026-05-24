@@ -47,11 +47,15 @@ requires-python = ">=3.11"
 # on ABI-compatible runtimes until the `ort` Rust crate is bumped to a
 # version that targets ORT 1.26's symbol namespace.
 #
-# CPU wheel runtime: sparrow_engine links against `libonnxruntime.so.1` at
-# runtime via ORT's load-dynamic mechanism. The `onnxruntime>=1.25.1`
-# pip dependency below provides the shared library.
-# GPU wheel substitutes `onnxruntime-gpu>=1.25.1` (sed-patched by
-# build.sh).
+# CPU wheel runtime: sparrow_engine's native cdylib is built with the
+# `ort/load-dynamic` feature, so `libonnxruntime` is dlopen'd at runtime
+# rather than DT_NEEDED-linked. The `sparrow_engine` Python package's
+# `__init__.py` discovers the versioned dylib inside the pip-installed
+# `onnxruntime` (or `onnxruntime-gpu`) and sets `ORT_DYLIB_PATH` before
+# the native module is imported, so end users do NOT need the manual
+# `ln -sf libonnxruntime.so.X.Y.Z libonnxruntime.so.1` workaround
+# (MT-4.1-15). GPU wheel substitutes `onnxruntime-gpu>=1.25.1` (sed-patched
+# by build.sh).
 dependencies = ["onnxruntime>=1.25.1,<1.26"]
 
 [tool.maturin]
