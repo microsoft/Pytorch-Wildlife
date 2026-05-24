@@ -337,7 +337,7 @@ jobs:
       - smoke-cpu-linux
     runs-on: ubuntu-latest
     environment:
-      name: testpypi
+      name: testpypi-cpu
       url: https://test.pypi.org/p/sparrow-engine
     permissions:
       id-token: write
@@ -371,7 +371,7 @@ jobs:
       - smoke-cpu-linux
     runs-on: ubuntu-latest
     environment:
-      name: pypi
+      name: pypi-cpu
       url: https://pypi.org/p/sparrow-engine
     permissions:
       id-token: write
@@ -429,7 +429,7 @@ jobs:
       - build-gpu-linux
     runs-on: ubuntu-latest
     environment:
-      name: pypi
+      name: pypi-gpu
       url: https://pypi.org/p/sparrow-engine-gpu
     permissions:
       id-token: write
@@ -453,7 +453,7 @@ jobs:
       - build-gpu-linux
     runs-on: ubuntu-latest
     environment:
-      name: testpypi
+      name: testpypi-gpu
       url: https://test.pypi.org/p/sparrow-engine-gpu
     permissions:
       id-token: write
