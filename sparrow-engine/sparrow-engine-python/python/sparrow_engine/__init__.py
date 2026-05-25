@@ -135,6 +135,7 @@ __all__ = [
     "summarize",
     # Phase 3 viz/export
     "visualize",
+    "visualize_audio",
     "export",
     # Types (re-exported for isinstance checks and type annotations)
     "BBox",
@@ -428,6 +429,17 @@ def visualize(
     converted = [(str(p), r) for p, r in items]
     out = str(output_dir) if output_dir is not None else None
     return _visualize_core(converted, out, show_labels)
+
+
+def visualize_audio(
+    items: list[tuple[Union[str, Path], AudioResult]],
+    output_dir: Optional[Union[str, Path]] = None,
+    smooth: bool = False,
+    show_windows: bool = False,
+    show_ranges: bool = True,
+) -> list[list[bytes]]:
+    """Render audio detection visualization layers for a batch."""
+    raise NotImplementedError("visualize_audio is not wired yet")
 
 
 def export(
