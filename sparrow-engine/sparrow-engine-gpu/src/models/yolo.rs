@@ -123,6 +123,16 @@ impl std::fmt::Debug for JpegDecoder {
 impl JpegDecoder {
     fn new(ctx: &Arc<CudaContext>) -> Result<Self> {
         use nvjpeg_sys as nvj;
+        // Phase E (2026-05-25): consult the dlopen loader BEFORE the
+        // existing nvjpegCreateSimple call. If libnvjpeg.so.12 is missing /
+        // wrong major / has missing symbols, surface the rich NvjpegInitError
+        // (remediation text) via SparrowEngineError::NvjpegUnavailable instead
+        // of letting the thin wrapper below flatten to status=1 (which would
+        // bubble up as a misleading "ONNX Runtime error: nvjpegCreateSimple
+        // failed: status=1").
+        if let Err(err) = nvj::nvjpeg() {
+            return Err(SparrowEngineError::NvjpegUnavailable(err.to_string()));
+        }
         // SAFETY: FFI; status checked.
         unsafe {
             let mut handle: nvj::nvjpegHandle_t = std::ptr::null_mut();

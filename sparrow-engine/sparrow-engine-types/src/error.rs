@@ -108,6 +108,15 @@ pub enum SparrowEngineError {
     #[error("Image file not found: {0}")]
     ImageFileNotFound(PathBuf),
 
+    // -- nvjpeg dlopen loader (Phase E, 2026-05-25) --
+    // Surfaced when the runtime libnvjpeg.so.12 load fails: library missing,
+    // wrong CUDA major, or symbol missing. Holds the formatted NvjpegInitError
+    // Display string which carries the full remediation text (install
+    // nvidia-nvjpeg-cu12 / use the CPU wheel / override
+    // SPARROW_ENGINE_NVJPEG_LIBRARY_PATH).
+    #[error("nvjpeg runtime unavailable: {0}")]
+    NvjpegUnavailable(String),
+
     // -- ORT --
     #[error("ONNX Runtime error: {0}")]
     Ort(String),

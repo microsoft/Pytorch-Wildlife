@@ -228,6 +228,16 @@ PY
 }
 
 t5_perf() {
+    # Phase E (2026-05-25): SKIP cleanly when the test model is not installed
+    # at SPARROW_ENGINE_MODEL_DIR. T5 measures the P3.8-Step1-Wave2 cached-
+    # decode invariant (≤ 0.74 ms / call); it requires a real ONNX model to
+    # run inference. The harness should not FAIL on a missing fixture.
+    local model_dir="${SPARROW_ENGINE_MODEL_DIR:-$HOME/.sparrow-engine/models}"
+    local manifest="$model_dir/$MODEL_ID/manifest.toml"
+    if [[ ! -f "$manifest" ]]; then
+        echo "CELL T5 (cached-decode regression — P3.8 invariant): SKIP — model manifest not found at $manifest (set SPARROW_ENGINE_MODEL_DIR or install $MODEL_ID)"
+        return 2
+    fi
     local image
     image="$(write_fixture_jpeg)" || { echo "CELL T5 (cached-decode regression — P3.8 invariant): FAIL — fixture setup failed"; return 1; }
     SPARROW_ENGINE_DEVICE="$DEVICE" SPARROW_ENGINE_TEST_MODEL="$MODEL_ID" "$PYTHON_BIN" - "$image" <<PY
@@ -286,6 +296,16 @@ PY
 }
 
 t10_sidecar() {
+    # Phase E (2026-05-25): two prerequisites — nvidia-nvjpeg-cu12 sidecar
+    # PyPI wheel installed + a test model under SPARROW_ENGINE_MODEL_DIR.
+    # SKIP cleanly if either is missing; this cell exercises the
+    # ctypes.CDLL(RTLD_GLOBAL) preload via importlib.resources.files.
+    local model_dir="${SPARROW_ENGINE_MODEL_DIR:-$HOME/.sparrow-engine/models}"
+    local manifest="$model_dir/$MODEL_ID/manifest.toml"
+    if [[ ! -f "$manifest" ]]; then
+        echo "CELL T10 (sidecar shim end-to-end — nvidia-nvjpeg-cu12 in venv): SKIP — model manifest not found at $manifest"
+        return 2
+    fi
     local image
     image="$(write_fixture_jpeg)" || { echo "CELL T10 (sidecar shim end-to-end — nvidia-nvjpeg-cu12 in venv): FAIL — fixture setup failed"; return 1; }
     "$PYTHON_BIN" - <<'PY'

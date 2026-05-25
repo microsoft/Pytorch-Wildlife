@@ -1,0 +1,4 @@
+
+# Phase E runtime artifacts (scripts/audit_wheel_gate.sh, scripts/test_nvjpeg_dlopen.sh)
+.phase-e-auditwheel-show.txt
+.phase-e-nvjpeg-dlopen/
