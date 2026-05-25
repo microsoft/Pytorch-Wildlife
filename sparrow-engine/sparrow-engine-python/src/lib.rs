@@ -1143,6 +1143,8 @@ fn bbox_visualization_model_type() -> ModelType {
 
 const VISUALIZE_AUDIO_UNSUPPORTED_MESSAGE: &str =
     "visualize() does not support AudioResult — use visualize_audio() for audio";
+// Keep this in sync with sparrow-engine-cli/src/main.rs VIZ_MERGE_THRESHOLD.
+const VIZ_MERGE_THRESHOLD: f32 = 0.9;
 
 fn visualize_render_opts(
     model_type: ModelType,
@@ -1324,6 +1326,19 @@ fn visualize(
     Ok(png_list)
 }
 
+fn derive_audio_visualization_ranges(
+    segments: &[sparrow_engine::AudioSegment],
+    duration_s: f32,
+    stride_s: f32,
+) -> Vec<sparrow_engine::AudioRange> {
+    let slots = sparrow_engine::viz::segments_to_overlap_mean_slots(segments, duration_s, stride_s);
+    let high_conf_slots: Vec<sparrow_engine::AudioSegment> = slots
+        .into_iter()
+        .filter(|s| s.confidence >= VIZ_MERGE_THRESHOLD)
+        .collect();
+    sparrow_engine::detect_audio::merge_segments(&high_conf_slots, stride_s + 1e-3)
+}
+
 /// Render audio detection visualization layers for a batch.
 ///
 /// Like `visualize()` but for `AudioResult`. Requires an initialized engine
@@ -1400,9 +1415,10 @@ fn visualize_audio(
                 let spec = sparrow_engine::viz::render_mel_spectrogram(&audio_path, &cfg)
                     .map_err(|e| format!("failed to render mel spectrogram: {e}"))?;
                 let ranges = if show_ranges {
-                    Some(sparrow_engine::detect_audio::merge_segments(
+                    Some(derive_audio_visualization_ranges(
                         &native.segments,
-                        stride_s + 1e-3,
+                        duration_s,
+                        stride_s,
                     ))
                 } else {
                     None
@@ -1685,6 +1701,17 @@ mod tests {
             onnx_sha256: None,
             onnx_size_bytes: None,
         }
+    }
+
+    fn audio_layer_bytes(
+        layers: &[(&'static str, image::DynamicImage)],
+        layer_name: &str,
+    ) -> Vec<u8> {
+        let (_, img) = layers
+            .iter()
+            .find(|(name, _)| *name == layer_name)
+            .unwrap_or_else(|| panic!("missing audio layer {layer_name}"));
+        img.to_rgba8().into_raw()
     }
 
     #[test]
@@ -1976,6 +2003,89 @@ mod tests {
     #[test]
     fn visualize_audio_unsupported_message_names_new_function() {
         assert!(VISUALIZE_AUDIO_UNSUPPORTED_MESSAGE.contains("visualize_audio()"));
+    }
+
+    #[test]
+    fn audio_visualization_ranges_match_cli_slot_pipeline() {
+        let spec = image::DynamicImage::new_rgb8(100, 20);
+        let duration_s = 2.0;
+        let stride_s = 0.5;
+        let segments = vec![
+            sparrow_engine::AudioSegment {
+                start_time_s: 0.0,
+                end_time_s: 1.0,
+                confidence: 1.0,
+                classes: Vec::new(),
+            },
+            sparrow_engine::AudioSegment {
+                start_time_s: 0.5,
+                end_time_s: 1.5,
+                confidence: 0.0,
+                classes: Vec::new(),
+            },
+            sparrow_engine::AudioSegment {
+                start_time_s: 1.0,
+                end_time_s: 2.0,
+                confidence: 0.0,
+                classes: Vec::new(),
+            },
+        ];
+
+        let cli_slots =
+            sparrow_engine::viz::segments_to_overlap_mean_slots(&segments, duration_s, stride_s);
+        let cli_high_conf_slots: Vec<sparrow_engine::AudioSegment> = cli_slots
+            .into_iter()
+            .filter(|s| s.confidence >= VIZ_MERGE_THRESHOLD)
+            .collect();
+        let cli_ranges =
+            sparrow_engine::detect_audio::merge_segments(&cli_high_conf_slots, stride_s + 1e-3);
+        let binding_ranges = derive_audio_visualization_ranges(&segments, duration_s, stride_s);
+        let raw_merge_ranges =
+            sparrow_engine::detect_audio::merge_segments(&segments, stride_s + 1e-3);
+
+        assert_eq!(binding_ranges, cli_ranges);
+        assert_eq!(binding_ranges.len(), 1);
+        assert_eq!(binding_ranges[0].start_time_s, 0.0);
+        assert_eq!(binding_ranges[0].end_time_s, stride_s);
+        assert_ne!(raw_merge_ranges, cli_ranges);
+
+        let opts = sparrow_engine::viz::AudioLayersOpts {
+            smooth: false,
+            show_windows: false,
+            window_s: 1.0,
+            stride_s,
+        };
+        let cli_layers = sparrow_engine::viz::render_audio_layers(
+            &spec,
+            &segments,
+            Some(&cli_ranges),
+            duration_s,
+            &opts,
+        );
+        let binding_layers = sparrow_engine::viz::render_audio_layers(
+            &spec,
+            &segments,
+            Some(&binding_ranges),
+            duration_s,
+            &opts,
+        );
+        let raw_layers = sparrow_engine::viz::render_audio_layers(
+            &spec,
+            &segments,
+            Some(&raw_merge_ranges),
+            duration_s,
+            &opts,
+        );
+
+        assert_eq!(
+            audio_layer_bytes(&binding_layers, "04_full"),
+            audio_layer_bytes(&cli_layers, "04_full")
+        );
+        assert_ne!(
+            audio_layer_bytes(&raw_layers, "04_full"),
+            audio_layer_bytes(&cli_layers, "04_full"),
+            "raw segment merging should not silently match the CLI-shaped overlay"
+        );
     }
 
     #[test]
