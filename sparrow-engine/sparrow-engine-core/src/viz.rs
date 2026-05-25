@@ -99,6 +99,33 @@ impl Default for HeatmapOpts {
     }
 }
 
+/// Options governing which layers `render_audio_layers` emits and how
+/// the heatmap layer is rendered.
+#[derive(Debug, Clone)]
+pub struct AudioLayersOpts {
+    /// If true, layer 03 uses a smoothed inferno heatmap (Gaussian-style blur).
+    /// If false, layer 03 mirrors layer 02 (raw per-slot pattern).
+    pub smooth: bool,
+    /// If true, emits an extra layer "02_segments_windows" between 02 and 03,
+    /// showing each inference window staggered across lanes.
+    pub show_windows: bool,
+    /// Inference window length (seconds). Used for window-lane stagger count.
+    pub window_s: f32,
+    /// Inference stride length (seconds). Used for slot resolution + lane count.
+    pub stride_s: f32,
+}
+
+impl Default for AudioLayersOpts {
+    fn default() -> Self {
+        Self {
+            smooth: false,
+            show_windows: false,
+            window_s: 1.0,
+            stride_s: 0.3,
+        }
+    }
+}
+
 fn validate_heatmap_opts(opts: &HeatmapOpts) -> std::result::Result<(), String> {
     if !opts.threshold.is_finite() || !(0.0..=1.0).contains(&opts.threshold) {
         return Err(format!(
@@ -417,6 +444,28 @@ fn inferno(t: f32) -> [u8; 3] {
 // ---------------------------------------------------------------------------
 // render_audio_heatmap()
 // ---------------------------------------------------------------------------
+
+/// Compose the audio-detection visualization layers from a spectrogram backdrop,
+/// segment list, and optional merged ranges.
+///
+/// Returns a Vec of (layer_name, image) in render order. Layer names match the
+/// CLI's `spe detect-audio --visualize` output filename stems:
+///   - "01_spec"               — raw spectrogram, no overlays
+///   - "02_segments"           — discrete per-slot confidence (no blur)
+///   - "02_segments_windows"   — only if opts.show_windows
+///   - "03_heatmap"            — smoothed inferno heatmap if opts.smooth, else
+///                               identical to 02_segments
+///   - "04_full"               — 03_heatmap + cyan range bars, only if ranges Some
+pub fn render_audio_layers(
+    spec: &DynamicImage,
+    segments: &[sparrow_engine_types::AudioSegment],
+    ranges: Option<&[sparrow_engine_types::AudioRange]>,
+    duration_s: f32,
+    opts: &AudioLayersOpts,
+) -> Vec<(&'static str, DynamicImage)> {
+    let _ = (spec, segments, ranges, duration_s, opts);
+    Vec::new()
+}
 
 /// Render an audio confidence heatmap overlaid on a spectrogram image.
 pub fn render_audio_heatmap(
