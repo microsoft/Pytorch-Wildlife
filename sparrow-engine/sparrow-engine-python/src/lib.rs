@@ -514,6 +514,32 @@ fn pyclassification_to_native(c: &Classification) -> sparrow_engine::Classificat
     }
 }
 
+fn pyaudio_class_to_native(c: &AudioClass) -> sparrow_engine::AudioClass {
+    sparrow_engine::AudioClass {
+        class_idx: c.class_idx,
+        label: c.label.clone(),
+        probability: c.probability,
+    }
+}
+
+fn pyaudio_segment_to_native(s: &AudioSegment) -> sparrow_engine::AudioSegment {
+    sparrow_engine::AudioSegment {
+        start_time_s: s.start_time_s,
+        end_time_s: s.end_time_s,
+        confidence: s.confidence,
+        classes: s.classes.iter().map(pyaudio_class_to_native).collect(),
+    }
+}
+
+fn pyaudio_to_native(r: &AudioResult) -> sparrow_engine::AudioDetectResult {
+    sparrow_engine::AudioDetectResult {
+        segments: r.segments.iter().map(pyaudio_segment_to_native).collect(),
+        duration_s: r.duration_s,
+        sample_rate: r.sample_rate,
+        processing_time_ms: r.processing_time_ms,
+    }
+}
+
 fn pydetect_to_native(r: &DetectResult) -> sparrow_engine::DetectResult {
     sparrow_engine::DetectResult {
         detections: r.detections.iter().map(pydetection_to_native).collect(),
@@ -572,6 +598,23 @@ fn longest_common_prefix(paths: &[PathBuf]) -> PathBuf {
         }
     }
     prefix
+}
+
+fn visualization_relative_path(input_path: &Path, common_prefix: &Path) -> PathBuf {
+    let candidate = if common_prefix.as_os_str().is_empty() {
+        input_path.to_path_buf()
+    } else {
+        input_path
+            .strip_prefix(common_prefix)
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|_| PathBuf::from(input_path.file_name().unwrap_or_default()))
+    };
+
+    if candidate.is_absolute() {
+        PathBuf::from(input_path.file_name().unwrap_or_default())
+    } else {
+        candidate
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -973,7 +1016,7 @@ impl PyEngine {
 }
 
 // ---------------------------------------------------------------------------
-// Module-level standalone functions (no engine needed)
+// Module-level functions
 // ---------------------------------------------------------------------------
 
 /// Compute SHA-256 hash of a file. No engine initialization required.
@@ -1098,6 +1141,9 @@ fn bbox_visualization_model_type() -> ModelType {
     ModelType::Detector
 }
 
+const VISUALIZE_AUDIO_UNSUPPORTED_MESSAGE: &str =
+    "visualize() does not support AudioResult — use visualize_audio() for audio";
+
 fn visualize_render_opts(
     model_type: ModelType,
     show_labels: bool,
@@ -1190,7 +1236,7 @@ fn visualize(
             )
         } else if result_obj.bind(py).is_instance_of::<AudioResult>() {
             return Err(SparrowEngineError::new_err(
-                "visualize() does not support AudioResult — use visualize_audio_heatmap() for audio",
+                VISUALIZE_AUDIO_UNSUPPORTED_MESSAGE,
             ));
         } else {
             return Err(SparrowEngineError::new_err(
@@ -1228,11 +1274,7 @@ fn visualize(
                 // Save to disk if output_dir is set.
                 if let Some(ref out_dir) = output_dir {
                     let input_path = Path::new(path_str);
-                    // Cross-root fallback: use filename only to avoid joining absolute paths.
-                    let rel = match input_path.strip_prefix(&common_prefix) {
-                        Ok(r) => r.to_path_buf(),
-                        Err(_) => PathBuf::from(input_path.file_name().unwrap_or_default()),
-                    };
+                    let rel = visualization_relative_path(input_path, &common_prefix);
                     let stem = rel.file_stem().unwrap_or_default().to_string_lossy();
                     // Derive output extension from the actual encoded format, not the input
                     // path extension. Post-PS3, BMP/TIFF/WEBP/unknown inputs produce PNG
@@ -1283,20 +1325,173 @@ fn visualize(
 }
 
 /// Render audio detection visualization layers for a batch.
+///
+/// Like `visualize()` but for `AudioResult`. Requires an initialized engine
+/// so the binding can recover each result's audio preprocessing config and
+/// manifest window/stride from `model_id`.
 #[pyfunction]
 #[pyo3(signature = (engine, items, output_dir=None, smooth=false, show_windows=false, show_ranges=true))]
 fn visualize_audio(
-    _py: Python<'_>,
-    _engine: &PyEngine,
-    _items: Vec<(String, PyObject)>,
-    _output_dir: Option<String>,
-    _smooth: bool,
-    _show_windows: bool,
-    _show_ranges: bool,
+    py: Python<'_>,
+    engine: &PyEngine,
+    items: Vec<(String, PyObject)>,
+    output_dir: Option<String>,
+    smooth: bool,
+    show_windows: bool,
+    show_ranges: bool,
 ) -> PyResult<Vec<Vec<Py<PyBytes>>>> {
-    Err(SparrowEngineError::new_err(
-        "visualize_audio: not yet implemented (stub)",
-    ))
+    if let Some(ref out_dir) = output_dir {
+        let dir = Path::new(out_dir);
+        std::fs::create_dir_all(dir).map_err(|e| {
+            SparrowEngineError::new_err(format!(
+                "cannot create output directory '{}': {e}",
+                dir.display()
+            ))
+        })?;
+    }
+
+    let input_paths: Vec<PathBuf> = items.iter().map(|(p, _)| PathBuf::from(p)).collect();
+    let common_prefix = if output_dir.is_some() {
+        longest_common_prefix(&input_paths)
+    } else {
+        PathBuf::new()
+    };
+
+    let engine_ref = &engine.engine;
+    let mut batch_layers: Vec<Vec<Py<PyBytes>>> = Vec::with_capacity(items.len());
+    let mut errors = 0u32;
+
+    for (path_str, result_obj) in &items {
+        if !result_obj.bind(py).is_instance_of::<AudioResult>() {
+            tracing::warn!(
+                target: "sparrow_engine::python",
+                "audio visualization failed for {path_str}: expected AudioResult"
+            );
+            errors += 1;
+            continue;
+        }
+
+        let result_py: Py<AudioResult> = match result_obj.extract(py) {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!(
+                    target: "sparrow_engine::python",
+                    "audio visualization failed for {path_str}: {e}"
+                );
+                errors += 1;
+                continue;
+            }
+        };
+        let result = result_py.get();
+        let model_id = result.model_id.clone();
+        let duration_s = result.duration_s;
+        let native = pyaudio_to_native(result);
+        let audio_path = PathBuf::from(path_str);
+
+        let render_result = py.allow_threads(
+            move || -> std::result::Result<Vec<(&'static str, Vec<u8>)>, String> {
+                let handle = engine_ref
+                    .get_or_load_model(&model_id)
+                    .map_err(|e| format!("failed to load model '{model_id}': {e}"))?;
+                let cfg = handle.audio_preprocess_config().ok_or_else(|| {
+                    format!("model '{model_id}' does not expose audio preprocessing config")
+                })?;
+                let (window_s, stride_s) = handle.audio_window_stride().unwrap_or((1.0, 0.3));
+                let spec = sparrow_engine::viz::render_mel_spectrogram(&audio_path, &cfg)
+                    .map_err(|e| format!("failed to render mel spectrogram: {e}"))?;
+                let ranges = if show_ranges {
+                    Some(sparrow_engine::detect_audio::merge_segments(
+                        &native.segments,
+                        stride_s + 1e-3,
+                    ))
+                } else {
+                    None
+                };
+                let opts = sparrow_engine::viz::AudioLayersOpts {
+                    smooth,
+                    show_windows,
+                    window_s,
+                    stride_s,
+                };
+                let rendered = sparrow_engine::viz::render_audio_layers(
+                    &spec,
+                    &native.segments,
+                    ranges.as_deref(),
+                    duration_s,
+                    &opts,
+                );
+
+                let mut encoded_layers = Vec::with_capacity(rendered.len());
+                for (layer_name, img) in rendered {
+                    let mut buf = Vec::new();
+                    img.write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
+                        .map_err(|e| format!("failed to encode {layer_name} PNG: {e}"))?;
+                    encoded_layers.push((layer_name, buf));
+                }
+                Ok(encoded_layers)
+            },
+        );
+
+        match render_result {
+            Ok(encoded_layers) => {
+                let mut item_failed = false;
+                if let Some(ref out_dir) = output_dir {
+                    let input_path = Path::new(path_str);
+                    let rel = visualization_relative_path(input_path, &common_prefix);
+                    let stem = rel.file_stem().unwrap_or_default().to_string_lossy();
+                    let parent = rel.parent().unwrap_or(Path::new(""));
+                    for (layer_name, buf) in &encoded_layers {
+                        let out_path = Path::new(out_dir)
+                            .join(parent)
+                            .join(format!("{stem}_{layer_name}.png"));
+                        if let Some(p) = out_path.parent() {
+                            if let Err(e) = std::fs::create_dir_all(p) {
+                                tracing::warn!(
+                                    target: "sparrow_engine::python",
+                                    "failed to create dir {}: {e}",
+                                    p.display()
+                                );
+                                item_failed = true;
+                                continue;
+                            }
+                        }
+                        if let Err(e) = std::fs::write(&out_path, buf) {
+                            tracing::warn!(
+                                target: "sparrow_engine::python",
+                                "failed to save audio visualization layer for {path_str}: {e}"
+                            );
+                            item_failed = true;
+                        }
+                    }
+                }
+                if item_failed {
+                    errors += 1;
+                }
+                batch_layers.push(
+                    encoded_layers
+                        .into_iter()
+                        .map(|(_, buf)| PyBytes::new(py, &buf).unbind())
+                        .collect(),
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "sparrow_engine::python",
+                    "audio visualization failed for {path_str}: {e}"
+                );
+                errors += 1;
+            }
+        }
+    }
+
+    if errors > 0 {
+        return Err(SparrowEngineError::new_err(format!(
+            "{errors} of {} audio visualization(s) failed",
+            items.len()
+        )));
+    }
+
+    Ok(batch_layers)
 }
 
 /// Export detection/pipeline results to megadet, coco, or csv. No engine initialization required.
@@ -1441,7 +1636,7 @@ fn _sparrow_engine_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Engine
     m.add_class::<PyEngine>()?;
 
-    // Standalone functions (no engine needed)
+    // Module-level functions
     m.add_function(wrap_pyfunction!(hash_file, m)?)?;
     m.add_function(wrap_pyfunction!(day_night, m)?)?;
     m.add_function(wrap_pyfunction!(verify_model, m)?)?;
@@ -1515,6 +1710,19 @@ mod tests {
     fn validate_pipeline_ids_defers_unknown_ids_to_load_path() {
         let available = vec![native_model_info("speciesnet-crop", ModelType::Classifier)];
         validate_pipeline_ids_from_available(&available, "missing", "speciesnet-crop").unwrap();
+    }
+
+    #[test]
+    fn visualization_relative_path_avoids_absolute_output_escape() {
+        let rel = visualization_relative_path(Path::new("/mnt/a/bird.wav"), Path::new(""));
+        assert_eq!(rel, PathBuf::from("bird.wav"));
+        assert!(!rel.is_absolute());
+    }
+
+    #[test]
+    fn visualization_relative_path_preserves_relative_mirroring_without_prefix() {
+        let rel = visualization_relative_path(Path::new("site-a/bird.wav"), Path::new(""));
+        assert_eq!(rel, PathBuf::from("site-a/bird.wav"));
     }
 
     // --- device_from_str ---
@@ -1734,6 +1942,107 @@ mod tests {
         assert_eq!(dst.end_time_s, 1.0);
         assert_eq!(dst.confidence, 0.0);
         assert!(dst.classes.is_empty());
+    }
+
+    #[test]
+    fn pyaudio_to_native_preserves_audio_result_fields() {
+        let src = AudioResult {
+            model_id: "md-audiobirds-v1".to_owned(),
+            duration_s: 3.2,
+            sample_rate: 48_000,
+            processing_time_ms: 12.5,
+            segments: vec![AudioSegment {
+                start_time_s: 0.3,
+                end_time_s: 1.3,
+                confidence: 0.82,
+                classes: vec![AudioClass {
+                    class_idx: 4,
+                    label: Some("sparrow".to_owned()),
+                    probability: 0.82,
+                }],
+            }],
+        };
+
+        let dst = pyaudio_to_native(&src);
+
+        assert_eq!(dst.duration_s, 3.2);
+        assert_eq!(dst.sample_rate, 48_000);
+        assert_eq!(dst.processing_time_ms, 12.5);
+        assert_eq!(dst.segments.len(), 1);
+        assert_eq!(dst.segments[0].start_time_s, 0.3);
+        assert_eq!(dst.segments[0].classes[0].label.as_deref(), Some("sparrow"));
+    }
+
+    #[test]
+    fn visualize_audio_unsupported_message_names_new_function() {
+        assert!(VISUALIZE_AUDIO_UNSUPPORTED_MESSAGE.contains("visualize_audio()"));
+    }
+
+    #[test]
+    fn render_audio_layers_returns_expected_layer_counts() {
+        let spec = image::DynamicImage::new_rgb8(120, 64);
+        let segments = vec![sparrow_engine::AudioSegment {
+            start_time_s: 0.0,
+            end_time_s: 1.0,
+            confidence: 0.91,
+            classes: Vec::new(),
+        }];
+        let ranges = vec![sparrow_engine::AudioRange {
+            start_time_s: 0.0,
+            end_time_s: 1.0,
+            max_confidence: 0.91,
+            class: None,
+        }];
+
+        let base_opts = sparrow_engine::viz::AudioLayersOpts {
+            smooth: false,
+            show_windows: false,
+            window_s: 1.0,
+            stride_s: 0.3,
+        };
+        let base =
+            sparrow_engine::viz::render_audio_layers(&spec, &segments, None, 2.0, &base_opts);
+        assert_eq!(base.len(), 3);
+        assert_eq!(
+            base.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            vec!["01_spec", "02_segments", "03_heatmap"]
+        );
+
+        let with_ranges = sparrow_engine::viz::render_audio_layers(
+            &spec,
+            &segments,
+            Some(&ranges),
+            2.0,
+            &base_opts,
+        );
+        assert_eq!(with_ranges.len(), 4);
+        assert_eq!(with_ranges.last().map(|(name, _)| *name), Some("04_full"));
+
+        let window_opts = sparrow_engine::viz::AudioLayersOpts {
+            show_windows: true,
+            ..base_opts
+        };
+        let with_windows_and_ranges = sparrow_engine::viz::render_audio_layers(
+            &spec,
+            &segments,
+            Some(&ranges),
+            2.0,
+            &window_opts,
+        );
+        assert_eq!(with_windows_and_ranges.len(), 5);
+        assert_eq!(
+            with_windows_and_ranges
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>(),
+            vec![
+                "01_spec",
+                "02_segments",
+                "02_segments_windows",
+                "03_heatmap",
+                "04_full",
+            ]
+        );
     }
 
     // --- convert_model_type ---
