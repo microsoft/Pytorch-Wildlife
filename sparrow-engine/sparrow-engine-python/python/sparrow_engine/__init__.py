@@ -178,6 +178,10 @@ def _get_engine() -> PyEngine:
         return _engine
 
 
+def _path_to_str(path: Union[str, Path]) -> str:
+    return os.fsdecode(os.fspath(path))
+
+
 def _resolve_inputs(
     input: Union[str, Path, list[Union[str, Path]]],  # noqa: A002
     extensions: set[str],
@@ -427,8 +431,8 @@ def visualize(
     ``show_labels=True`` renders ``"{label} {conf:.2}"`` text above each
     bbox using the bundled DejaVu Sans font. Default off (clean overlays).
     """
-    converted = [(str(p), r) for p, r in items]
-    out = str(output_dir) if output_dir is not None else None
+    converted = [(_path_to_str(p), r) for p, r in items]
+    out = _path_to_str(output_dir) if output_dir is not None else None
     return _visualize_core(converted, out, show_labels)
 
 
@@ -458,9 +462,11 @@ def visualize_audio(
     If ``output_dir`` is set, also writes files using directory mirroring
     with filenames ``{stem}_{layer_name}.png``.
     """
+    if not items:
+        return []
+    converted = [(_path_to_str(p), r) for p, r in items]
+    out = _path_to_str(output_dir) if output_dir is not None else None
     engine = _get_engine()
-    converted = [(str(p), r) for p, r in items]
-    out = str(output_dir) if output_dir is not None else None
     return _visualize_audio_core(engine, converted, out, smooth, show_windows, show_ranges)
 
 

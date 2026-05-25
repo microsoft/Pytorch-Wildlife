@@ -1,7 +1,6 @@
 """Integration tests for the Python audio visualization wrapper."""
 from __future__ import annotations
 
-import base64
 import os
 from pathlib import Path
 
@@ -16,10 +15,6 @@ from sparrow_engine import SparrowEngineError  # noqa: E402
 AUDIO_MODEL_ID = "md-audiobirds-v1"
 AUDIO_MODEL_FILES = ("MD_AudioBirds_V1.onnx", "MD_AudioBirds_V1_fp16.onnx")
 PNG_MAGIC = b"\x89PNG"
-TINY_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8A"
-    "AwMCAO+/p9sAAAAASUVORK5CYII="
-)
 
 
 def _repo_root() -> Path:
@@ -102,6 +97,20 @@ def test_visualize_audio_writes_files_when_output_dir_set(
     assert expected.issubset(produced)
 
 
+def test_visualize_audio_creates_missing_output_dir(
+    audio_item: tuple[Path, sparrow_engine.AudioResult],
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "nested" / "viz"
+
+    assert not target.exists()
+    result = sparrow_engine.visualize_audio([audio_item], output_dir=target)
+
+    assert len(result) == 1
+    assert target.is_dir()
+    assert any(target.rglob("*.png"))
+
+
 def test_visualize_audio_show_windows_adds_layer(
     audio_item: tuple[Path, sparrow_engine.AudioResult],
 ) -> None:
@@ -112,42 +121,71 @@ def test_visualize_audio_show_windows_adds_layer(
     assert len(with_windows[0]) == len(default[0]) + 1
 
 
-def _detector_model_id() -> str:
-    requested = os.environ.get("SPARROW_ENGINE_IMAGE_MODEL")
-    if requested:
-        return requested
+def test_visualize_audio_show_windows_writes_extra_file(
+    audio_item: tuple[Path, sparrow_engine.AudioResult],
+    tmp_path: Path,
+) -> None:
+    audio_path, _ = audio_item
 
-    for info in sparrow_engine.list_models():
-        if info.model_type in {"detector", "overhead_detector"}:
-            return info.id
-    pytest.skip("no detector model available to construct a DetectResult")
+    sparrow_engine.visualize_audio([audio_item], output_dir=tmp_path, show_windows=True)
 
-
-def _detect_result(tmp_path: Path) -> tuple[Path, sparrow_engine.DetectResult]:
-    model_dir = _audio_model_dir()
-    _init_with_model_dir(model_dir)
-    model_id = _detector_model_id()
-    image_path = tmp_path / "detect_fixture.png"
-    image_path.write_bytes(TINY_PNG)
-
-    try:
-        results = sparrow_engine.detect(image_path, model=model_id, threshold=0.0)
-    except SparrowEngineError as exc:
-        pytest.skip(f"could not construct DetectResult with model {model_id!r}: {exc}")
-    if not results:
-        pytest.skip(f"model {model_id!r} returned no DetectResult")
-    return image_path, results[0]
+    produced = {p.name for p in tmp_path.rglob("*.png")}
+    assert f"{audio_path.stem}_02_segments_windows.png" in produced
 
 
-def test_visualize_audio_rejects_wrong_result_type(tmp_path: Path) -> None:
-    image_path, detect_result = _detect_result(tmp_path)
+def test_visualize_audio_show_ranges_false_drops_full_layer(
+    audio_item: tuple[Path, sparrow_engine.AudioResult],
+    tmp_path: Path,
+) -> None:
+    audio_path, _ = audio_item
+    target = tmp_path / "ranges_off"
 
-    with pytest.raises(SparrowEngineError):
+    result = sparrow_engine.visualize_audio(
+        [audio_item], output_dir=target, show_ranges=False
+    )
+
+    assert len(result) == 1
+    assert len(result[0]) == 3
+    produced = {p.name for p in target.rglob("*.png")}
+    assert f"{audio_path.stem}_04_full.png" not in produced
+    assert {
+        f"{audio_path.stem}_01_spec.png",
+        f"{audio_path.stem}_02_segments.png",
+        f"{audio_path.stem}_03_heatmap.png",
+    }.issubset(produced)
+
+
+def test_visualize_audio_smooth_changes_heatmap_layer(
+    audio_item: tuple[Path, sparrow_engine.AudioResult],
+) -> None:
+    default = sparrow_engine.visualize_audio([audio_item])
+    smooth = sparrow_engine.visualize_audio([audio_item], smooth=True)
+
+    assert len(default) == len(smooth) == 1
+    assert len(default[0]) == len(smooth[0])
+    assert default[0][0] == smooth[0][0]
+    assert default[0][1] == smooth[0][1]
+    assert default[0][2] != smooth[0][2]
+    if len(default[0]) > 3:
+        assert default[0][3] != smooth[0][3]
+
+
+def test_visualize_audio_rejects_wrong_result_type(
+    audio_item: tuple[Path, sparrow_engine.AudioResult],
+) -> None:
+    audio_path, _ = audio_item
+
+    with pytest.raises(SparrowEngineError, match="visualization"):
         sparrow_engine.visualize_audio(
-            [(image_path, detect_result)]  # type: ignore[list-item]
+            [(audio_path, object())]  # type: ignore[list-item]
         )
 
 
-def test_visualize_audio_empty_batch() -> None:
-    _init_with_model_dir(_audio_model_dir())
+def test_visualize_audio_empty_batch_does_not_initialize_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sparrow_engine, "_engine", None)
+    monkeypatch.delenv("SPARROW_ENGINE_MODEL_DIR", raising=False)
+
     assert sparrow_engine.visualize_audio([]) == []
+    assert sparrow_engine._engine is None

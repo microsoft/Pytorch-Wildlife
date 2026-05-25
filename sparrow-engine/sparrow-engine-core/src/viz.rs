@@ -126,6 +126,37 @@ impl Default for AudioLayersOpts {
     }
 }
 
+const MAX_AUDIO_VIZ_SLOTS: usize = 1_000_000;
+const MAX_AUDIO_WINDOW_LANES: u32 = 128;
+
+fn bounded_window_lanes(window_s: f32, stride_s: f32) -> u32 {
+    if !window_s.is_finite()
+        || window_s <= 0.0
+        || !stride_s.is_finite()
+        || stride_s <= 0.0
+    {
+        return 1;
+    }
+    let lanes = (window_s / stride_s).ceil();
+    if !lanes.is_finite() || lanes <= 1.0 {
+        1
+    } else {
+        (lanes as u32).min(MAX_AUDIO_WINDOW_LANES)
+    }
+}
+
+fn valid_time_span(start_time_s: f32, end_time_s: f32) -> bool {
+    start_time_s.is_finite() && end_time_s.is_finite() && end_time_s > start_time_s
+}
+
+fn valid_audio_segment(seg: &sparrow_engine_types::AudioSegment) -> bool {
+    valid_time_span(seg.start_time_s, seg.end_time_s) && seg.confidence.is_finite()
+}
+
+fn valid_audio_range(range: &sparrow_engine_types::AudioRange) -> bool {
+    valid_time_span(range.start_time_s, range.end_time_s) && range.max_confidence.is_finite()
+}
+
 fn validate_heatmap_opts(opts: &HeatmapOpts) -> std::result::Result<(), String> {
     if !opts.threshold.is_finite() || !(0.0..=1.0).contains(&opts.threshold) {
         return Err(format!(
@@ -480,13 +511,8 @@ pub fn render_audio_layers(
     layers.push(("02_segments", segments_img.clone()));
 
     if opts.show_windows {
-        let n_lanes = if opts.stride_s > 0.0 {
-            (opts.window_s / opts.stride_s).ceil().max(1.0) as u32
-        } else {
-            1
-        };
         let window_opts = WindowLanesOpts {
-            n_lanes,
+            n_lanes: bounded_window_lanes(opts.window_s, opts.stride_s),
             ..WindowLanesOpts::default()
         };
         let segments_windows_img =
@@ -534,13 +560,25 @@ pub fn segments_to_overlap_mean_slots(
     duration_s: f32,
     step_s: f32,
 ) -> Vec<sparrow_engine_types::AudioSegment> {
-    if segments.is_empty() || duration_s <= 0.0 || step_s <= 0.0 {
+    if segments.is_empty()
+        || !duration_s.is_finite()
+        || duration_s <= 0.0
+        || !step_s.is_finite()
+        || step_s <= 0.0
+    {
         return vec![];
     }
-    let n_slots = (duration_s / step_s).ceil() as usize;
+    let n_slots_f = (duration_s / step_s).ceil();
+    if !n_slots_f.is_finite() || n_slots_f <= 0.0 || n_slots_f > MAX_AUDIO_VIZ_SLOTS as f32 {
+        return vec![];
+    }
+    let n_slots = n_slots_f as usize;
     let mut sums = vec![0.0f32; n_slots];
     let mut counts = vec![0u32; n_slots];
     for seg in segments {
+        if !valid_audio_segment(seg) {
+            continue;
+        }
         let slot_lo = ((seg.start_time_s / step_s).floor() as usize).min(n_slots);
         let slot_hi = ((seg.end_time_s / step_s).ceil() as usize).min(n_slots);
         for slot in slot_lo..slot_hi {
@@ -573,7 +611,7 @@ pub fn render_audio_heatmap(
 ) -> DynamicImage {
     let base = spectrogram.to_rgba8();
     let (w, h) = base.dimensions();
-    if w == 0 || h == 0 || duration_s <= 0.0 {
+    if w == 0 || h == 0 || !duration_s.is_finite() || duration_s <= 0.0 {
         return DynamicImage::ImageRgba8(base);
     }
 
@@ -597,7 +635,7 @@ pub fn render_audio_heatmap(
     // Accumulate confidence into a 1D array (width of the image).
     let mut heat = vec![0.0f32; w as usize];
     for seg in segments {
-        if seg.confidence < opts.threshold {
+        if !valid_audio_segment(seg) || seg.confidence < opts.threshold {
             continue;
         }
         let x_start = ((seg.start_time_s / duration_s) * w as f32).round() as usize;
@@ -755,7 +793,7 @@ pub fn render_range_overlay(
 ) -> DynamicImage {
     let mut canvas = heatmap.to_rgba8();
     let (w, h) = canvas.dimensions();
-    if w == 0 || h == 0 || duration_s <= 0.0 || ranges.is_empty() {
+    if w == 0 || h == 0 || !duration_s.is_finite() || duration_s <= 0.0 || ranges.is_empty() {
         return DynamicImage::ImageRgba8(canvas);
     }
 
@@ -793,6 +831,9 @@ pub fn render_range_overlay(
     };
 
     for range in ranges {
+        if !valid_audio_range(range) {
+            continue;
+        }
         let x_start = time_to_edge_x(range.start_time_s);
         let x_end = time_to_edge_x(range.end_time_s);
         draw_v_bar(&mut canvas, time_to_bar_x(range.start_time_s));
@@ -862,7 +903,10 @@ pub fn render_window_lanes(
 ) -> DynamicImage {
     let base_rgba = base.to_rgba8();
     let (w, base_h) = base_rgba.dimensions();
-    let n_lanes = opts.n_lanes.max(1);
+    if w == 0 || base_h == 0 {
+        return DynamicImage::ImageRgba8(base_rgba);
+    }
+    let n_lanes = opts.n_lanes.clamp(1, MAX_AUDIO_WINDOW_LANES);
     let band_h = n_lanes
         .saturating_mul(opts.line_height_px)
         .saturating_add(n_lanes.saturating_sub(1).saturating_mul(opts.lane_gap_px));
@@ -888,7 +932,7 @@ pub fn render_window_lanes(
         }
     }
 
-    if w == 0 || duration_s <= 0.0 || segments.is_empty() {
+    if !duration_s.is_finite() || duration_s <= 0.0 || segments.is_empty() {
         return DynamicImage::ImageRgba8(canvas);
     }
 
@@ -899,6 +943,9 @@ pub fn render_window_lanes(
     };
 
     for (idx, seg) in segments.iter().enumerate() {
+        if !valid_audio_segment(seg) {
+            continue;
+        }
         let lane = (idx as u32) % n_lanes;
         let y0 = band_y0.saturating_add(lane.saturating_mul(lane_pitch));
         let y1 = y0.saturating_add(opts.line_height_px).min(total_h);
