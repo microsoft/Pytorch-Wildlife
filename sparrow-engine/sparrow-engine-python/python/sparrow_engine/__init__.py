@@ -117,6 +117,7 @@ from sparrow_engine._sparrow_engine_core import hash_file as _hash_file_core
 from sparrow_engine._sparrow_engine_core import summarize as _summarize_core
 from sparrow_engine._sparrow_engine_core import verify_model as _verify_model_core
 from sparrow_engine._sparrow_engine_core import visualize as _visualize_core
+from sparrow_engine._sparrow_engine_core import visualize_audio as _visualize_audio_core
 
 __all__ = [
     # Functions
@@ -438,8 +439,29 @@ def visualize_audio(
     show_windows: bool = False,
     show_ranges: bool = True,
 ) -> list[list[bytes]]:
-    """Render audio detection visualization layers for a batch."""
-    raise NotImplementedError("visualize_audio is not wired yet")
+    """Render audio detection visualization layers for a batch.
+
+    Mirrors :func:`visualize` but for :class:`AudioResult`. Requires
+    :func:`init` to have been called — looks up audio preprocess config
+    + window/stride from the engine via each result's ``model_id``.
+
+    Returns ``list[list[bytes]]`` — outer list one entry per input item;
+    inner list holds encoded PNG bytes for every layer rendered in render
+    order (3-5 layers depending on options/ranges):
+
+    * ``01_spec`` — raw spectrogram, no overlays
+    * ``02_segments`` — per-slot confidence (no blur)
+    * ``02_segments_windows`` — only when ``show_windows=True``
+    * ``03_heatmap`` — smoothed heatmap when ``smooth=True``, else identical to 02
+    * ``04_full`` — heatmap + cyan range bars (only when ``show_ranges=True``)
+
+    If ``output_dir`` is set, also writes files using directory mirroring
+    with filenames ``{stem}_{layer_name}.png``.
+    """
+    engine = _get_engine()
+    converted = [(str(p), r) for p, r in items]
+    out = str(output_dir) if output_dir is not None else None
+    return _visualize_audio_core(engine, converted, out, smooth, show_windows, show_ranges)
 
 
 def export(
