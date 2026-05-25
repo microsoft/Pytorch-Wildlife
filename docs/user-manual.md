@@ -249,7 +249,55 @@ The following constraints are baked into the engine. If you onboard a new model,
 
 ---
 
-### 2.5 Exit codes you might see
+### 2.5 GPU install (`sparrow-engine-gpu`)
+
+The `sparrow-engine-gpu` wheel requires CUDA 12 nvjpeg at runtime. Use one of these install paths.
+
+#### Option A — System CUDA 12 toolkit (preferred for servers)
+
+```bash
+sudo apt install nvidia-cuda-toolkit  # Debian/Ubuntu, brings libnvjpeg-12-*
+pip install sparrow-engine-gpu
+```
+
+Use this path when the host already manages NVIDIA drivers and CUDA packages at the system level.
+
+#### Option B — Python sidecar wheels (no root, no system CUDA)
+
+```bash
+pip install sparrow-engine-gpu nvidia-nvjpeg-cu12 nvidia-cuda-runtime-cu12
+```
+
+`import sparrow_engine` auto-preloads `libnvjpeg.so.12` from the sidecar wheel with `ctypes.CDLL(..., RTLD_GLOBAL)`. The `sparrow-engine-gpu` wheel does not bundle `libnvjpeg.so.12`.
+
+For the standalone CLI binary `spe-gpu`, the Python preload does not run. Point the dynamic linker at the sidecar library directory before invoking the CLI:
+
+```bash
+NVJPEG_DIR=$(python -c "from importlib.resources import files; print(files('nvidia.nvjpeg') / 'lib')")
+export LD_LIBRARY_PATH="$NVJPEG_DIR:${LD_LIBRARY_PATH:-}"
+spe-gpu --help
+```
+
+#### Option C — Manual override
+
+```bash
+export SPARROW_ENGINE_NVJPEG_LIBRARY_PATH=/abs/path/to/libnvjpeg.so.12
+python -c "import sparrow_engine; sparrow_engine.Engine(...)"
+```
+
+`SPARROW_ENGINE_NVJPEG_LIBRARY_PATH` is the nvjpeg loader override. When set, Sparrow Engine tries exactly that path first; use it for non-standard CUDA layouts or CI negative tests.
+
+#### nvjpeg error messages
+
+| Error text | Meaning | Fix |
+|---|---|---|
+| `RuntimeError: libnvjpeg.so.12 could not be loaded: <dlerror>. ...` | `LibraryNotFound`: CUDA 12 nvjpeg was not found through the sidecar, SONAME lookup, or known CUDA paths. | Install `nvidia-nvjpeg-cu12`, install a system CUDA 12 package such as `libnvjpeg-12-*`, or set `SPARROW_ENGINE_NVJPEG_LIBRARY_PATH=/abs/path/to/libnvjpeg.so.12`. |
+| `RuntimeError: libnvjpeg major version <N> found; sparrow-engine-gpu requires CUDA 12.` | `IncompatibleMajor`: a CUDA 11/13 nvjpeg library was found. | Install CUDA 12 nvjpeg and remove or override the wrong-major library. |
+| `RuntimeError: libnvjpeg loaded but missing symbol '<name>'; CUDA installation appears corrupt or pre-CUDA-12.0.` | `SymbolMissing`: `dlopen` succeeded, but a required nvjpeg symbol was absent. | Reinstall the CUDA 12 nvjpeg package or the `nvidia-nvjpeg-cu12` sidecar wheel. |
+
+---
+
+### 2.6 Exit codes you might see
 
 | Code | Meaning |
 |------|---------|
@@ -269,7 +317,7 @@ The following constraints are baked into the engine. If you onboard a new model,
 
 ---
 
-### 2.6 Air-gapped install
+### 2.7 Air-gapped install
 
 ```
 ONLINE machine:                        OFFLINE machine:                                                                 
