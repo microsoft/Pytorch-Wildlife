@@ -1,31 +1,17 @@
 # Untested -- requires nvidia-docker2 or CDI (NVIDIA Container Device Interface)
-# at runtime; the build itself only needs libnvjpeg.so for the link step
-# (vendored nvjpeg-sys emits `cargo:rustc-link-lib=dylib=nvjpeg`).
-
-# Stage 0: pull libnvjpeg.so + cudnn header-less runtime libs from the
-# NVIDIA CUDA devel image so the rust:bookworm builder can satisfy the
-# `-lnvjpeg` link directive without rebasing the entire builder onto
-# the much larger CUDA image.
-FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04 AS cuda-runtime
+# at runtime. Phase E loads nvjpeg via dlopen, so the builder no longer
+# needs a build-time libnvjpeg copy, symlink, or LIBRARY_PATH.
 
 # Stage 1: Build
 #
 # Phase 3.8 Phase C Wave 4c (2026-05-06): the GPU image links the
 # `sparrow-engine-gpu` engine via `--features gpu`, which pulls in `cudarc`
 # (NVRTC + driver + cuFFT + cuBLAS) and `nvjpeg-sys`. `cudarc 0.19.4`
-# uses `fallback-dynamic-loading` (no CUDA at compile time), but
-# `nvjpeg-sys` 0.1.0 emits `cargo:rustc-link-lib=dylib=nvjpeg` and the
-# linker resolves that to `libnvjpeg.so` at the time it produces the
-# sparrow-engine-gpu cdylib. W5 fix (2026-05-06): copy the runtime-shipped
-# `libnvjpeg.so.12` from the cuda-runtime stage into the rust builder
-# and create the `.so` symlink the linker needs. This stays on
-# `rust:bookworm` rather than rebasing onto `nvidia/cuda:devel` to
-# keep the build image small.
+# uses `fallback-dynamic-loading` (no CUDA at compile time). Phase E removes
+# nvjpeg from the build-time link path; the runtime CUDA base image provides
+# `libnvjpeg.so.12` for the Rust dlopen loader's SONAME lookup.
 FROM rust:bookworm AS builder
 WORKDIR /build
-COPY --from=cuda-runtime /usr/local/cuda-12.6/targets/x86_64-linux/lib/libnvjpeg.so.12 /usr/local/cuda-runtime/lib/libnvjpeg.so.12
-RUN ln -s /usr/local/cuda-runtime/lib/libnvjpeg.so.12 /usr/local/cuda-runtime/lib/libnvjpeg.so
-ENV LIBRARY_PATH=/usr/local/cuda-runtime/lib
 COPY Cargo.toml Cargo.lock ./
 # Phase 3.8 Phase A: sparrow-engine was carved into 4 workspace crates.
 # Phase 3.8 Phase C Wave 4c: sparrow-engine-server is built with
