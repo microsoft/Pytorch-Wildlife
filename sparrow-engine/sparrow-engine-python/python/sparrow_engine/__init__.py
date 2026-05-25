@@ -13,6 +13,42 @@ from typing import Callable, Optional, Union
 ProgressCallback = Callable[[int, int, str], None]
 
 
+def _runtime_flavor() -> str:
+    try:
+        from sparrow_engine._flavor import FLAVOR as flavor  # type: ignore[import-not-found]
+    except ImportError:
+        flavor = os.environ.get("SPARROW_ENGINE_FLAVOR", "")
+    return str(flavor).lower()
+
+
+def _preload_nvjpeg_sidecar() -> None:
+    """Preload nvidia-nvjpeg-cu12's libnvjpeg for the GPU Linux wheel."""
+    if sys.platform != "linux" or _runtime_flavor() != "gpu":
+        return
+
+    import ctypes
+    from importlib.resources import files
+
+    override = os.environ.get("SPARROW_ENGINE_NVJPEG_LIBRARY_PATH")
+    if override:
+        try:
+            ctypes.CDLL(override, mode=ctypes.RTLD_GLOBAL)
+        except OSError:
+            pass
+        return
+
+    try:
+        lib_dir = files("nvidia.nvjpeg") / "lib"
+        candidate = lib_dir / "libnvjpeg.so.12"
+        if candidate.is_file():
+            ctypes.CDLL(str(candidate), mode=ctypes.RTLD_GLOBAL)
+    except (ModuleNotFoundError, FileNotFoundError, OSError, TypeError):
+        pass
+
+
+_preload_nvjpeg_sidecar()
+
+
 # -------------------------------------------------------------------------
 # RP-3 (2026-05-23): ORT dylib discovery shim.
 #
