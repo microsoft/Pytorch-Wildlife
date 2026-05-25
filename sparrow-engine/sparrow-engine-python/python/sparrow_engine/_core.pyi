@@ -116,3 +116,13 @@ class PyEngine:
     def list_models(self) -> list[ModelInfo]: ...
     def model_info(self, model_id: str) -> ModelInfo: ...
     def active_device(self) -> str: ...
+
+
+def visualize_audio(
+    engine: PyEngine,
+    items: list[tuple[str, AudioResult]],
+    output_dir: Optional[str] = None,
+    smooth: bool = False,
+    show_windows: bool = False,
+    show_ranges: bool = True,
+) -> list[list[bytes]]: ...
