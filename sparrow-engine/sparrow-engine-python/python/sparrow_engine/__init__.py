@@ -448,8 +448,9 @@ def visualize_audio(
     Mirrors :func:`visualize` but for :class:`AudioResult`. Non-empty calls
     automatically initialize the engine on first use via ``_get_engine()``;
     explicit :func:`init` is optional and lets callers choose device/model_dir.
-    The engine supplies audio preprocess config + window/stride via each
-    result's ``model_id``.
+    The engine supplies audio preprocess config via each result's ``model_id``;
+    each :class:`AudioResult` carries the effective window/stride used during
+    detection, including runtime overrides.
 
     Returns ``list[list[bytes]]`` — outer list one entry per input item;
     inner list holds encoded PNG bytes for every layer rendered in render

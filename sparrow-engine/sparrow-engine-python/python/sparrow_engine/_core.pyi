@@ -65,6 +65,8 @@ class AudioResult:
     model_id: str
     duration_s: float
     sample_rate: int
+    window_s: float
+    stride_s: float
     processing_time_ms: float
     segments: list[AudioSegment]
     def __len__(self) -> int: ...

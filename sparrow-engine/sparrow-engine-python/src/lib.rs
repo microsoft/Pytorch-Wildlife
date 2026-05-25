@@ -368,6 +368,10 @@ pub struct AudioResult {
     #[pyo3(get)]
     pub sample_rate: u32,
     #[pyo3(get)]
+    pub window_s: f32,
+    #[pyo3(get)]
+    pub stride_s: f32,
+    #[pyo3(get)]
     pub processing_time_ms: f32,
     #[pyo3(get)]
     pub segments: Vec<AudioSegment>,
@@ -377,9 +381,10 @@ pub struct AudioResult {
 impl AudioResult {
     fn __repr__(&self) -> String {
         format!(
-            "AudioResult(model_id='{}', duration={:.2}s, segments={})",
+            "AudioResult(model_id='{}', duration={:.2}s, stride={:.3}s, segments={})",
             self.model_id,
             self.duration_s,
+            self.stride_s,
             self.segments.len()
         )
     }
@@ -851,6 +856,11 @@ impl PyEngine {
 
         py.allow_threads(move || {
             let handle = engine.get_or_load_model(&model_id).map_err(to_pyerr)?;
+            let (window_s, effective_stride_s) = resolve_audio_window_stride(
+                handle.audio_window_stride(),
+                stride_s,
+                segment_duration_s,
+            );
             let mut results = Vec::with_capacity(paths.len());
             let mut errors = 0usize;
             for (i, path) in paths.iter().enumerate() {
@@ -861,6 +871,8 @@ impl PyEngine {
                             model_id: model_id.clone(),
                             duration_s: r.duration_s,
                             sample_rate: r.sample_rate,
+                            window_s,
+                            stride_s: effective_stride_s,
                             processing_time_ms: r.processing_time_ms,
                             segments: r.segments.iter().map(convert_audio_segment).collect(),
                         });
@@ -1143,6 +1155,8 @@ fn bbox_visualization_model_type() -> ModelType {
 
 const VISUALIZE_AUDIO_UNSUPPORTED_MESSAGE: &str =
     "visualize() does not support AudioResult — use visualize_audio() for audio";
+const DEFAULT_AUDIO_WINDOW_S: f32 = 1.0;
+const DEFAULT_AUDIO_STRIDE_S: f32 = 0.3;
 // Keep this in sync with sparrow-engine-cli/src/main.rs VIZ_MERGE_THRESHOLD.
 const VIZ_MERGE_THRESHOLD: f32 = 0.9;
 
@@ -1326,6 +1340,23 @@ fn visualize(
     Ok(png_list)
 }
 
+fn resolve_audio_window_stride(
+    manifest_window_stride: Option<(f32, f32)>,
+    stride_s: Option<f32>,
+    segment_duration_s: Option<f32>,
+) -> (f32, f32) {
+    let (manifest_window_s, manifest_stride_s) =
+        manifest_window_stride.unwrap_or((DEFAULT_AUDIO_WINDOW_S, DEFAULT_AUDIO_STRIDE_S));
+    (
+        segment_duration_s.unwrap_or(manifest_window_s),
+        stride_s.unwrap_or(manifest_stride_s),
+    )
+}
+
+fn audio_result_visualization_timing(result: &AudioResult) -> (f32, f32) {
+    (result.window_s, result.stride_s)
+}
+
 fn derive_audio_visualization_ranges(
     segments: &[sparrow_engine::AudioSegment],
     duration_s: f32,
@@ -1342,8 +1373,9 @@ fn derive_audio_visualization_ranges(
 /// Render audio detection visualization layers for a batch.
 ///
 /// Like `visualize()` but for `AudioResult`. Requires an initialized engine
-/// so the binding can recover each result's audio preprocessing config and
-/// manifest window/stride from `model_id`.
+/// so the binding can recover each result's audio preprocessing config from
+/// `model_id`; each `AudioResult` carries the effective window/stride used
+/// during detection.
 #[pyfunction]
 #[pyo3(signature = (engine, items, output_dir=None, smooth=false, show_windows=false, show_ranges=true))]
 fn visualize_audio(
@@ -1400,6 +1432,7 @@ fn visualize_audio(
         let result = result_py.get();
         let model_id = result.model_id.clone();
         let duration_s = result.duration_s;
+        let (window_s, stride_s) = audio_result_visualization_timing(result);
         let native = pyaudio_to_native(result);
         let audio_path = PathBuf::from(path_str);
 
@@ -1411,7 +1444,6 @@ fn visualize_audio(
                 let cfg = handle.audio_preprocess_config().ok_or_else(|| {
                     format!("model '{model_id}' does not expose audio preprocessing config")
                 })?;
-                let (window_s, stride_s) = handle.audio_window_stride().unwrap_or((1.0, 0.3));
                 let spec = sparrow_engine::viz::render_mel_spectrogram(&audio_path, &cfg)
                     .map_err(|e| format!("failed to render mel spectrogram: {e}"))?;
                 let ranges = if show_ranges {
@@ -1977,6 +2009,8 @@ mod tests {
             model_id: "md-audiobirds-v1".to_owned(),
             duration_s: 3.2,
             sample_rate: 48_000,
+            window_s: 1.0,
+            stride_s: 0.3,
             processing_time_ms: 12.5,
             segments: vec![AudioSegment {
                 start_time_s: 0.3,
@@ -1995,6 +2029,7 @@ mod tests {
         assert_eq!(dst.duration_s, 3.2);
         assert_eq!(dst.sample_rate, 48_000);
         assert_eq!(dst.processing_time_ms, 12.5);
+        assert_eq!(audio_result_visualization_timing(&src), (1.0, 0.3));
         assert_eq!(dst.segments.len(), 1);
         assert_eq!(dst.segments[0].start_time_s, 0.3);
         assert_eq!(dst.segments[0].classes[0].label.as_deref(), Some("sparrow"));
@@ -2003,6 +2038,117 @@ mod tests {
     #[test]
     fn visualize_audio_unsupported_message_names_new_function() {
         assert!(VISUALIZE_AUDIO_UNSUPPORTED_MESSAGE.contains("visualize_audio()"));
+    }
+
+    #[test]
+    fn resolve_audio_window_stride_applies_runtime_overrides() {
+        assert_eq!(
+            resolve_audio_window_stride(Some((1.0, 0.3)), None, None),
+            (1.0, 0.3)
+        );
+        assert_eq!(
+            resolve_audio_window_stride(Some((1.0, 0.3)), Some(0.1), Some(0.7)),
+            (0.7, 0.1)
+        );
+        assert_eq!(
+            resolve_audio_window_stride(None, Some(0.2), None),
+            (DEFAULT_AUDIO_WINDOW_S, 0.2)
+        );
+    }
+
+    #[test]
+    fn audio_visualization_uses_result_timing_metadata() {
+        let result = AudioResult {
+            model_id: "md-audiobirds-v1".to_owned(),
+            duration_s: 2.0,
+            sample_rate: 48_000,
+            window_s: 0.7,
+            stride_s: 0.1,
+            processing_time_ms: 0.0,
+            segments: vec![
+                AudioSegment {
+                    start_time_s: 0.0,
+                    end_time_s: 1.0,
+                    confidence: 1.0,
+                    classes: Vec::new(),
+                },
+                AudioSegment {
+                    start_time_s: 0.5,
+                    end_time_s: 1.5,
+                    confidence: 0.0,
+                    classes: Vec::new(),
+                },
+                AudioSegment {
+                    start_time_s: 1.0,
+                    end_time_s: 2.0,
+                    confidence: 0.0,
+                    classes: Vec::new(),
+                },
+            ],
+        };
+        let (window_s, stride_s) = audio_result_visualization_timing(&result);
+        assert_eq!((window_s, stride_s), (0.7, 0.1));
+
+        let native = pyaudio_to_native(&result);
+        let override_ranges =
+            derive_audio_visualization_ranges(&native.segments, result.duration_s, stride_s);
+        let manifest_default_ranges = derive_audio_visualization_ranges(
+            &native.segments,
+            result.duration_s,
+            DEFAULT_AUDIO_STRIDE_S,
+        );
+        assert_ne!(override_ranges, manifest_default_ranges);
+        assert_eq!(override_ranges[0].end_time_s, stride_s * 5.0);
+
+        let spec = image::DynamicImage::new_rgb8(80, 16);
+        let override_opts = sparrow_engine::viz::AudioLayersOpts {
+            smooth: false,
+            show_windows: true,
+            window_s,
+            stride_s,
+        };
+        let manifest_opts = sparrow_engine::viz::AudioLayersOpts {
+            smooth: false,
+            show_windows: true,
+            window_s: DEFAULT_AUDIO_WINDOW_S,
+            stride_s: DEFAULT_AUDIO_STRIDE_S,
+        };
+        let override_layers = sparrow_engine::viz::render_audio_layers(
+            &spec,
+            &native.segments,
+            Some(&override_ranges),
+            result.duration_s,
+            &override_opts,
+        );
+        let manifest_layers = sparrow_engine::viz::render_audio_layers(
+            &spec,
+            &native.segments,
+            Some(&manifest_default_ranges),
+            result.duration_s,
+            &manifest_opts,
+        );
+
+        assert_ne!(
+            audio_layer_bytes(&override_layers, "04_full"),
+            audio_layer_bytes(&manifest_layers, "04_full"),
+            "range overlay must use AudioResult.stride_s, not the manifest default"
+        );
+        let override_windows = override_layers
+            .iter()
+            .find(|(name, _)| *name == "02_segments_windows")
+            .expect("missing override windows layer")
+            .1
+            .height();
+        let manifest_windows = manifest_layers
+            .iter()
+            .find(|(name, _)| *name == "02_segments_windows")
+            .expect("missing manifest windows layer")
+            .1
+            .height();
+        assert_ne!(
+            override_windows, manifest_windows,
+            "window lanes must use AudioResult.window_s/stride_s, not manifest defaults"
+        );
     }
 
     #[test]
