@@ -1282,6 +1282,23 @@ fn visualize(
     Ok(png_list)
 }
 
+/// Render audio detection visualization layers for a batch.
+#[pyfunction]
+#[pyo3(signature = (engine, items, output_dir=None, smooth=false, show_windows=false, show_ranges=true))]
+fn visualize_audio(
+    _py: Python<'_>,
+    _engine: &PyEngine,
+    _items: Vec<(String, PyObject)>,
+    _output_dir: Option<String>,
+    _smooth: bool,
+    _show_windows: bool,
+    _show_ranges: bool,
+) -> PyResult<Vec<Vec<Py<PyBytes>>>> {
+    Err(SparrowEngineError::new_err(
+        "visualize_audio: not yet implemented (stub)",
+    ))
+}
+
 /// Export detection/pipeline results to megadet, coco, or csv. No engine initialization required.
 #[pyfunction]
 #[pyo3(signature = (items, format, output=None, model_id=None))]
@@ -1430,6 +1447,7 @@ fn _sparrow_engine_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_model, m)?)?;
     m.add_function(wrap_pyfunction!(summarize, m)?)?;
     m.add_function(wrap_pyfunction!(visualize, m)?)?;
+    m.add_function(wrap_pyfunction!(visualize_audio, m)?)?;
     m.add_function(wrap_pyfunction!(export_results, m)?)?;
 
     // Test-only helpers (S6) — not re-exported by sparrow_engine/__init__.py
