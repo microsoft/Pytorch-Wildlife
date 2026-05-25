@@ -927,54 +927,6 @@ fn save_layer_png(
     Ok(out_path)
 }
 
-/// Compute per-slot **overlap-mean** confidence at step-size (stride)
-/// resolution. For a window=1.0 s / stride=0.3 s model, every 0.3 s slot
-/// is contained in ~3-4 sliding-window segments. The mean over those
-/// overlapping segments is a denser, more representative confidence at
-/// step-size resolution than the single window starting at the slot.
-///
-/// Each output `AudioSegment` covers exactly one stride-width slot, so
-/// when fed to `render_audio_heatmap` the per-pixel `max` aggregation is
-/// effectively a no-op (each pixel covered by exactly one input segment).
-/// The rendered heat array reads the mean confidence directly.
-///
-/// Slots with zero overlapping windows (gaps at the timeline tail beyond
-/// the last full window) are dropped so the renderer skips them.
-fn segments_to_overlap_mean_slots(
-    segments: &[engine_dispatch::types::AudioSegment],
-    duration_s: f32,
-    step_s: f32,
-) -> Vec<engine_dispatch::types::AudioSegment> {
-    if segments.is_empty() || duration_s <= 0.0 || step_s <= 0.0 {
-        return vec![];
-    }
-    let n_slots = (duration_s / step_s).ceil() as usize;
-    let mut sums = vec![0.0f32; n_slots];
-    let mut counts = vec![0u32; n_slots];
-    for seg in segments {
-        let slot_lo = ((seg.start_time_s / step_s).floor() as usize).min(n_slots);
-        let slot_hi = ((seg.end_time_s / step_s).ceil() as usize).min(n_slots);
-        for slot in slot_lo..slot_hi {
-            sums[slot] += seg.confidence;
-            counts[slot] += 1;
-        }
-    }
-    let mut result = Vec::with_capacity(n_slots);
-    for slot in 0..n_slots {
-        if counts[slot] == 0 {
-            continue;
-        }
-        let mean = sums[slot] / counts[slot] as f32;
-        result.push(engine_dispatch::types::AudioSegment {
-            start_time_s: slot as f32 * step_s,
-            end_time_s: ((slot + 1) as f32 * step_s).min(duration_s),
-            confidence: mean,
-            classes: Vec::new(),
-        });
-    }
-    result
-}
-
 /// Configuration knobs for the layered audio visualization.
 ///
 /// Bundled into a struct so `save_audio_visualization` stays under
@@ -991,7 +943,7 @@ struct AudioVizParams<'a> {
 
 /// Render and save the layered audio visualization for one file.
 ///
-/// Produces up to four PNGs so the tester can isolate which stage of the
+/// Produces up to five PNGs so the tester can isolate which stage of the
 /// pipeline a perceived bug lives in:
 ///
 /// - `{stem}_01_spec.png` — raw mel spectrogram only (no overlays). If this
@@ -1036,129 +988,28 @@ fn save_audio_visualization(
         None => build_synthetic_spectrogram(result.duration_s),
     };
 
-    let mut paths = Vec::with_capacity(4);
-
-    // Layer 01: raw spectrogram (no overlays).
-    paths.push(save_layer_png(
-        &spec,
-        audio_path,
-        output_dir,
-        common_prefix,
-        "01_spec",
-    )?);
-
-    // Compute step-size-resolution confidence: at each 0.3s slot, take the
-    // MEAN over all sliding windows that contain that slot. This uses the
-    // overlap (each slot is covered by ~3-4 windows for window=1.0s,
-    // stride=0.3s) to produce a denser per-slot confidence than the single
-    // window starting at each step. Each slot becomes one non-overlapping
-    // segment so render_audio_heatmap renders without aggregation noise.
-    let diag_segments =
-        segments_to_overlap_mean_slots(&result.segments, result.duration_s, params.stride_s);
-
-    // Layer 02: discrete per-window segments, no blur, linear emphasis,
-    // no threshold filter. Renders the raw confidence pattern faithfully
-    // for visual verification of the heat-array stats logged above.
-    let segments_opts = engine_dispatch::viz::HeatmapOpts {
-        blur_passes: 0,
-        blur_radius: Some(0),
-        alpha_max: 200,
-        ..engine_dispatch::viz::HeatmapOpts::default()
+    let opts = engine_dispatch::viz::AudioLayersOpts {
+        smooth: params.smooth,
+        show_windows: params.show_windows,
+        window_s: params.window_s,
+        stride_s: params.stride_s,
     };
-    let segments_img = engine_dispatch::viz::render_audio_heatmap(
+    let layers = engine_dispatch::viz::render_audio_layers(
         &spec,
-        &diag_segments,
+        &result.segments,
+        params.ranges,
         result.duration_s,
-        &segments_opts,
+        &opts,
     );
-    paths.push(save_layer_png(
-        &segments_img,
-        audio_path,
-        output_dir,
-        common_prefix,
-        "02_segments",
-    )?);
 
-    // Optional layer: per-window outline rectangles overlaid on the segments
-    // image. Staggered into `ceil(window_s / stride_s)` lanes so adjacent
-    // overlapping windows render side-by-side and remain individually visible.
-    // Source: raw `result.segments` (one per inference call) — NOT the
-    // overlap-mean diag_segments — so each window's actual placement shows.
-    if params.show_windows {
-        // Append a "lanes" band below the segments image: each window is a
-        // thin horizontal line spanning [start_time_s, end_time_s], staggered
-        // across `ceil(window_s / stride_s)` lanes by idx so adjacent
-        // overlapping windows render in different lanes. Line color =
-        // inferno(confidence). Time-aligned with the spectrogram above.
-        let n_lanes = if params.stride_s > 0.0 {
-            (params.window_s / params.stride_s).ceil().max(1.0) as u32
-        } else {
-            1
-        };
-        let window_opts = engine_dispatch::viz::WindowLanesOpts {
-            n_lanes,
-            ..engine_dispatch::viz::WindowLanesOpts::default()
-        };
-        let segments_windows_img = engine_dispatch::viz::render_window_lanes(
-            &segments_img,
-            &result.segments,
-            result.duration_s,
-            &window_opts,
-        );
+    let mut paths = Vec::with_capacity(layers.len());
+    for (layer_suffix, img) in layers {
         paths.push(save_layer_png(
-            &segments_windows_img,
+            &img,
             audio_path,
             output_dir,
             common_prefix,
-            "02_segments_windows",
-        )?);
-    }
-
-    // Layer 03: smoothed inferno heatmap when --smooth is set; otherwise
-    // identical to layer 02 (discrete per-slot pattern). Smoothing adds a
-    // Gaussian blur that softens the per-slot transitions and reads more
-    // like a continuous heatmap; useful for presentation but hides the
-    // actual per-slot values, so it's opt-in.
-    let (blur_passes, blur_radius) = if params.smooth {
-        (3u32, None) // None → render_audio_heatmap defaults to w/50
-    } else {
-        (0u32, Some(0u32))
-    };
-    let heatmap_opts = engine_dispatch::viz::HeatmapOpts {
-        blur_passes,
-        blur_radius,
-        alpha_max: 200,
-        ..engine_dispatch::viz::HeatmapOpts::default()
-    };
-    let heatmap_img = engine_dispatch::viz::render_audio_heatmap(
-        &spec,
-        &diag_segments,
-        result.duration_s,
-        &heatmap_opts,
-    );
-    paths.push(save_layer_png(
-        &heatmap_img,
-        audio_path,
-        output_dir,
-        common_prefix,
-        "03_heatmap",
-    )?);
-
-    // Layer 04: full composite (heatmap + cyan range overlay). Only when
-    // ranges are present (default merged mode; --raw-segments skips).
-    if let Some(rs) = params.ranges {
-        let full_img = engine_dispatch::viz::render_range_overlay(
-            &heatmap_img,
-            rs,
-            result.duration_s,
-            &engine_dispatch::viz::RangeOverlayOpts::default(),
-        );
-        paths.push(save_layer_png(
-            &full_img,
-            audio_path,
-            output_dir,
-            common_prefix,
-            "04_full",
+            layer_suffix,
         )?);
     }
 
@@ -1683,7 +1534,7 @@ fn cmd_detect_audio(
                     let ranges_owned = if args.raw_segments {
                         None
                     } else {
-                        let slots = segments_to_overlap_mean_slots(
+                        let slots = engine_dispatch::viz::segments_to_overlap_mean_slots(
                             &result.segments,
                             result.duration_s,
                             stride_s,

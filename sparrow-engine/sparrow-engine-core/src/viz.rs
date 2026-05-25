@@ -99,6 +99,33 @@ impl Default for HeatmapOpts {
     }
 }
 
+/// Options governing which layers `render_audio_layers` emits and how
+/// the heatmap layer is rendered.
+#[derive(Debug, Clone)]
+pub struct AudioLayersOpts {
+    /// If true, layer 03 uses a smoothed inferno heatmap (Gaussian-style blur).
+    /// If false, layer 03 mirrors layer 02 (raw per-slot pattern).
+    pub smooth: bool,
+    /// If true, emits an extra layer "02_segments_windows" between 02 and 03,
+    /// showing each inference window staggered across lanes.
+    pub show_windows: bool,
+    /// Inference window length (seconds). Used for window-lane stagger count.
+    pub window_s: f32,
+    /// Inference stride length (seconds). Used for slot resolution + lane count.
+    pub stride_s: f32,
+}
+
+impl Default for AudioLayersOpts {
+    fn default() -> Self {
+        Self {
+            smooth: false,
+            show_windows: false,
+            window_s: 1.0,
+            stride_s: 0.3,
+        }
+    }
+}
+
 fn validate_heatmap_opts(opts: &HeatmapOpts) -> std::result::Result<(), String> {
     if !opts.threshold.is_finite() || !(0.0..=1.0).contains(&opts.threshold) {
         return Err(format!(
@@ -417,6 +444,125 @@ fn inferno(t: f32) -> [u8; 3] {
 // ---------------------------------------------------------------------------
 // render_audio_heatmap()
 // ---------------------------------------------------------------------------
+
+/// Compose the audio-detection visualization layers from a spectrogram backdrop,
+/// segment list, and optional merged ranges.
+///
+/// Returns a Vec of (layer_name, image) in render order. Layer names match the
+/// CLI's `spe detect-audio --visualize` output filename stems:
+///   - "01_spec"               — raw spectrogram, no overlays
+///   - "02_segments"           — discrete per-slot confidence (no blur)
+///   - "02_segments_windows"   — only if opts.show_windows
+///   - "03_heatmap"            — smoothed inferno heatmap if opts.smooth, else
+///     identical to 02_segments
+///   - "04_full"               — 03_heatmap + cyan range bars, only if ranges Some
+pub fn render_audio_layers(
+    spec: &DynamicImage,
+    segments: &[sparrow_engine_types::AudioSegment],
+    ranges: Option<&[sparrow_engine_types::AudioRange]>,
+    duration_s: f32,
+    opts: &AudioLayersOpts,
+) -> Vec<(&'static str, DynamicImage)> {
+    let mut layers = Vec::with_capacity(
+        3 + usize::from(opts.show_windows) + usize::from(ranges.is_some()),
+    );
+
+    layers.push(("01_spec", spec.clone()));
+
+    let diag_segments = segments_to_overlap_mean_slots(segments, duration_s, opts.stride_s);
+    let segments_opts = HeatmapOpts {
+        blur_passes: 0,
+        blur_radius: Some(0),
+        alpha_max: 200,
+        ..HeatmapOpts::default()
+    };
+    let segments_img = render_audio_heatmap(spec, &diag_segments, duration_s, &segments_opts);
+    layers.push(("02_segments", segments_img.clone()));
+
+    if opts.show_windows {
+        let n_lanes = if opts.stride_s > 0.0 {
+            (opts.window_s / opts.stride_s).ceil().max(1.0) as u32
+        } else {
+            1
+        };
+        let window_opts = WindowLanesOpts {
+            n_lanes,
+            ..WindowLanesOpts::default()
+        };
+        let segments_windows_img =
+            render_window_lanes(&segments_img, segments, duration_s, &window_opts);
+        layers.push(("02_segments_windows", segments_windows_img));
+    }
+
+    let heatmap_img = if opts.smooth {
+        let heatmap_opts = HeatmapOpts {
+            blur_passes: 3,
+            blur_radius: None,
+            alpha_max: 200,
+            ..HeatmapOpts::default()
+        };
+        render_audio_heatmap(spec, &diag_segments, duration_s, &heatmap_opts)
+    } else {
+        segments_img
+    };
+    layers.push(("03_heatmap", heatmap_img.clone()));
+
+    if let Some(rs) = ranges {
+        let full_img =
+            render_range_overlay(&heatmap_img, rs, duration_s, &RangeOverlayOpts::default());
+        layers.push(("04_full", full_img));
+    }
+
+    layers
+}
+
+/// Compute per-slot **overlap-mean** confidence at step-size (stride)
+/// resolution. For a window=1.0 s / stride=0.3 s model, every 0.3 s slot
+/// is contained in ~3-4 sliding-window segments. The mean over those
+/// overlapping segments is a denser, more representative confidence at
+/// step-size resolution than the single window starting at the slot.
+///
+/// Each output `AudioSegment` covers exactly one stride-width slot, so
+/// when fed to `render_audio_heatmap` the per-pixel `max` aggregation is
+/// effectively a no-op (each pixel covered by exactly one input segment).
+/// The rendered heat array reads the mean confidence directly.
+///
+/// Slots with zero overlapping windows (gaps at the timeline tail beyond
+/// the last full window) are dropped so the renderer skips them.
+pub fn segments_to_overlap_mean_slots(
+    segments: &[sparrow_engine_types::AudioSegment],
+    duration_s: f32,
+    step_s: f32,
+) -> Vec<sparrow_engine_types::AudioSegment> {
+    if segments.is_empty() || duration_s <= 0.0 || step_s <= 0.0 {
+        return vec![];
+    }
+    let n_slots = (duration_s / step_s).ceil() as usize;
+    let mut sums = vec![0.0f32; n_slots];
+    let mut counts = vec![0u32; n_slots];
+    for seg in segments {
+        let slot_lo = ((seg.start_time_s / step_s).floor() as usize).min(n_slots);
+        let slot_hi = ((seg.end_time_s / step_s).ceil() as usize).min(n_slots);
+        for slot in slot_lo..slot_hi {
+            sums[slot] += seg.confidence;
+            counts[slot] += 1;
+        }
+    }
+    let mut result = Vec::with_capacity(n_slots);
+    for slot in 0..n_slots {
+        if counts[slot] == 0 {
+            continue;
+        }
+        let mean = sums[slot] / counts[slot] as f32;
+        result.push(sparrow_engine_types::AudioSegment {
+            start_time_s: slot as f32 * step_s,
+            end_time_s: ((slot + 1) as f32 * step_s).min(duration_s),
+            confidence: mean,
+            classes: Vec::new(),
+        });
+    }
+    result
+}
 
 /// Render an audio confidence heatmap overlaid on a spectrogram image.
 pub fn render_audio_heatmap(
