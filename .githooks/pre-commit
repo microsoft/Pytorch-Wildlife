@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit — Block dev/AI artifacts from leaking into the public
+# Pytorch-Wildlife (sparrow-engine code) repo.
+#
+# Why: per sparrow-engine-dev/docs/rules.md § Dev-companion split, dev/AI
+# narrative artifacts (audit-fix rounds, design rounds, /implement skill
+# outputs, prompt logs, scope ledgers, etc.) live in the internal
+# `sparrow-engine-dev` companion repo, NOT here. One historical leak
+# (`docs/rp11_handoff.md` in commit b8c2158) prompted this enforcement.
+#
+# What: scans the staged file list. If any path matches a denylist pattern
+# AND is not on the small whitelist, the commit is rejected with a pointer
+# to the rule + the migration path.
+#
+# How: install with `bash .githooks/install.sh` (one-time per fresh clone).
+# That sets `git config core.hooksPath .githooks` so this script runs.
+#
+# Escape hatches:
+#   - Stage with `--no-verify` to bypass (use ONLY for explicit, justified
+#     exceptions; do NOT use to land routine dev artifacts).
+#   - To allow a new public-docs file, add it to the WHITELIST_FILES /
+#     WHITELIST_DIRS arrays below and document the rationale in the commit
+#     message.
+set -euo pipefail
+
+# -----------------------------------------------------------------------------
+# Allow-list (always permitted)
+# -----------------------------------------------------------------------------
+WHITELIST_FILES=(
+    "docs/user-manual.md"
+    "docs/install.md"
+    "docs/README.md"
+)
+
+# Directory prefixes whose contents are always allowed (relative to repo root,
+# no leading slash). Add only public-docs subdirs here.
+WHITELIST_DIRS=(
+    "docs/images/"
+    "docs/assets/"
+)
+
+# -----------------------------------------------------------------------------
+# Deny-list patterns (any match fails the commit unless allow-listed above)
+#
+# Glob-style; matched against `git diff --cached --name-only` (forward slashes,
+# repo-relative). Use `*` for any chars in one segment, `**` for any number of
+# segments.
+# -----------------------------------------------------------------------------
+DENYLIST_PATTERNS=(
+    # docs/ dev-narrative subtrees
+    "docs/design/**"
+    "docs/research/**"
+    "docs/review/**"
+    "docs/implement/**"
+    "docs/implementation/**"
+    "docs/explain/**"
+    "docs/tech_report/**"
+    "docs/changelog/**"
+
+    # docs/ top-level dev-narrative files
+    "docs/plan.md"
+    "docs/plan*.md"
+    "docs/master_plan.md"
+    "docs/master_plan*.md"
+    "docs/changelog.md"
+    "docs/changelog*.md"
+    "docs/lessons.md"
+    "docs/bugs.md"
+    "docs/ideas.md"
+    "docs/decisions.md"
+    "docs/rules.md"
+    "docs/benchmarks.md"
+
+    # Handoff / report / round artifacts anywhere in the tree
+    "**/*_handoff.md"
+    "**/*-handoff.md"
+    "**/*_report.md"
+    "**/*-report.md"
+    "**/round_*/**"
+
+    # Skill artifacts
+    "**/SESSION_LEDGER*.json"
+    "**/COVERAGE_LOG*.jsonl"
+    "**/CONVERGED.sentinel"
+    "**/MEMORY.md"
+    "**/scope_check.sh"
+
+    # Agent instruction dumps
+    "CLAUDE.md"
+    "AGENTS.md"
+    "**/CLAUDE.md"
+    "**/AGENTS.md"
+
+    # Prompt logs
+    "prompt_logs/**"
+    "**/prompt_logs/**"
+
+    # Audit-fix / doc-fix marker files
+    "**/MIGRATED_FROM_PUBLIC.md"
+)
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+# Convert a glob-style pattern (with `**`) into an extended regex.
+# `**` → `.*`, `*` → `[^/]*`, literal dots escaped.
+glob_to_regex() {
+    local pat="$1"
+    # Escape regex specials except * and / (we transform * after).
+    # NOTE: do NOT use ${pat//?/...} — bash treats `?` as a glob (any single
+    # char) in the pattern slot, which would replace every character.
+    pat="${pat//./\\.}"
+    pat="${pat//+/\\+}"
+    # `**` placeholder so the single-* pass doesn't eat it.
+    pat="${pat//\*\*/__DOUBLE_STAR__}"
+    pat="${pat//\*/[^/]*}"
+    pat="${pat//__DOUBLE_STAR__/.*}"
+    echo "^${pat}\$"
+}
+
+is_whitelisted() {
+    local path="$1"
+    local w
+    for w in "${WHITELIST_FILES[@]}"; do
+        [[ "$path" == "$w" ]] && return 0
+    done
+    for w in "${WHITELIST_DIRS[@]}"; do
+        [[ "$path" == "$w"* ]] && return 0
+    done
+    return 1
+}
+
+matches_denylist() {
+    local path="$1"
+    local pat regex
+    for pat in "${DENYLIST_PATTERNS[@]}"; do
+        regex="$(glob_to_regex "$pat")"
+        if [[ "$path" =~ $regex ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# -----------------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------------
+# Initial commit safety: HEAD may not exist.
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    DIFF_TARGET="HEAD"
+else
+    DIFF_TARGET="--cached"  # falls back to staged tree
+fi
+
+# Get list of staged files (added/modified/renamed; diff-filter excludes deleted).
+mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR ${DIFF_TARGET:+--ignore-submodules} 2>/dev/null || true)
+
+if (( ${#STAGED[@]} == 0 )); then
+    exit 0
+fi
+
+VIOLATIONS=()
+for path in "${STAGED[@]}"; do
+    [[ -z "$path" ]] && continue
+    if is_whitelisted "$path"; then
+        continue
+    fi
+    if matches_denylist "$path"; then
+        VIOLATIONS+=("$path")
+    fi
+done
+
+if (( ${#VIOLATIONS[@]} > 0 )); then
+    cat >&2 <<'EOF'
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  COMMIT BLOCKED — dev/AI artifact detected                                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+The Pytorch-Wildlife repo (sparrow-engine code) MUST NOT carry dev/AI
+narrative artifacts. They belong in the internal `sparrow-engine-dev`
+companion repo (typically at ../sparrow-engine-dev or via $SPARROW_X_DEV).
+
+Files blocked by this hook:
+EOF
+    for v in "${VIOLATIONS[@]}"; do
+        printf '  • %s\n' "$v" >&2
+    done
+    cat >&2 <<'EOF'
+
+What to do:
+
+  1. Move each file into the sparrow-engine-dev companion under the
+     equivalent docs/ subpath (or docs/implement/<phase>/ for implement
+     skill artifacts).
+  2. Drop a MIGRATED_FROM_PUBLIC.md provenance note in the destination
+     directory citing this would-be PW commit's intended SHA + subject.
+  3. `git restore --staged <path>` to unstage, then `git rm` if the file
+     was already committed.
+  4. Re-run `git commit`.
+
+Rule citation: sparrow-engine-dev/docs/rules.md § Dev-companion split
+Hook source: .githooks/pre-commit (this file)
+
+If you have a justified exception (e.g., a new genuinely-public docs file),
+either:
+  a) Add the path to WHITELIST_FILES / WHITELIST_DIRS in this hook and
+     commit the change with a justification, or
+  b) Bypass once with `git commit --no-verify` (logs the exception in
+     your reflog).
+EOF
+    exit 1
+fi
+
+exit 0

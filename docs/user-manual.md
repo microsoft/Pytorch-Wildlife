@@ -778,6 +778,70 @@ Sparrow Engine's Rust `tracing` events are bridged to the Python `logging` modul
 
 **Cite**: Phase 3.5 S6 (`docs/master_plan.md § Phase 3.5 Wave 2`); `sparrow-engine/sparrow-engine-python/src/lib.rs`.
 
+### 6.6 Example — MegaDetector v6 on a folder of camera-trap images
+
+End-to-end script: enumerate a folder, run MegaDetector v6, save annotated copies, and emit a CSV of detections.
+
+```python
+from pathlib import Path
+import sparrow_engine
+
+image_dir = Path("./trail_cam_2024")
+out_dir = Path("./trail_cam_2024_out")
+out_dir.mkdir(parents=True, exist_ok=True)
+
+# Gather image paths (sorted for reproducible output ordering).
+# Supported extensions match the engine's image input set.
+exts = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
+paths = sorted(p for p in image_dir.iterdir() if p.suffix.lower() in exts)
+
+# Run detection. `detect()` accepts a list[Path] (or a directory directly via
+# `recursive=True`). Returns one DetectResult per input image, in input order.
+results = sparrow_engine.detect(
+    paths,
+    model="megadetector-v6-yolov10e",
+    threshold=0.20,
+    max_detections=100,
+)
+
+# Pair each input path with its result. DetectResult does NOT carry the
+# source path, so `visualize` and `export` take list[tuple[path, result]].
+items = list(zip(paths, results))
+
+# Render bounding boxes onto each image and write into `out_dir`.
+sparrow_engine.visualize(items, output_dir=out_dir, show_labels=True)
+
+# Emit a flat CSV (one row per detection) suitable for spreadsheet review.
+sparrow_engine.export(items, format="csv", output=out_dir / "detections.csv")
+
+# Inspect a single result programmatically.
+for path, r in items[:3]:
+    print(f"{path.name}: {len(r.detections)} dets, {r.processing_time_ms:.1f} ms")
+    for d in r.detections:
+        print(f"  {d.label} ({d.confidence:.2f}) bbox={d.bbox.x_min:.3f},"
+              f"{d.bbox.y_min:.3f},{d.bbox.x_max:.3f},{d.bbox.y_max:.3f}")
+```
+
+**Knobs**
+
+| Parameter | Default | Typical use |
+|---|---|---|
+| `model` | (required) | Model ID from the local registry. For MDv6: `"megadetector-v6-yolov10e"`. |
+| `threshold` | `None` (manifest default = 0.20 for MDv6) | Raise to 0.30+ to cut false positives; lower to recall more borderline boxes. |
+| `max_detections` | manifest default (300 for MDv6) | Hard cap per image after NMS. |
+| `recursive` | `False` | Pass a directory + `True` to walk subfolders. |
+| `format` | required | `export` accepts `"megadet"` (Microsoft AI for Earth JSON; requires `model_id=`), `"coco"`, or `"csv"`. No other values are valid. |
+
+**Result shape**
+
+`DetectResult` exposes `model_id`, `image_size`, `processing_time_ms`, and `detections: list[Detection]`. Each `Detection` carries `label: str`, `label_id: int`, `confidence: float`, and `bbox: BBox` with normalized `[0, 1]` `x_min/y_min/x_max/y_max`. Use `bbox.to_pixels(width, height)` for pixel coordinates. The input path is NOT a field on the result — track it externally via the `(path, result)` pair.
+
+**First-run note**
+
+If you have not run MDv6 before, place the ONNX file under `~/.sparrow-engine/models/megadetector-v6-yolov10e/` next to its TOML manifest. The Python wheel does not auto-download models; manifests are bundled but ONNX weights must be staged manually (see §2.3 "What lands on disk" and `sparrow-engine/tools/examples/megadetector-v6.toml`).
+
+**Cite**: `sparrow-engine/sparrow-engine-python/python/sparrow_engine/__init__.py:327` (`detect`), `:509` (`visualize`), `:566` (`export`); `sparrow-engine/sparrow-engine-python/python/sparrow_engine/_core.pyi:21-28` (`DetectResult`); `sparrow-engine/sparrow-engine-python/src/lib.rs:1557` (export format whitelist); `sparrow-engine/tools/examples/megadetector-v6.toml` (model + threshold defaults).
+
 ---
 
 ## 7. HTTP API server — `sparrow-engine-server`
