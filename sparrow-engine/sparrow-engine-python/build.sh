@@ -114,7 +114,7 @@ build_gpu() {
     sed -i \
         -e 's|^name = "sparrow-engine"$|name = "sparrow-engine-gpu"|' \
         -e 's|^description = "Camera-trap ML inference engine — Python bindings (sparrow-engine CPU pipeline)"$|description = "Camera-trap ML inference engine — Python bindings (sparrow-engine GPU pipeline)"|' \
-        -e 's|"onnxruntime>=1.25.1,<1.26"|"onnxruntime-gpu>=1.25.1,<1.26"|' \
+        -e 's|"onnxruntime>=1.25.1,<1.26"|"onnxruntime-gpu>=1.25.1,<1.26", "nvidia-cudnn-cu12>=9,<10", "nvidia-cublas-cu12", "nvidia-curand-cu12", "nvidia-cufft-cu12"|' \
         pyproject.toml
     write_flavor_sentinel gpu
 

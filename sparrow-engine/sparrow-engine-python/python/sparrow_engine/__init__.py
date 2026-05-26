@@ -46,7 +46,61 @@ def _preload_nvjpeg_sidecar() -> None:
         pass
 
 
+def _preload_cuda_runtime_sidecars() -> None:
+    """Preload CUDA runtime libs (cuDNN, cuBLAS, cuRAND, cuFFT) for the
+    GPU Linux wheel from `nvidia-*-cu12` PyPI packages.
+
+    ORT's CUDA EP dlopens `libcudnn.so.9` + `libcublas.so.12` +
+    `libcurand.so.10` + `libcufft.so.11` at first inference. Without these
+    preloads end users would need to set LD_LIBRARY_PATH manually at every
+    launch (the gap surfaced when E.7 of the Phase E manual test ran against
+    the TestPyPI wheel in a fresh venv, 2026-05-25). Mirrors the nvjpeg
+    sidecar pattern.
+
+    Preload semantics: `ctypes.CDLL(path, mode=RTLD_GLOBAL)` registers the
+    library's symbols in the global symbol table, so ORT's subsequent
+    `dlopen("libcudnn.so.9")` (by SONAME, no path) finds the already-loaded
+    handle without needing the directory on LD_LIBRARY_PATH.
+
+    Override via `SPARROW_ENGINE_CUDA_RUNTIME_PATH` (colon-separated list of
+    lib dirs) — useful for system-CUDA installs or non-standard layouts.
+    """
+    if sys.platform != "linux" or _runtime_flavor() != "gpu":
+        return
+
+    import ctypes
+    from importlib.resources import files
+
+    def _preload_dir(d: Union[str, Path]) -> None:
+        p = Path(d)
+        if not p.is_dir():
+            return
+        # Sort so `libfoo.so.<major>` loads after any sub-libs the resolver
+        # needs (alphabetical ordering does this reliably for the cuDNN /
+        # cuBLAS family — `libcudnn_adv.so.9` precedes `libcudnn.so.9`).
+        for entry in sorted(p.iterdir()):
+            name = entry.name
+            if name.startswith("lib") and ".so." in name and entry.is_file():
+                try:
+                    ctypes.CDLL(str(entry), mode=ctypes.RTLD_GLOBAL)
+                except OSError:
+                    pass
+
+    override = os.environ.get("SPARROW_ENGINE_CUDA_RUNTIME_PATH")
+    if override:
+        for d in override.split(os.pathsep):
+            _preload_dir(d)
+        return
+
+    for pkg in ("nvidia.cudnn", "nvidia.cublas", "nvidia.curand", "nvidia.cufft"):
+        try:
+            _preload_dir(str(files(pkg) / "lib"))
+        except (ModuleNotFoundError, FileNotFoundError, OSError, TypeError):
+            pass
+
+
 _preload_nvjpeg_sidecar()
+_preload_cuda_runtime_sidecars()
 
 
 # -------------------------------------------------------------------------
