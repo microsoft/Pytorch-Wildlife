@@ -338,6 +338,11 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          # TestPyPI is a sandbox; treat duplicate version uploads as no-ops
+          # so workflow_dispatch retries (e.g. after a downstream job fails)
+          # don't error out at the CPU publish step. Prod-PyPI publishes
+          # below MUST NOT set this flag — there a duplicate is a real error.
+          skip-existing: true
 
   # -------- Prod PyPI publish (tag push, non-RC only) --------
 
@@ -451,3 +456,6 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          # See publish-testpypi-cpu comment above — TestPyPI sandbox,
+          # duplicate-version uploads treated as no-ops on retry.
+          skip-existing: true
