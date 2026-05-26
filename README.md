@@ -29,9 +29,34 @@ and **cuDNN ≥9.10** (cuDNN 9.8 has a Conv-engine bug on sm_89).
 ### Python package only (PyPI)
 
 If you only want the Python wheel — no CLI, no Docker image — install
-straight from PyPI:
+straight from PyPI. Both wheels target CPython ≥ 3.11 (`cp311-abi3`), so
+make sure your venv runs Python 3.11 or newer.
+
+**With `uv` (recommended)**:
 
 ```bash
+uv venv --python 3.11
+source .venv/bin/activate         # Windows: .venv\Scripts\activate
+
+# CPU
+uv pip install sparrow-engine
+
+# GPU (Linux x86_64 only; requires CUDA 12.6 runtime on the host)
+uv pip install sparrow-engine-gpu
+```
+
+`uv venv` does not ship `pip` inside the venv by default, so use `uv pip
+install` (uv's pip-compatible wrapper) instead of bare `pip install`.
+Calling `pip install …` after `source activate` falls back to the system
+pip, which usually targets the wrong Python version and fails with
+`No matching distribution found`.
+
+**With stdlib `venv`**:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate         # Windows: .venv\Scripts\activate
+
 # CPU
 pip install sparrow-engine
 
@@ -40,7 +65,9 @@ pip install sparrow-engine-gpu
 ```
 
 Both wheels import as `sparrow_engine`. Never install both into the same
-environment. See [§6 of the user manual](docs/user-manual.md#6-python-package--sparrow-engine)
+environment. Check the installed version with
+`python -c "import sparrow_engine; print(sparrow_engine.__version__)"`.
+See [§6 of the user manual](docs/user-manual.md#6-python-package--sparrow-engine)
 for the full API surface and GPU sidecar options.
 
 ---

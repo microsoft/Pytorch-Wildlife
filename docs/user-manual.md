@@ -717,7 +717,9 @@ $ spe pipeline IMG.jpg \
 | `visualize_audio(results, output_dir, ...)` | None; writes mel-spectrogram PNGs with detection windows for `detect_audio` results. |
 | `export(results, format, output)` | None; writes consolidated batch output |
 
-**Cite**: `sparrow-engine/sparrow-engine-python/python/sparrow_engine/__init__.py:212-246` (`__all__`); per-function defs in the same file.
+Plus one public attribute: `sparrow_engine.__version__` (`str`) — the installed wheel's version, single-sourced from PyPI metadata via `importlib.metadata.version(...)`. Resolves the GPU distribution name first, then the CPU name, then falls back to `"unknown"` on a broken install. Lets a tester confirm the wheel they just installed without grepping `pip show`.
+
+**Cite**: `sparrow-engine/sparrow-engine-python/python/sparrow_engine/__init__.py:212-247` (`__all__`); per-function defs in the same file; `__version__` resolver at `__init__.py:16-29`.
 
 ---
 

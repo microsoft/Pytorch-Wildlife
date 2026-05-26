@@ -4,8 +4,28 @@ from __future__ import annotations
 import os
 import sys
 import threading
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Callable, Optional, Union
+
+
+# Public package version. Single-sourced from the wheel METADATA (which
+# itself comes from sparrow-engine-python/pyproject.toml). Tries the GPU
+# distribution name first because the GPU wheel is the more specific
+# install — if both were ever resolvable in the same env (Provides-Dist
+# advisory only; not a hard guard per Phase 3.8 Phase C `feedback_no_soft_tolerance_framing_on_gates.md`),
+# preferring GPU is the safer reflection of what's actually loaded.
+def _resolve_version() -> str:
+    for dist in ("sparrow-engine-gpu", "sparrow-engine"):
+        try:
+            return _pkg_version(dist)
+        except PackageNotFoundError:
+            continue
+    return "unknown"
+
+
+__version__ = _resolve_version()
+
 
 # S6: per-file progress callback. Invoked once per input file, AFTER the
 # file's inference attempt resolves (success or failure), with
@@ -210,6 +230,8 @@ from sparrow_engine._sparrow_engine_core import visualize as _visualize_core
 from sparrow_engine._sparrow_engine_core import visualize_audio as _visualize_audio_core
 
 __all__ = [
+    # Version (single-sourced from wheel METADATA via importlib.metadata)
+    "__version__",
     # Functions
     "init",
     "detect",
