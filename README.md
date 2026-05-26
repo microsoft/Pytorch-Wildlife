@@ -26,6 +26,23 @@ to install the HTTP-server image instead.
 System prerequisites for GPU: NVIDIA driver ≥550.x, CUDA 12.6 runtime,
 and **cuDNN ≥9.10** (cuDNN 9.8 has a Conv-engine bug on sm_89).
 
+### Python package only (PyPI)
+
+If you only want the Python wheel — no CLI, no Docker image — install
+straight from PyPI:
+
+```bash
+# CPU
+pip install sparrow-engine
+
+# GPU (Linux x86_64 only; requires CUDA 12.6 runtime on the host)
+pip install sparrow-engine-gpu
+```
+
+Both wheels import as `sparrow_engine`. Never install both into the same
+environment. See [§6 of the user manual](docs/user-manual.md#6-python-package--sparrow-engine)
+for the full API surface and GPU sidecar options.
+
 ---
 
 > 📖 **[Read the full user manual →](docs/user-manual.md)**

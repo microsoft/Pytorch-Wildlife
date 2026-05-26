@@ -690,14 +690,14 @@ $ spe pipeline IMG.jpg \
 ```
 
 **Why**: scientists work in notebooks. A Python wheel removes the install friction of the CLI.
-**What**: a single `import sparrow_engine` exposing 14 functions, plus IDE-ready type stubs (`_core.pyi`).
+**What**: a single `import sparrow_engine` exposing 15 functions, plus IDE-ready type stubs (`_core.pyi`).
 **How**: PyO3 0.25 builds the Rust → Python bridge; the GIL is released during inference (`py.allow_threads`).
 
 **Plain words**: "GIL" (Global Interpreter Lock) is the Python rule that only one thread can run Python bytecode at a time. Releasing it during inference means other threads keep working.
 
 ---
 
-### 6.1 The 14 public functions
+### 6.1 The 15 public functions
 
 | Function | Returns |
 |----------|---------|
@@ -713,10 +713,11 @@ $ spe pipeline IMG.jpg \
 | `day_night(path)` | `dict` with `is_day`, `brightness` |
 | `verify_model(model_id)` | `dict` with `ok`, `expected`, `actual` |
 | `summarize(results)` | `dict` of detection statistics |
-| `visualize(results, output_dir, ...)` | None; writes PNGs |
+| `visualize(results, output_dir, ...)` | None; writes annotated PNGs for image detect / classify / pipeline results. |
+| `visualize_audio(results, output_dir, ...)` | None; writes mel-spectrogram PNGs with detection windows for `detect_audio` results. |
 | `export(results, format, output)` | None; writes consolidated batch output |
 
-**Cite**: `sparrow-engine/sparrow-engine-python/python/sparrow_engine/__init__.py:127-340`.
+**Cite**: `sparrow-engine/sparrow-engine-python/python/sparrow_engine/__init__.py:212-246` (`__all__`); per-function defs in the same file.
 
 ---
 
