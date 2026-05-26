@@ -233,19 +233,22 @@ jobs:
           # Rocky 8 / RHEL 8: dnf instead of apt; python3.11 is the newest
           # cpython available via AppStream and matches the wheel's abi3-cp311
           # target + the project's requires-python>=3.11 floor.
-          # epel-release enables patchelf (needed by auditwheel repair).
-          dnf install -y epel-release
           dnf install -y --setopt=install_weak_deps=False \
-            ca-certificates curl git gcc gcc-c++ make pkgconfig patchelf \
+            ca-certificates curl git gcc gcc-c++ make pkgconfig \
             python3.11 python3.11-devel python3.11-pip
           ln -sf /usr/bin/python3.11 /usr/local/bin/python3
           ln -sf /usr/bin/python3.11 /usr/local/bin/python
           # auditwheel >=6.0.0 needed for manylinux_2_28 policy support.
-          # build.sh calls `auditwheel repair` directly at line 152 — must be
-          # on PATH before the `Build GPU wheel via build.sh` step. The
-          # build step also exports $HOME/.local/bin to PATH so --user
-          # installs resolve.
-          python3 -m pip install --user --upgrade "auditwheel>=6.0.0"
+          # patchelf MUST come from PyPI (not Rocky 8 EPEL, which ships
+          # v0.12 — auditwheel repair requires >=0.14). The PyPI patchelf
+          # package wraps the upstream binary release (currently 0.18+)
+          # and puts it in $HOME/.local/bin, which is prepended to PATH
+          # via $GITHUB_PATH so it takes precedence over any system
+          # patchelf. build.sh calls `auditwheel repair` at line 152 —
+          # must be on PATH before the `Build GPU wheel via build.sh` step.
+          python3 -m pip install --user --upgrade \
+            "auditwheel>=6.0.0" \
+            "patchelf>=0.14"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - uses: actions/checkout@v4
