@@ -13,11 +13,15 @@ name: Release sparrow-engine wheels
 # macOS x86_64 (Intel Mac) is NOT in the matrix — no ORT 1.25.1 wheel exists for that
 # platform AND the macos-13 GitHub-hosted runner pool has chronic 25+ min queue latency
 # that blocks every release. Intel-Mac users build from source per `docs/install.md`.
-# GPU wheel: Linux x86_64 inside nvidia/cuda:12.6.3-cudnn-devel-ubuntu24.04 container.
+# GPU wheel: Linux x86_64 inside Rocky 8 / glibc 2.28 container (Phase F switch from
+# Ubuntu 24.04 to satisfy manylinux_2_28 policy).
 #
-# GPU PyPI publish is currently gated `if: false`. Phase E (nvjpeg dlopen rewrite)
-# must land first to remove the `libnvjpeg.so` DT_NEEDED and verify zero codebase
-# + zero performance regression. Flip the gate in Phase F.
+# Phase H (2026-05-25): GPU prod-PyPI publish ENABLED. Phase E (nvjpeg dlopen) +
+# Phase F (Rocky 8 container + auditwheel hard gate + CUDA runtime preload)
+# made the GPU wheel manylinux_2_28-compliant and runtime-self-contained; the
+# v0.1.3 TestPyPI publish + dev-box E.7-E.10 manual test verified end-to-end
+# install + inference. Tag-version validation step (mirrored from publish-pypi-cpu)
+# guards the prod-PyPI immutability invariant.
 #
 # OIDC trusted-publisher prerequisites (USER action, not automatable):
 #   - prod PyPI: claim `sparrow-engine` + `sparrow-engine-gpu` names; configure
@@ -398,17 +402,13 @@ jobs:
 
   publish-pypi-gpu:
     name: Publish GPU wheel to PyPI
-    # Phase F (2026-05-25): TestPyPI GPU publish ENABLED (see
-    # publish-testpypi-gpu below); Phase E's dlopen rewrite + the Rocky 8
-    # build container + the auditwheel hard gate in build-gpu-linux satisfy
-    # the manylinux_2_28 policy. This prod-PyPI gate stays `if: false` until
-    # Phase H adds:
-    #   1. A tag-version validation step (copy the "Validate tag matches
-    #      wheel version" block from publish-pypi-cpu at the top of this
-    #      file's `steps:`).
-    #   2. Flip THIS condition to:
-    #        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    if: false
+    # Phase H (2026-05-25): gate flipped from `if: false` to mirror
+    # publish-pypi-cpu (only on actual non-prerelease version tags).
+    # Phase E (nvjpeg dlopen) + Phase F (Rocky 8 build container + auditwheel
+    # hard gate + CUDA runtime preload) made the GPU wheel manylinux_2_28-
+    # compliant and runtime-self-contained; v0.1.3 TestPyPI publish + dev-box
+    # E.7-E.10 manual test verified end-to-end install + inference.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs:
       - build-gpu-linux
     runs-on: ubuntu-latest
@@ -426,6 +426,22 @@ jobs:
 
       - name: Show collected dist/
         run: ls -la dist/
+
+      - name: Validate tag matches wheel version (PyPI immutability guard)
+        run: |
+          # Strip leading 'v' from tag: refs/tags/v0.1.4 -> 0.1.4
+          tag_version="${GITHUB_REF_NAME#v}"
+          # Extract version from any wheel filename; abi3 wheels share one version.
+          # Wheel filename shape: sparrow_engine_gpu-<version>-cp311-abi3-<platform>.whl
+          wheel_version="$(ls dist/sparrow_engine_gpu-*.whl | head -1 \
+            | sed -E 's|.*/sparrow_engine_gpu-([^-]+)-cp311-abi3-.*|\1|')"
+          echo "Tag version:   $tag_version"
+          echo "Wheel version: $wheel_version"
+          if [ "$tag_version" != "$wheel_version" ]; then
+            echo "FAIL: tag ($tag_version) and wheel ($wheel_version) versions disagree."
+            echo "Bump pyproject.toml [project].version (and Cargo.toml) before tagging."
+            exit 1
+          fi
 
       - uses: pypa/gh-action-pypi-publish@release/v1
 
