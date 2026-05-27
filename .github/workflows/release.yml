@@ -788,7 +788,19 @@ jobs:
 
   publish-cli-release-assets:
     name: Attach CLI tarballs to GitHub Release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    # Tag-push only; skips on hyphenated tags (RC / pre-release).
+    # Fires when the 3 reliable CLI builds succeed; build-cli-windows is
+    # allowed to fail in the meantime (Windows .zip packaging is a known
+    # follow-up — see RP-4 Windows tracking ticket). When Windows succeeds
+    # the .zip is attached automatically via the files glob below; when it
+    # fails, the release ships with 6 of 8 assets (Linux + macOS + GPU
+    # tarballs and their sha256s).
+    if: |
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      && !contains(github.ref_name, '-')
+      && needs.build-cli-linux-cpu.result == 'success'
+      && needs.build-cli-linux-gpu.result == 'success'
+      && needs.build-cli-macos-arm64.result == 'success'
     needs:
       - build-cli-linux-cpu
       - build-cli-linux-gpu
@@ -824,7 +836,11 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          fail_on_unmatched_files: true
+          # Soft-fail when Windows tarball is missing — see job-level if
+          # gate above. When build-cli-windows starts succeeding, the
+          # glob picks up the .zip automatically; for now the 6 reliable
+          # assets ship.
+          fail_on_unmatched_files: false
           files: |
             dist/sparrow-engine-cpu-*-linux-x86_64.tar.gz
             dist/sparrow-engine-cpu-*-linux-x86_64.tar.gz.sha256
