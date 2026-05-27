@@ -1,4 +1,4 @@
-# installer/probe_gpu_quality.ps1 — dot-sourceable layer-2 quality probe (Windows).
+﻿# installer/probe_gpu_quality.ps1 — dot-sourceable layer-2 quality probe (Windows).
 #                                    cuDNN ≥9.10 floor + driver-version sanity.
 #
 # Purpose

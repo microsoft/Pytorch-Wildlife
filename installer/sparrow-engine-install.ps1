@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     sparrow-engine-install.ps1 — Windows install wrapper (PowerShell mirror of sparrow-engine-install.sh).
 

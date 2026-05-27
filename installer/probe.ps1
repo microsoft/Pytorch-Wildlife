@@ -1,4 +1,4 @@
-# installer/probe.ps1 — dot-sourceable CUDA-detection probe (Windows).
+﻿# installer/probe.ps1 — dot-sourceable CUDA-detection probe (Windows).
 #
 # Purpose
 #   Layer-1 of the Sparrow Engine install-time selector on Windows: decide
