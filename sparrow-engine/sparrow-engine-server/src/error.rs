@@ -134,6 +134,8 @@ fn bongo_into_response(e: SparrowEngineError) -> Response {
         ImageDecode(_) => (StatusCode::UNPROCESSABLE_ENTITY, "IMAGE_DECODE_ERROR"),
         InvalidStride { .. } => (StatusCode::UNPROCESSABLE_ENTITY, "INVALID_IMAGE_INPUT"),
         ImageFileNotFound(_) => (StatusCode::NOT_FOUND, "IMAGE_NOT_FOUND"),
+        // GPU resources
+        NvjpegUnavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "NVJPEG_UNAVAILABLE"),
         // ORT / IO
         Ort(_) => (StatusCode::INTERNAL_SERVER_ERROR, "INFERENCE_ERROR"),
         Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "IO_ERROR"),
