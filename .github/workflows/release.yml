@@ -316,6 +316,95 @@ jobs:
           path: sparrow-engine/target/wheels/sparrow_engine_gpu-*.whl
           if-no-files-found: error
 
+  build-gpu-windows:
+    name: Build GPU wheel (Windows x86_64)
+    runs-on: windows-latest
+    # No CUDA Toolkit on the runner. cudarc's `fallback-dynamic-loading`
+    # feature (vendor/cudarc/build.rs:70-78) activates the `dynamic-loading`
+    # cfg from the feature flag alone, with no nvcc / driver probing.
+    # nvjpeg-sys (vendor/nvjpeg-sys/build.rs) is a 2-line stub that ships
+    # pre-generated bindings — no bindgen at build time. `ort` uses
+    # `load-dynamic`, so libonnxruntime is dlopen'd at runtime. None of
+    # these crates needs the CUDA SDK at compile time.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install maturin
+        shell: bash
+        run: |
+          uv tool install maturin
+          # uv tool dir --bin prints the platform-correct bin directory
+          # (~/.local/bin on Linux, %USERPROFILE%\.local\bin on Windows
+          # in recent uv versions) — avoids hard-coding either path.
+          uv tool dir --bin >> "$GITHUB_PATH"
+
+      - name: Build GPU wheel via build.sh
+        shell: bash
+        run: |
+          # Git Bash on windows-latest reports OSTYPE=msys; build.sh's
+          # IS_WINDOWS detection catches that and skips the Linux-only
+          # `--compatibility linux` flag and `auditwheel repair` step.
+          cd sparrow-engine/sparrow-engine-python
+          SPARROW_ENGINE_FLAVOR=gpu ./build.sh
+
+      - name: Inspect built wheel
+        shell: bash
+        run: |
+          ls -la sparrow-engine/target/wheels/
+          for w in sparrow-engine/target/wheels/sparrow_engine_gpu-*.whl; do
+            echo "Wheel: $w"
+            case "$w" in
+              *cp311-abi3*win_amd64*) echo "  OK: abi3 + win_amd64";;
+              *) echo "  FAIL: expected cp311-abi3-win_amd64 tag"; exit 1;;
+            esac
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-gpu-windows
+          path: sparrow-engine/target/wheels/sparrow_engine_gpu-*.whl
+          if-no-files-found: error
+
+  smoke-gpu-windows:
+    name: Smoke test GPU Windows wheel (Python ${{ matrix.python }})
+    needs: build-gpu-windows
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-gpu-windows
+          path: dist
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install wheel + onnxruntime-gpu, run import
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          # PEP 508 markers in METADATA skip nvidia-cudnn-cu12 / cublas /
+          # curand / cufft on sys_platform != 'linux'; onnxruntime-gpu has
+          # native Windows wheels and resolves normally.
+          python -m pip install dist/sparrow_engine_gpu-*.whl
+          # GitHub-hosted windows-latest has no NVIDIA GPU, so we cannot
+          # call sparrow_engine.init() — Device::Auto/Cpu coerce to
+          # Cuda(0) on the GPU flavor (flavor-strict post-MT-4.1-2),
+          # which would fail at CUDA context creation. Import-only test
+          # still validates: pip resolution, cdylib load, PyO3 binding,
+          # METADATA Provides-Dist mutex with sparrow-engine.
+          python -c "import sparrow_engine; print('Smoke OK on', __import__('sys').version, '— version:', sparrow_engine.__version__)"
+
   # -------- TestPyPI publish (workflow_dispatch) --------
 
   publish-testpypi-cpu:
@@ -411,6 +500,8 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs:
       - build-gpu-linux
+      - build-gpu-windows
+      - smoke-gpu-windows
     runs-on: ubuntu-latest
     environment:
       name: pypi-gpu
@@ -456,6 +547,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
     needs:
       - build-gpu-linux
+      - build-gpu-windows
+      - smoke-gpu-windows
     runs-on: ubuntu-latest
     environment:
       name: testpypi-gpu
