@@ -217,9 +217,18 @@ case "$archive_ext" in
     tar -C "$work" -czf "$out_archive_abs" "$bundle_name"
     ;;
   zip)
-    # zip preserves the executable bit on Unix-style tools; Windows users
-    # extract via Explorer or `tar -xf` (Win10+ ships bsdtar).
-    ( cd "$work" && zip -qr "$out_archive_abs" "$bundle_name" )
+    # Prefer bsdtar (built into Windows 10+ as `tar.exe`; cross-platform on
+    # macOS/Linux when available) — it auto-detects the archive format from
+    # the .zip extension and is more portable than MSYS `zip`. Fall back to
+    # the standalone `zip` binary if bsdtar isn't present.
+    if tar --version 2>/dev/null | grep -qi bsdtar; then
+      tar -a -cf "$out_archive_abs" -C "$work" "$bundle_name"
+    elif command -v zip >/dev/null 2>&1; then
+      ( cd "$work" && zip -qr "$out_archive_abs" "$bundle_name" )
+    else
+      echo "ERROR: neither bsdtar nor zip available to create $out_archive_abs" >&2
+      exit 6
+    fi
     ;;
 esac
 
