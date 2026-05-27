@@ -1,61 +1,91 @@
-# Homebrew tap bootstrap — sparrow-engine
+# Homebrew tap — sparrow-engine
 
-This directory holds the source-of-truth Homebrew formula for the
-`sparrow-engine` CLI (RP-17). The formula lives here, not in a separate
-tap repo, so it versions with the rest of the codebase.
+This directory holds the source-of-truth Homebrew formulas for the
+`sparrow-engine` + `sparrow-engine-gpu` CLI binaries (RP-17). The
+formulas live here, not in a separate tap repo, so they version with
+the rest of the codebase.
 
 ## What ships
 
-- `sparrow-engine.rb` — formula pointing at the GH Release tarballs produced
-  by RP-4 (`.github/workflows/release.yml § build-cli-*`).
+- `sparrow-engine.rb` — CPU formula. macOS arm64 + brew-Linux x86_64. Ships
+  the `spe` binary with bundled `libonnxruntime`.
+- `sparrow-engine-gpu.rb` — GPU formula. brew-Linux x86_64 only. Ships
+  `spe-gpu` with bundled `libonnxruntime` + ORT CUDA provider sidecars.
+  Adds a wrapper script that auto-discovers `libcudnn.so.9` +
+  `libnvjpeg.so.12` from common host locations at startup (no
+  `LD_LIBRARY_PATH` manual setup required).
+
+Both formulas point at the GH Release tarballs produced by RP-4
+(`.github/workflows/release.yml § build-cli-*` + `publish-cli-release-assets`).
 
 ## End-user UX (post-tap-publish)
 
+CPU (works on Apple Silicon Macs + brew-Linux):
 ```bash
 brew tap microsoft/sparrow-engine
 brew install sparrow-engine
-spe --version
-spe detect --image /path/to/photo.jpg
+spe device                  # {"device":"cpu"}
+spe detect /path/to/photo.jpg --model MDV6-yolov10-e --print
 ```
 
-`spe` is a symlink under brew's `bin/` pointing at
-`<Cellar>/sparrow-engine/<ver>/libexec/bin/spe`. The in-binary
-`ort_resolver::init_ort_env()` (RP-4 step 1) canonicalises
-`current_exe()`, walks one directory up, and dlopens
-`<Cellar>/.../libexec/lib/libonnxruntime.<dylib|so.X.Y.Z>` — no
-`LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` setup required.
+GPU (Linux x86_64 + NVIDIA CUDA only):
+```bash
+brew install sparrow-engine-gpu
+spe-gpu device              # {"device":"cuda:0"} when host has cuDNN
+spe-gpu detect /path/to/photos/ --model MDV6-yolov10-e --recursive --print
+```
 
-## Bootstrapping the tap repo (one-time, operator action)
+Both binaries coexist cleanly — install one, the other, or both. They
+share the model cache at `~/.sparrow-engine/models/`.
 
-The formula in this directory is the source of truth; the public tap
-repo at `microsoft/homebrew-sparrow-engine` is a thin distribution
-surface. Procedure:
+## The wrapper script (GPU only)
 
-1. Wait for the first RP-4 release to fire — `git tag v0.1.6` + `git push
-   origin v0.1.6` cuts the GH Release and attaches the tarballs.
-2. Fetch the `.sha256` files from the GH Release:
+`brew install sparrow-engine-gpu` generates `bin/spe-gpu` as a small
+POSIX shell wrapper (not a symlink) that auto-discovers
+`libcudnn.so.9` + `libnvjpeg.so.12` from 7 common cuDNN locations and 4
+common nvJPEG locations before `exec`'ing the real binary at
+`libexec/bin/spe-gpu`. This eliminates the `LD_LIBRARY_PATH` setup
+production users would otherwise need.
+
+Override the search via `SPARROW_ENGINE_CUDA_LIB_DIR=/some/path
+spe-gpu …` — the wrapper skips auto-discovery when this env var is
+set. Brew rewrites the wrapper on every `(re)install`; do NOT edit it
+in place.
+
+Full caveats block (with the 7 + 4 location lists) appears at the end
+of `brew install` output, or run `brew info sparrow-engine-gpu`.
+
+## Bootstrapping the tap repo (one-time, operator action — DONE 2026-05-27)
+
+The tap is live at https://github.com/microsoft/homebrew-sparrow-engine
+with both formulas pinned to v0.1.10. Procedure if cutting fresh:
+
+1. Cut the release: `git tag vX.Y.Z && git push origin vX.Y.Z` — CI runs
+   `publish-cli-release-assets` and attaches CPU + GPU tarballs + sha256
+   sidecars to the GH Release.
+2. Fetch the SHA256 sidecars:
    ```bash
-   gh release download v0.1.6 --pattern '*.sha256' --dir /tmp/sha
+   gh release download vX.Y.Z --repo microsoft/Pytorch-Wildlife \
+     --pattern '*.sha256' --dir /tmp/sha
    ```
-3. Replace the `REPLACE_WITH_*_sha256` placeholders in
-   `sparrow-engine.rb` with the matching checksums.
-4. Create the public tap repo `microsoft/homebrew-sparrow-engine` (one-
-   time GitHub UI / `gh repo create`). Repos named `homebrew-*` are
-   recognised as brew taps automatically.
-5. Copy `sparrow-engine.rb` into `Formula/sparrow-engine.rb` in the new
-   tap repo. Commit + push.
-6. Smoke test on a macOS arm64 + a brew-Linux x86_64 host:
+3. Copy this directory's formulas to the tap repo, substituting the
+   `REPLACE_WITH_*_sha256` placeholders for the real SHA256s.
+4. Commit + push to `microsoft/homebrew-sparrow-engine` `main`.
+5. Smoke-install on a macOS arm64 host (CPU) and a brew-Linux + NVIDIA
+   host (GPU):
    ```bash
-   brew tap microsoft/sparrow-engine
-   brew install sparrow-engine
-   spe device   # expected: {"device":"cpu"}
+   brew update
+   brew install sparrow-engine sparrow-engine-gpu
+   spe device         # {"device":"cpu"}
+   spe-gpu device     # {"device":"cuda:0"}
    ```
 
 ## Per-release bump (after bootstrap)
 
-Each subsequent release follows the same shape: fetch new `.sha256`
-files, substitute, commit to the tap repo, push. Automatable via a
-small helper script (deferred — see `docs/ideas.md § RP-17`).
+Each subsequent release: fetch new `.sha256` files, substitute, commit
+to the tap repo on a feature branch, fast-forward merge to `main`,
+push. Automatable via a small helper script (deferred — see
+`sparrow-engine-dev/docs/ideas.md § RP-17 follow-ups` if/when needed).
 
 ## Why not just submit to homebrew-core?
 
@@ -63,4 +93,5 @@ small helper script (deferred — see `docs/ideas.md § RP-17`).
 used). Pre-public-release, sparrow-engine doesn't meet them yet. The
 custom tap is the bridge until the project is established enough to
 warrant a core submission. Migration from custom-tap → core later is
-straightforward (formula source code is the same).
+straightforward (formula source code is the same; just submit the
+file via PR to homebrew/homebrew-core).
