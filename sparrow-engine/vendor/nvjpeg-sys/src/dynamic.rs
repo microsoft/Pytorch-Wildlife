@@ -59,13 +59,22 @@ pub enum NvjpegInitError {
 impl fmt::Display for NvjpegInitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::LibraryNotFound { dlerror, .. } => write!(
-                f,
-                "libnvjpeg.so.12 could not be loaded: {dlerror}. The sparrow-engine-gpu wheel requires the CUDA 12 nvjpeg runtime. Install one of: (a) pip install nvidia-nvjpeg-cu12, (b) apt install libnvjpeg-12-6 (Debian/Ubuntu), (c) use the CPU wheel: pip install sparrow-engine. Override the search path with SPARROW_ENGINE_NVJPEG_LIBRARY_PATH=/abs/path/libnvjpeg.so.12."
-            ),
+            Self::LibraryNotFound { dlerror, .. } => {
+                if cfg!(target_os = "windows") {
+                    write!(
+                        f,
+                        "nvjpeg64_12.dll could not be loaded: {dlerror}. The sparrow-engine-gpu wheel requires the CUDA 12 nvjpeg runtime. Install one of: (a) the NVIDIA CUDA Toolkit 12.x for Windows (https://developer.nvidia.com/cuda-downloads — provides %CUDA_PATH%\\bin\\nvjpeg64_12.dll), (b) use the CPU wheel: pip install sparrow-engine. Override the search path with SPARROW_ENGINE_NVJPEG_LIBRARY_PATH=C:\\abs\\path\\nvjpeg64_12.dll."
+                    )
+                } else {
+                    write!(
+                        f,
+                        "libnvjpeg.so.12 could not be loaded: {dlerror}. The sparrow-engine-gpu wheel requires the CUDA 12 nvjpeg runtime. Install one of: (a) pip install nvidia-nvjpeg-cu12, (b) apt install libnvjpeg-12-6 (Debian/Ubuntu), (c) use the CPU wheel: pip install sparrow-engine. Override the search path with SPARROW_ENGINE_NVJPEG_LIBRARY_PATH=/abs/path/libnvjpeg.so.12."
+                    )
+                }
+            }
             Self::IncompatibleMajor { found, expected } => write!(
                 f,
-                "libnvjpeg major version {found} found; sparrow-engine-gpu requires CUDA {expected}. Install nvidia-nvjpeg-cu12 or the CUDA 12 toolkit."
+                "libnvjpeg major version {found} found; sparrow-engine-gpu requires CUDA {expected}. Install the CUDA {expected} toolkit (or nvidia-nvjpeg-cu{expected} on Linux)."
             ),
             Self::SymbolMissing(name) => write!(
                 f,
@@ -127,15 +136,21 @@ fn candidate_paths() -> Vec<PathBuf> {
         return vec![PathBuf::from(path)];
     }
 
-    let mut candidates = vec![
-        PathBuf::from("libnvjpeg.so.12"),
-        PathBuf::from("libnvjpeg.so"),
-    ];
-    candidates.extend(cuda_known_paths());
-    candidates
+    if cfg!(target_os = "windows") {
+        let mut candidates = vec![PathBuf::from("nvjpeg64_12.dll")];
+        candidates.extend(windows_cuda_known_paths());
+        candidates
+    } else {
+        let mut candidates = vec![
+            PathBuf::from("libnvjpeg.so.12"),
+            PathBuf::from("libnvjpeg.so"),
+        ];
+        candidates.extend(linux_cuda_known_paths());
+        candidates
+    }
 }
 
-fn cuda_known_paths() -> Vec<PathBuf> {
+fn linux_cuda_known_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let Ok(entries) = fs::read_dir("/usr/local") else {
         return paths;
@@ -152,6 +167,58 @@ fn cuda_known_paths() -> Vec<PathBuf> {
         }
     }
     paths.sort();
+    paths
+}
+
+/// Windows nvjpeg candidate paths.
+///
+/// Order: explicit env vars (`CUDA_PATH`, `CUDA_PATH_V12_*`) first so a user
+/// pointing at a specific toolkit overrides the default-install probe, then
+/// the typical `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.X\bin\`
+/// locations. The bare `nvjpeg64_12.dll` candidate above falls back to the
+/// Windows DLL search path (app dir, System32, PATH).
+fn windows_cuda_known_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    for var in ["CUDA_PATH", "CUDA_HOME", "CUDA_ROOT"] {
+        if let Some(root) = env::var_os(var) {
+            let candidate = PathBuf::from(&root).join("bin").join("nvjpeg64_12.dll");
+            if candidate.is_file() {
+                paths.push(candidate);
+            }
+        }
+    }
+
+    for (key, value) in env::vars_os() {
+        let key_str = key.to_string_lossy();
+        if !key_str.starts_with("CUDA_PATH_V12_") {
+            continue;
+        }
+        let candidate = PathBuf::from(&value).join("bin").join("nvjpeg64_12.dll");
+        if candidate.is_file() {
+            paths.push(candidate);
+        }
+    }
+
+    // Probe the default-install layout in case CUDA_PATH is unset.
+    if let Ok(entries) =
+        fs::read_dir(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA")
+    {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if !name_str.starts_with("v12") {
+                continue;
+            }
+            let candidate = entry.path().join("bin").join("nvjpeg64_12.dll");
+            if candidate.is_file() {
+                paths.push(candidate);
+            }
+        }
+    }
+
+    paths.sort();
+    paths.dedup();
     paths
 }
 
