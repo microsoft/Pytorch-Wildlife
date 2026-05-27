@@ -166,11 +166,11 @@ The following constraints are baked into the engine. If you onboard a new model,
        │                    │                         │                      
        v                    v                         v                      
    CLI tarball         pip wheel                Docker image                 
-   ~/.sparrow_engine/bin    active Python env       sparrow-engine:cpu / :gpu
+   ~/.sparrow-engine/bin    active Python env       sparrow-engine:cpu / :gpu
 ```
 
 **Why**: one wrapper hides the GPU-detection complexity. The user runs one command and gets the right build.
-**What**: a layered probe + downloader that installs into `~/.sparrow_engine/` (Linux/macOS) or `%USERPROFILE%\.sparrow_engine\` (Windows).
+**What**: a layered probe + downloader that installs into `~/.sparrow-engine/` (Linux/macOS) or `%USERPROFILE%\.sparrow-engine\` (Windows).
 **How**: layer-1 detects NVIDIA hardware; layer-2 verifies cuDNN quality; the wrapper picks `cpu` or `gpu` flavor and fetches the matching artifact.
 
 **Cite**: `docs/install.md`, `installer/sparrow-engine-install.{sh,ps1}`.
@@ -189,7 +189,7 @@ The following constraints are baked into the engine. If you onboard a new model,
 
 **Why**: same script, same flags, different shell.
 **What**: from a clone of the repo, run the wrapper with no flags; it auto-picks flavor.
-**How**: the wrapper writes binaries to `~/.sparrow_engine/bin/` and (if Python is active) installs the matching wheel into that environment.
+**How**: the wrapper writes binaries to `~/.sparrow-engine/bin/` and (if Python is active) installs the matching wheel into that environment.
 
 **Footgun**: the `curl … | sh` and `iwr … | iex` one-liners DO NOT WORK today (the wrapper resolves `probe.sh` relative to `$0`, which becomes `bash` under stdin pipes). Use the local-clone form. Tracked for post-public-release.
 
@@ -211,7 +211,7 @@ The following constraints are baked into the engine. If you onboard a new model,
 ### 2.3 What lands on disk
 
 ```
-~/.sparrow_engine/                                            
+~/.sparrow-engine/                                            
 ├── bin/                                                      
 │   ├── spe                    (or spe-gpu on the GPU flavor) 
 │   └── (symlink helpers, ort-env.sh)                         
@@ -220,11 +220,11 @@ The following constraints are baked into the engine. If you onboard a new model,
 
 ~/.bashrc / ~/.zshrc:                                         
   # >>> sparrow_engine >>>                                    
-  export PATH="$HOME/.sparrow_engine/bin:$PATH"               
+  export PATH="$HOME/.sparrow-engine/bin:$PATH"               
   # <<< sparrow_engine <<<                                    
 ```
 
-**Why**: predictable footprint so uninstall is one `rm -rf ~/.sparrow_engine` and one rc-file block delete.
+**Why**: predictable footprint so uninstall is one `rm -rf ~/.sparrow-engine` and one rc-file block delete.
 **What**: a single directory + a single rc-file fenced block. No system-wide files.
 **How**: tarball extraction + optional pip install + optional Docker image pull.
 
@@ -232,7 +232,7 @@ The following constraints are baked into the engine. If you onboard a new model,
 
 > **Note — calling the CLI binary by full path**
 >
-> The release tarballs ship as `<install-prefix>/bin/spe` (or `spe-gpu`) with the matching `lib/libonnxruntime.so.X.Y.Z` next to them. The `spe` binary discovers this `lib/` directory at startup via `ort_resolver::init_ort_env()` (relative to `current_exe()`), so calling it by full path (e.g. `~/.sparrow_engine/bin/spe detect …`) works without any `LD_LIBRARY_PATH` shell setup. The legacy `ort-env.sh` wrapper is dev-only — production users do not need to source anything. **Caveat**: if you copy `bin/spe` somewhere ELSE without also copying the sibling `lib/` directory, the resolver falls through silently and ORT cannot dlopen; set `ORT_DYLIB_PATH=/abs/path/to/libonnxruntime.so.X.Y.Z` to point at any libonnxruntime install of your choice.
+> The release tarballs ship as `<install-prefix>/bin/spe` (or `spe-gpu`) with the matching `lib/libonnxruntime.so.X.Y.Z` next to them. The `spe` binary discovers this `lib/` directory at startup via `ort_resolver::init_ort_env()` (relative to `current_exe()`), so calling it by full path (e.g. `~/.sparrow-engine/bin/spe detect …`) works without any `LD_LIBRARY_PATH` shell setup. The legacy `ort-env.sh` wrapper is dev-only — production users do not need to source anything. **Caveat**: if you copy `bin/spe` somewhere ELSE without also copying the sibling `lib/` directory, the resolver falls through silently and ORT cannot dlopen; set `ORT_DYLIB_PATH=/abs/path/to/libonnxruntime.so.X.Y.Z` to point at any libonnxruntime install of your choice.
 
 ---
 
@@ -326,7 +326,7 @@ ONLINE machine:                        OFFLINE machine:
 │ sparrow-engine tarball │             │ + sha256               │                                                       
 │ + sparrow_engine.dll   │   USB ─►    │                        │                                                       
 │ + sha256               │             │ Verify + extract       │                                                       
-│                        │             │ into ~/.sparrow_engine/│                                                       
+│                        │             │ into ~/.sparrow-engine/│                                                       
 └────────────────────────┘             └────────────────────────┘                                                       
 ```
 
@@ -1681,7 +1681,7 @@ DeepFaune FP32:                    DeepFaune FP16:
 ### 13.6 CLI binary cannot find libonnxruntime
 
 ```
-$ /home/me/.sparrow_engine/bin/spe detect IMG.jpg
+$ /home/me/.sparrow-engine/bin/spe detect IMG.jpg
 error while loading shared libraries: libonnxruntime.so.1: cannot open shared object file
 ```
 
