@@ -6,20 +6,35 @@ MD_AudioBirds_V1; model-agnostic via TOML manifests.
 
 ## Quickstart
 
-Clone the repo and run the install wrapper (CWD = repo root):
+### Easiest: Homebrew (macOS arm64 / brew-Linux x86_64)
 
 ```bash
-# Linux / macOS
+brew tap microsoft/sparrow-engine
+brew install sparrow-engine            # CPU; works on macOS arm64 + brew-Linux x86_64
+brew install sparrow-engine-gpu        # GPU; brew-Linux x86_64 + NVIDIA only
+
+spe device                              # {"device":"cpu"}  or  {"device":"cuda:0"}
+spe detect /path/to/photos --model MDV6-yolov10-e --recursive --print
+```
+
+Both formulas can coexist (separate binaries `spe` + `spe-gpu`; shared model cache at `~/.sparrow-engine/models/`). The GPU formula installs a wrapper that auto-discovers `libcudnn.so.9` + `libnvjpeg.so.12` from common host locations — no `LD_LIBRARY_PATH` setup needed for production users. See `brew info sparrow-engine-gpu` for the full search order and `docs/user-manual.md §2.4` for the other install paths.
+
+### Alternative install paths
+
+If brew isn't right for your environment (server distro without brew-Linux, Windows, etc.), the install wrapper handles probe-and-install for Linux / macOS / Windows:
+
+```bash
+# Linux / macOS — clone the repo and run from its root
 bash installer/sparrow-engine-install.sh
 ```
 
 ```powershell
-# Windows PowerShell
+# Windows PowerShell — clone the repo and run from its root
 installer\sparrow-engine-install.ps1
 ```
 
 The wrapper probes hardware once, picks the right CPU or GPU build, and
-installs the matching CLI binary plus the Python wheel into `~/.sparrow_engine/`.
+installs the matching CLI binary plus the Python wheel into `~/.sparrow-engine/`.
 Pass `--flavor cpu` or `--flavor gpu` to skip the probe. Pass `--docker`
 to install the HTTP-server image instead.
 
