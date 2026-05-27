@@ -2,7 +2,7 @@ class SparrowEngine < Formula
   desc "Camera-trap ML inference engine (sparrow-engine CLI binary)"
   homepage "https://github.com/microsoft/Pytorch-Wildlife"
   license "MIT"
-  version "0.1.6"
+  version "0.1.7"
 
   # RP-4 (2026-05-26): the formula points at the GH Release tarballs produced
   # by .github/workflows/release.yml § build-cli-* and attached by
