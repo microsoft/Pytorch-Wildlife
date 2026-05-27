@@ -14,10 +14,17 @@ brew install sparrow-engine            # CPU; works on macOS arm64 + brew-Linux 
 brew install sparrow-engine-gpu        # GPU; brew-Linux x86_64 + NVIDIA only
 
 spe device                              # {"device":"cpu"}  or  {"device":"cuda:0"}
+
+# One-time: download a model from the Zenodo bundle (brew doesn't ship models)
+mkdir -p ~/.sparrow-engine/models && cd ~/.sparrow-engine/models
+curl -fLO https://zenodo.org/records/20360316/files/MDV6-yolov10-e.zip
+unzip -q MDV6-yolov10-e.zip && rm MDV6-yolov10-e.zip
+cd -
+
 spe detect /path/to/photos --model MDV6-yolov10-e --recursive --export-format megadet --export-output detections.json
 ```
 
-Both formulas can coexist (separate binaries `spe` + `spe-gpu`; shared model cache at `~/.sparrow-engine/models/`). See `docs/user-manual.md §2.4` for the other install paths.
+Both formulas can coexist (separate binaries `spe` + `spe-gpu`; shared model cache at `~/.sparrow-engine/models/`). The example above pulls MegaDetector v6 (general camera-trap detection); see the [Model zoo](#model-zoo) section below for the other 15 models in the Zenodo bundle (image classifiers, audio detectors, overhead-imagery detectors). See `docs/user-manual.md §2.4` for the other install paths.
 
 #### GPU host prerequisites
 
