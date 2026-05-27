@@ -14,7 +14,7 @@ brew install sparrow-engine            # CPU; works on macOS arm64 + brew-Linux 
 brew install sparrow-engine-gpu        # GPU; brew-Linux x86_64 + NVIDIA only
 
 spe device                              # {"device":"cpu"}  or  {"device":"cuda:0"}
-spe detect /path/to/photos --model MDV6-yolov10-e --recursive --print
+spe detect /path/to/photos --model MDV6-yolov10-e --recursive --export-format megadet --export-output detections.json
 ```
 
 Both formulas can coexist (separate binaries `spe` + `spe-gpu`; shared model cache at `~/.sparrow-engine/models/`). The GPU formula installs a wrapper that auto-discovers `libcudnn.so.9` + `libnvjpeg.so.12` from common host locations — no `LD_LIBRARY_PATH` setup needed for production users. See `brew info sparrow-engine-gpu` for the full search order and `docs/user-manual.md §2.4` for the other install paths.
