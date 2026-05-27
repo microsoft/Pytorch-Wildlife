@@ -17,7 +17,40 @@ spe device                              # {"device":"cpu"}  or  {"device":"cuda:
 spe detect /path/to/photos --model MDV6-yolov10-e --recursive --export-format megadet --export-output detections.json
 ```
 
-Both formulas can coexist (separate binaries `spe` + `spe-gpu`; shared model cache at `~/.sparrow-engine/models/`). The GPU formula installs a wrapper that auto-discovers `libcudnn.so.9` + `libnvjpeg.so.12` from common host locations — no `LD_LIBRARY_PATH` setup needed for production users. See `brew info sparrow-engine-gpu` for the full search order and `docs/user-manual.md §2.4` for the other install paths.
+Both formulas can coexist (separate binaries `spe` + `spe-gpu`; shared model cache at `~/.sparrow-engine/models/`). See `docs/user-manual.md §2.4` for the other install paths.
+
+#### GPU host prerequisites
+
+The `sparrow-engine-gpu` formula ships ~256 MB of `libonnxruntime` + ORT CUDA provider sidecars, but it does **NOT** bundle NVIDIA's runtime libraries (NVIDIA's license forbids redistribution). The host must provide:
+
+| Library | Apt package (Ubuntu/Debian) | pip wheel (no root) | Why |
+|---|---|---|---|
+| NVIDIA driver ≥550.x | `nvidia-driver-550` (or newer) | — (kernel module; host-only) | GPU access |
+| CUDA runtime 12.6 | `nvidia-cuda-toolkit` brings it | `nvidia-cuda-runtime-cu12` | `libcudart.so.12` |
+| **cuDNN ≥9.10** (9.8 has Conv bug on sm_89) | `nvidia-cudnn` | `nvidia-cudnn-cu12` | `libcudnn.so.9` — convolutions |
+| cuBLAS | bundled with CUDA toolkit | `nvidia-cublas-cu12` | matrix multiplications |
+| cuRAND | bundled with CUDA toolkit | `nvidia-curand-cu12` | rand sampling (some models) |
+| cuFFT | bundled with CUDA toolkit | `nvidia-cufft-cu12` | audio FFT (MD_AudioBirds_V1) |
+| nvJPEG | bundled with CUDA toolkit | `nvidia-nvjpeg-cu12` | GPU JPEG decode |
+
+After installing the libraries (system or pip), the brew-installed `spe-gpu` wrapper auto-discovers them from common host locations — no `LD_LIBRARY_PATH` setup needed for production users. Search order (first hit wins):
+
+1. `SPARROW_ENGINE_CUDA_LIB_DIR` (user override; honored as-is)
+2. `~/.sparrow-engine/cuda-sidecars/lib/python*/site-packages/nvidia/*/lib` (the convention if you used pip sidecars)
+3. `/usr/lib/python3/dist-packages/torch/lib` (Lambda Stack / system PyTorch — cuDNN comes bundled)
+4. `/usr/local/cuda/lib64` (NVIDIA CUDA toolkit)
+5. `/usr/lib/x86_64-linux-gnu` (Ubuntu apt nvidia-cudnn)
+
+Full table + remediation appears in `brew info sparrow-engine-gpu`. Quick all-pip install (no root) for a fresh host:
+
+```bash
+uv venv ~/.sparrow-engine/cuda-sidecars --python 3.11
+~/.sparrow-engine/cuda-sidecars/bin/pip install \
+    nvidia-cudnn-cu12 nvidia-cublas-cu12 nvidia-curand-cu12 \
+    nvidia-cufft-cu12 nvidia-nvjpeg-cu12 nvidia-cuda-runtime-cu12
+```
+
+Verify with `spe-gpu device` — `{"device":"cuda:0"}` means good, any dlopen error in the output names the missing library.
 
 ### Alternative install paths
 
