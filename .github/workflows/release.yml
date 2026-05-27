@@ -796,11 +796,12 @@ jobs:
     # fails, the release ships with 6 of 8 assets (Linux + macOS + GPU
     # tarballs and their sha256s).
     if: |
-      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      !cancelled()
+      && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
       && !contains(github.ref_name, '-')
-      && needs.build-cli-linux-cpu.result == 'success'
-      && needs.build-cli-linux-gpu.result == 'success'
-      && needs.build-cli-macos-arm64.result == 'success'
+      && needs['build-cli-linux-cpu'].result == 'success'
+      && needs['build-cli-linux-gpu'].result == 'success'
+      && needs['build-cli-macos-arm64'].result == 'success'
     needs:
       - build-cli-linux-cpu
       - build-cli-linux-gpu
