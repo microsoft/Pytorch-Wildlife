@@ -503,15 +503,17 @@ jobs:
       - name: Install Rust toolchain
         run: |
           /opt/python/cp311-cp311/bin/python -m pip install --user rustup-init
-          rustup-init -y --default-toolchain stable --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          "$HOME/.local/bin/rustup-init" -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Stage ORT runtime (pip onnxruntime, capi/libonnxruntime.so.X.Y.Z)
         run: |
-          /opt/python/cp311-cp311/bin/python -m venv /tmp/ort-venv
-          /tmp/ort-venv/bin/pip install --quiet "onnxruntime>=1.25.1,<1.26"
-          ORT_CAPI=$(/tmp/ort-venv/bin/python -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
-          echo "ORT_STAGE_DIR=$ORT_CAPI" >> $GITHUB_ENV
+          ORT_VENV="$RUNNER_TEMP/ort-venv"
+          rm -rf "$ORT_VENV"
+          /opt/python/cp311-cp311/bin/python -m venv "$ORT_VENV"
+          "$ORT_VENV/bin/pip" install --quiet "onnxruntime>=1.25.1,<1.26"
+          ORT_CAPI=$("$ORT_VENV/bin/python" -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
+          echo "ORT_STAGE_DIR=$ORT_CAPI" >> "$GITHUB_ENV"
           ls -la "$ORT_CAPI"/libonnxruntime.so.*
 
       - name: Build spe (release, CPU flavor, load-dynamic via ort_resolver)
@@ -524,8 +526,10 @@ jobs:
       - name: Hard gate — no DT_NEEDED libonnxruntime (load-dynamic invariant)
         working-directory: sparrow-engine
         run: |
-          readelf -d target/release/spe | grep -E 'NEEDED' | tee /tmp/needed.txt
-          if grep -q 'libonnxruntime' /tmp/needed.txt; then
+          set -euo pipefail
+          needed="$(readelf -d target/release/spe)"
+          printf '%s\n' "$needed" | grep -E 'NEEDED' || true
+          if printf '%s\n' "$needed" | grep -q 'libonnxruntime'; then
             echo "FAIL: spe has DT_NEEDED libonnxruntime — load-dynamic contract violated (RP-3/RP-4)"
             exit 1
           fi
@@ -570,16 +574,36 @@ jobs:
       - name: Install Rust toolchain
         run: |
           python3 -m pip install --user rustup-init
-          rustup-init -y --default-toolchain stable --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          "$HOME/.local/bin/rustup-init" -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Stage ORT GPU runtime (onnxruntime-gpu + CUDA provider sidecars)
         run: |
-          python3 -m venv /tmp/ort-venv
-          /tmp/ort-venv/bin/pip install --quiet "onnxruntime-gpu>=1.25.1,<1.26"
-          ORT_CAPI=$(/tmp/ort-venv/bin/python -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
-          echo "ORT_STAGE_DIR=$ORT_CAPI" >> $GITHUB_ENV
+          ORT_VENV="$RUNNER_TEMP/ort-venv"
+          rm -rf "$ORT_VENV"
+          python3 -m venv "$ORT_VENV"
+          "$ORT_VENV/bin/pip" install --quiet "onnxruntime-gpu>=1.25.1,<1.26"
+          ORT_CAPI=$("$ORT_VENV/bin/python" -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
+          echo "ORT_STAGE_DIR=$ORT_CAPI" >> "$GITHUB_ENV"
           ls -la "$ORT_CAPI"/libonnxruntime*.so* | head -20
+
+      - name: Patch GPU ORT RUNPATH for provider sidecars
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --quiet "patchelf>=0.14"
+          export PATH="$HOME/.local/bin:$PATH"
+          patched=0
+          for so in "$ORT_STAGE_DIR"/libonnxruntime.so.* "$ORT_STAGE_DIR"/libonnxruntime_providers_*.so; do
+            [[ -e "$so" ]] || continue
+            patchelf --set-rpath '$ORIGIN' "$so"
+            readelf -d "$so" | grep -E 'RUNPATH|RPATH'
+            readelf -d "$so" | grep -q '\$ORIGIN' || { echo "FAIL: $so lacks \$ORIGIN RUNPATH"; exit 1; }
+            patched=$((patched + 1))
+          done
+          if [[ "$patched" -eq 0 ]]; then
+            echo "FAIL: no ORT shared libraries were patched"
+            exit 1
+          fi
 
       - name: Build spe-gpu (release, GPU flavor, load-dynamic via ort_resolver)
         working-directory: sparrow-engine
@@ -591,8 +615,10 @@ jobs:
       - name: Hard gate — no DT_NEEDED libonnxruntime (load-dynamic invariant)
         working-directory: sparrow-engine
         run: |
-          readelf -d target/release/spe-gpu | grep -E 'NEEDED' | tee /tmp/needed.txt
-          if grep -q 'libonnxruntime' /tmp/needed.txt; then
+          set -euo pipefail
+          needed="$(readelf -d target/release/spe-gpu)"
+          printf '%s\n' "$needed" | grep -E 'NEEDED' || true
+          if printf '%s\n' "$needed" | grep -q 'libonnxruntime'; then
             echo "FAIL: spe-gpu has DT_NEEDED libonnxruntime — load-dynamic contract violated (RP-3/RP-4)"
             exit 1
           fi
@@ -629,12 +655,19 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install GNU coreutils for packaging
+        run: |
+          brew install coreutils
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+
       - name: Stage ORT runtime
         run: |
-          python3 -m venv /tmp/ort-venv
-          /tmp/ort-venv/bin/pip install --quiet "onnxruntime>=1.25.1,<1.26"
-          ORT_CAPI=$(/tmp/ort-venv/bin/python -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
-          echo "ORT_STAGE_DIR=$ORT_CAPI" >> $GITHUB_ENV
+          ORT_VENV="$RUNNER_TEMP/ort-venv"
+          rm -rf "$ORT_VENV"
+          python3 -m venv "$ORT_VENV"
+          "$ORT_VENV/bin/pip" install --quiet "onnxruntime>=1.25.1,<1.26"
+          ORT_CAPI=$("$ORT_VENV/bin/python" -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
+          echo "ORT_STAGE_DIR=$ORT_CAPI" >> "$GITHUB_ENV"
 
       - name: Build spe (release, CPU flavor, macOS arm64)
         working-directory: sparrow-engine
@@ -645,8 +678,10 @@ jobs:
       - name: Hard gate — no LC_LOAD_DYLIB libonnxruntime (load-dynamic invariant)
         working-directory: sparrow-engine
         run: |
-          otool -L target/release/spe | tee /tmp/loaded.txt
-          if grep -q 'libonnxruntime' /tmp/loaded.txt; then
+          set -euo pipefail
+          loaded="$(otool -L target/release/spe)"
+          printf '%s\n' "$loaded"
+          if printf '%s\n' "$loaded" | grep -q 'libonnxruntime'; then
             echo "FAIL: spe has LC_LOAD_DYLIB libonnxruntime — load-dynamic contract violated"
             exit 1
           fi
@@ -684,10 +719,12 @@ jobs:
       - name: Stage ORT runtime
         shell: bash
         run: |
-          python3 -m venv /tmp/ort-venv
-          /tmp/ort-venv/Scripts/pip install --quiet "onnxruntime>=1.25.1,<1.26"
-          ORT_CAPI=$(/tmp/ort-venv/Scripts/python -c "import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / 'capi')")
-          echo "ORT_STAGE_DIR=$ORT_CAPI" >> $GITHUB_ENV
+          ORT_VENV="$(cygpath -u "$RUNNER_TEMP")/ort-venv"
+          rm -rf "$ORT_VENV"
+          python3 -m venv "$ORT_VENV"
+          "$ORT_VENV/Scripts/pip" install --quiet "onnxruntime>=1.25.1,<1.26"
+          ORT_CAPI=$("$ORT_VENV/Scripts/python" -c "import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / 'capi')")
+          echo "ORT_STAGE_DIR=$ORT_CAPI" >> "$GITHUB_ENV"
 
       - name: Build spe.exe (release, CPU flavor, Windows x86_64)
         working-directory: sparrow-engine
@@ -696,12 +733,20 @@ jobs:
           cargo build --release -p sparrow-engine-cli --bin spe \
             --no-default-features --features cpu
 
+      - name: Configure MSVC developer command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
       # Windows DLL link verification: dumpbin (MSVC) lists imports.
       - name: Hard gate — no onnxruntime.dll in import table (load-dynamic invariant)
         working-directory: sparrow-engine
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $imports = & dumpbin /dependents target\release\spe.exe
+          if ($LASTEXITCODE -ne 0) {
+            throw "dumpbin failed with exit code $LASTEXITCODE"
+          }
           if ($imports -match 'onnxruntime\.dll') {
             Write-Error "FAIL: spe.exe imports onnxruntime.dll - load-dynamic contract violated"
             exit 1

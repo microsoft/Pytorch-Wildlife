@@ -40,6 +40,7 @@ PW_COMPAT_DIR="$REPO_ROOT/pytorchwildlife-compat"
 RESULTS_MD="$REPO_ROOT/docs/review/phase3.5-clean-room/results.md"
 
 CLI_BIN="$SPARROW_ENGINE_DIR/target/release/spe"
+CLI_TARBALL_GLOB="$SPARROW_ENGINE_DIR/dist/sparrow-engine-cpu-*-linux-x86_64.tar.gz"
 PY_WHEEL_GLOB="$SPARROW_ENGINE_DIR/sparrow-engine-python/dist/sparrow_engine-*.whl"
 SHIM_WHEEL_GLOB="$PW_COMPAT_DIR/dist/pytorchwildlife-*.whl"
 
@@ -125,6 +126,34 @@ ensure_cli_bin() {
   fi
 }
 
+ensure_cli_tarball() {
+  local tarball
+  tarball="$(find_first "$CLI_TARBALL_GLOB")"
+  if [[ -n "$tarball" ]]; then
+    LOG "CLI tarball present: $tarball"
+    return
+  fi
+  (( BUILD_MISSING )) || FAIL "CLI tarball missing (glob $CLI_TARBALL_GLOB); --no-build forbids build"
+  ensure_cli_bin
+
+  local work_dir="$SPARROW_ENGINE_DIR/target/clean-room"
+  local ort_venv="$work_dir/ort-venv"
+  mkdir -p "$work_dir"
+  rm -rf "$ort_venv"
+  LOG "Staging ORT runtime for CLI tarball (onnxruntime>=1.25.1,<1.26)..."
+  python3 -m venv "$ort_venv"
+  "$ort_venv/bin/pip" install --quiet "onnxruntime>=1.25.1,<1.26"
+  local ort_capi
+  ort_capi=$("$ort_venv/bin/python" -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
+  local version
+  version=$(awk -F' = ' '/^version = / {gsub(/"/, "", $2); print $2; exit}' "$SPARROW_ENGINE_DIR/sparrow-engine-cli/Cargo.toml")
+  [[ -n "$version" ]] || FAIL "could not determine CLI version from Cargo.toml"
+  LOG "Packaging CLI tarball (version=$version, ORT_CAPI=$ort_capi)..."
+  ( cd "$SPARROW_ENGINE_DIR" && ORT_STAGE_DIR="$ort_capi" FLAVOR=cpu PLATFORM=linux-x86_64 VERSION="$version" ./scripts/package_cli_tarball.sh )
+  tarball="$(find_first "$CLI_TARBALL_GLOB")"
+  [[ -n "$tarball" ]] || FAIL "CLI tarball build finished but nothing under $CLI_TARBALL_GLOB"
+}
+
 ensure_python_wheel() {
   local wheel
   wheel="$(find_first "$PY_WHEEL_GLOB")"
@@ -186,16 +215,29 @@ ensure_image() {
 # wheel-ABI mismatch — see C1), non-zero (other) on FAIL.
 #
 # Smoke tests intentionally avoid model downloads and inference — we're
-# verifying the INSTALL path, not the inference path. `sparrow-engine models list`
+# verifying the INSTALL path, not the inference path. `spe models list`
 # without models installed still prints an empty list + exit 0.
 
 smoke_cli() {
   # $1 = image tag
   local tag="$1"
+  local tarball
+  tarball="$(find_first "$CLI_TARBALL_GLOB")"
+  [[ -n "$tarball" ]] || FAIL "CLI tarball missing (glob $CLI_TARBALL_GLOB)"
+  local tarball_name
+  tarball_name="$(basename "$tarball")"
   docker run --rm \
-    -v "$CLI_BIN:/usr/local/bin/spe:ro" \
+    -e TARBALL_NAME="$tarball_name" \
+    -v "$tarball:/clean_room/$tarball_name:ro" \
     "$tag" \
-    bash -c "spe --version && sparrow-engine models list"
+    bash -c '
+set -e
+mkdir -p /opt/sparrow-engine-cli
+tar -xzf "/clean_room/$TARBALL_NAME" -C /opt/sparrow-engine-cli
+bundle=$(find /opt/sparrow-engine-cli -mindepth 1 -maxdepth 1 -type d | head -n1)
+"$bundle/bin/spe" --version
+"$bundle/bin/spe" models list
+'
 }
 
 smoke_python() {
@@ -279,21 +321,14 @@ if [[ "$wheel_py" != "$container_py" ]]; then
   exit 2
 fi
 python3 -m venv /opt/venv
-# ORT pin matches docs/benchmarks.md §8.3 L231. Drop --quiet so pip
-# warnings/errors stay visible.
-/opt/venv/bin/pip install "onnxruntime>=1.24.4,<1.25" "/clean_room/$SPARROW_ENGINE_WHEEL_NAME"
+# ORT pin matches sparrow-engine-python/pyproject.toml Requires-Dist
+# (>=1.25.1,<1.26). The sparrow-engine wheel import-time
+# `_discover_ort_dylib()` shim sets ORT_DYLIB_PATH from the pip install,
+# so no manual libonnxruntime symlink workaround is needed here.
+/opt/venv/bin/pip install "onnxruntime>=1.25.1,<1.26" "/clean_room/$SPARROW_ENGINE_WHEEL_NAME"
+# Keep --no-deps: this local smoke intentionally bypasses the shim package
+# co-bump pin so the just-built sparrow-engine wheel is the runtime dependency.
 /opt/venv/bin/pip install --no-deps "/clean_room/$WHEEL_NAME"
-# Pip onnxruntime ships only libonnxruntime.so.X.Y.Z; sparrow-engine cdylib has
-# DT_NEEDED libonnxruntime.so.1, so create the missing soname symlinks.
-# Same workaround as sparrow-engine/scripts/test.sh + docs/benchmarks.md §8.3 L234-237.
-ORT_DIR=$(/opt/venv/bin/python -c "import onnxruntime, os; print(os.path.dirname(onnxruntime.__file__))")/capi
-for base in libonnxruntime libonnxruntime_providers_shared; do
-  versioned=$(ls "$ORT_DIR/${base}.so."* 2>/dev/null | head -n1) || true
-  if [[ -n "$versioned" ]]; then
-    [[ -e "$ORT_DIR/${base}.so" ]]   || ln -sf "$(basename "$versioned")" "$ORT_DIR/${base}.so"
-    [[ -e "$ORT_DIR/${base}.so.1" ]] || ln -sf "$(basename "$versioned")" "$ORT_DIR/${base}.so.1"
-  fi
-done
 /opt/venv/bin/python -c "import pytorchwildlife; print(\"pytorchwildlife shim OK\")"
 '
 }
@@ -308,7 +343,7 @@ LOG "Build missing: $BUILD_MISSING"
 # Prep artifacts once.
 for a in "${MATRIX_ARTIFACT[@]}"; do
   case "$a" in
-    cli)    ensure_cli_bin;;
+    cli)    ensure_cli_tarball;;
     python) ensure_python_wheel;;
     shim)   ensure_shim_wheel; ensure_python_wheel;;  # shim needs sparrow-engine
   esac

@@ -34,6 +34,7 @@
 //! Port of `_discover_ort_dylib()` from
 //! `sparrow-engine-python/python/sparrow_engine/__init__.py:149-201` (RP-3).
 
+use std::cmp::Ordering;
 use std::env;
 #[cfg(all(feature = "gpu", target_os = "linux"))]
 use std::ffi::OsString;
@@ -93,55 +94,87 @@ fn find_bundle_lib_dir() -> Option<PathBuf> {
 /// Find the highest-versioned `libonnxruntime` in `lib_dir` for the current
 /// platform. Returns `None` if no matching file exists.
 fn find_ort_dylib(lib_dir: &Path) -> Option<PathBuf> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut candidates: Vec<OrtDylibCandidate> = Vec::new();
     let entries = std::fs::read_dir(lib_dir).ok()?;
     for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if !matches_ort_dylib_name(name) {
-            continue;
+        if let Some(candidate) = ort_dylib_candidate(entry.path()) {
+            candidates.push(candidate);
         }
-        // Prefer real files over symlinks (the unversioned `.so` is usually a symlink).
-        if path.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false) {
-            continue;
-        }
-        candidates.push(path);
     }
-    // Sort lexicographically; for `libonnxruntime.so.X.Y.Z` this happens to
-    // give numeric-version-correct ordering for ORT's single-digit minor /
-    // patch numbers (the same heuristic the Python shim uses).
-    candidates.sort();
-    candidates.pop().or_else(|| {
-        // Fall back to bare unversioned name (Windows ships onnxruntime.dll
-        // unversioned; rare on Linux/macOS but accepted).
-        let bare = lib_dir.join(bare_ort_dylib_name());
-        bare.is_file().then_some(bare)
+    candidates.sort_by(compare_ort_candidates);
+    candidates.pop().map(|candidate| candidate.path)
+}
+
+#[derive(Debug)]
+struct OrtDylibCandidate {
+    path: PathBuf,
+    version: Option<Vec<u32>>,
+    is_symlink: bool,
+}
+
+fn ort_dylib_candidate(path: PathBuf) -> Option<OrtDylibCandidate> {
+    let name = path.file_name().and_then(|n| n.to_str())?;
+    let version = parse_ort_dylib_version(name)?;
+    let is_symlink = path
+        .symlink_metadata()
+        .map(|m| m.is_symlink())
+        .unwrap_or(false);
+    if !path.is_file() {
+        return None;
+    }
+    Some(OrtDylibCandidate {
+        path,
+        version,
+        is_symlink,
     })
 }
 
-/// Platform-specific filename prefixes/suffixes for ORT's shared library.
-fn matches_ort_dylib_name(name: &str) -> bool {
-    if cfg!(target_os = "windows") {
-        name.eq_ignore_ascii_case("onnxruntime.dll")
-    } else if cfg!(target_os = "macos") {
-        // libonnxruntime.<version>.dylib OR libonnxruntime.dylib
-        name.starts_with("libonnxruntime.") && name.ends_with(".dylib")
-    } else {
-        // Linux / other ELF: libonnxruntime.so.X.Y.Z
-        name.starts_with("libonnxruntime.so")
+fn compare_ort_candidates(a: &OrtDylibCandidate, b: &OrtDylibCandidate) -> Ordering {
+    match (&a.version, &b.version) {
+        (Some(a_version), Some(b_version)) => a_version.cmp(b_version),
+        (Some(_), None) => Ordering::Greater,
+        (None, Some(_)) => Ordering::Less,
+        (None, None) => Ordering::Equal,
     }
+    .then_with(|| (!a.is_symlink).cmp(&(!b.is_symlink)))
+    .then_with(|| a.path.cmp(&b.path))
 }
 
-fn bare_ort_dylib_name() -> &'static str {
+/// Platform-specific filename prefixes/suffixes for ORT's shared library.
+#[cfg(test)]
+fn matches_ort_dylib_name(name: &str) -> bool {
+    parse_ort_dylib_version(name).is_some()
+}
+
+fn parse_ort_dylib_version(name: &str) -> Option<Option<Vec<u32>>> {
     if cfg!(target_os = "windows") {
-        "onnxruntime.dll"
-    } else if cfg!(target_os = "macos") {
-        "libonnxruntime.dylib"
-    } else {
-        "libonnxruntime.so"
+        return name.eq_ignore_ascii_case("onnxruntime.dll").then_some(None);
     }
+    if cfg!(target_os = "macos") {
+        if name == "libonnxruntime.dylib" {
+            return Some(None);
+        }
+        let version = name
+            .strip_prefix("libonnxruntime.")?
+            .strip_suffix(".dylib")?;
+        return parse_numeric_version(version).map(Some);
+    }
+    if name == "libonnxruntime.so" {
+        return Some(None);
+    }
+    let version = name.strip_prefix("libonnxruntime.so.")?;
+    parse_numeric_version(version).map(Some)
+}
+
+fn parse_numeric_version(version: &str) -> Option<Vec<u32>> {
+    let mut parts = Vec::new();
+    for part in version.split('.') {
+        if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        parts.push(part.parse().ok()?);
+    }
+    (!parts.is_empty()).then_some(parts)
 }
 
 /// Prepend `lib_dir` to `LD_LIBRARY_PATH` (GPU + Linux only). Idempotent —
@@ -155,9 +188,8 @@ fn prepend_library_path(lib_dir: &Path) {
         return;
     }
     // Skip if lib_dir is already first.
-    let existing_str = existing.to_string_lossy();
-    if let Some(first) = existing_str.split(':').next() {
-        if Path::new(first) == lib_dir {
+    if let Some(first) = env::split_paths(&existing).next() {
+        if first == lib_dir {
             return;
         }
     }
@@ -181,6 +213,8 @@ mod tests {
             "libonnxruntime.so.1.26.0",
         ];
         let cases_no_match = [
+            "libonnxruntime.so.bak",
+            "libonnxruntime.so.old",
             "libonnxruntime_providers_cuda.so",
             "libonnxruntime_providers_shared.so",
             "libfoo.so",
@@ -252,15 +286,66 @@ mod tests {
         }
         let tmp = tempfile::tempdir().unwrap();
         let lib = tmp.path();
+        std::fs::write(lib.join("libonnxruntime.so.1.9.0"), b"").unwrap();
         std::fs::write(lib.join("libonnxruntime.so.1.25.0"), b"").unwrap();
         std::fs::write(lib.join("libonnxruntime.so.1.25.1"), b"").unwrap();
         std::fs::write(lib.join("libonnxruntime_providers_cuda.so"), b"").unwrap();
 
         let picked = find_ort_dylib(lib).expect("expected a candidate");
         assert!(
-            picked.file_name().unwrap().to_str().unwrap().ends_with("1.25.1"),
+            picked
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with("1.25.1"),
             "expected highest version, got {}",
             picked.display()
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_linux_dylib_names_and_directories() {
+        if !cfg!(target_os = "linux") {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = tmp.path();
+        std::fs::write(lib.join("libonnxruntime.so.1.25.1"), b"").unwrap();
+        std::fs::write(lib.join("libonnxruntime.so.bak"), b"").unwrap();
+        std::fs::create_dir(lib.join("libonnxruntime.so.99.0.0")).unwrap();
+
+        let picked = find_ort_dylib(lib).expect("expected a candidate");
+        assert!(
+            picked
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with("1.25.1"),
+            "expected valid numeric dylib, got {}",
+            picked.display()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn accepts_valid_symlink_and_rejects_dangling_symlink() {
+        if !cfg!(target_os = "linux") {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = tmp.path();
+        let target = lib.join("actual-onnxruntime");
+        std::fs::write(&target, b"").unwrap();
+        std::os::unix::fs::symlink(&target, lib.join("libonnxruntime.so.1.25.1")).unwrap();
+        std::os::unix::fs::symlink(lib.join("missing"), lib.join("libonnxruntime.so.9.99.0"))
+            .unwrap();
+
+        let picked = find_ort_dylib(lib).expect("expected a valid symlink candidate");
+        assert_eq!(
+            picked.file_name().unwrap().to_str().unwrap(),
+            "libonnxruntime.so.1.25.1"
         );
     }
 }
