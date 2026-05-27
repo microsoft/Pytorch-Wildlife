@@ -85,9 +85,31 @@ pick_newest_ort_dir() {
         sort -V -r | head -1 | awk '{print $2}'
 }
 
+ort_dir_has_runtime_lib() {
+    local dir="$1"
+    local versioned
+    if [[ -f "$dir/libonnxruntime.so" ]]; then
+        return 0
+    fi
+    versioned=$(find "$dir" -maxdepth 1 -name 'libonnxruntime.so.*.*.*' -type f -print -quit 2>/dev/null)
+    [[ -n "$versioned" ]]
+}
+
 find_ort_dir() {
     # Check explicit override first.
     if [[ -n "${ORT_DIR:-}" ]]; then
+        if [[ ! -d "$ORT_DIR" ]]; then
+            echo >&2 "error: ORT_DIR is not a directory: $ORT_DIR"
+            echo >&2 "Check ORT_DIR points to an onnxruntime/capi directory."
+            echo >&2 "Unset ORT_DIR to fall back to auto-discovery."
+            return 1
+        fi
+        if ! ort_dir_has_runtime_lib "$ORT_DIR"; then
+            echo >&2 "error: ORT_DIR does not contain libonnxruntime.so: $ORT_DIR"
+            echo >&2 "Check ORT_DIR points to an onnxruntime/capi directory."
+            echo >&2 "Unset ORT_DIR to fall back to auto-discovery."
+            return 1
+        fi
         echo "$ORT_DIR"
         return
     fi
