@@ -109,7 +109,7 @@ fi
 # Pick the highest-versioned libonnxruntime + (GPU) provider sidecars.
 case "$PLATFORM" in
   linux-x86_64)
-    ort_dylib="$(\ls -1 "$ort_capi"/libonnxruntime.so.* 2>/dev/null \
+    ort_dylib="$(ls -1 "$ort_capi"/libonnxruntime.so.* 2>/dev/null \
                  | grep -v '\.symlink$' | sort -V | tail -1)"
     gpu_sidecars=()
     if [[ "$FLAVOR" = "gpu" ]]; then
@@ -123,7 +123,7 @@ case "$PLATFORM" in
     fi
     ;;
   macos-aarch64)
-    ort_dylib="$(\ls -1 "$ort_capi"/libonnxruntime.*.dylib 2>/dev/null \
+    ort_dylib="$(ls -1 "$ort_capi"/libonnxruntime.*.dylib 2>/dev/null \
                  | sort -V | tail -1)"
     gpu_sidecars=()
     ;;
@@ -152,9 +152,9 @@ mkdir -p "$bundle/bin" "$bundle/lib"
 cp "$src_bin" "$bundle/bin/"
 chmod +x "$bundle/bin/$bin_filename"
 cp "$ort_dylib" "$bundle/lib/"
-for s in ${gpu_sidecars[@]+"${gpu_sidecars[@]}"}; do
-  cp "$s" "$bundle/lib/"
-done
+if ((${#gpu_sidecars[@]})); then
+  cp "${gpu_sidecars[@]}" "$bundle/lib/"
+fi
 
 echo "$VERSION" > "$bundle/VERSION"
 
@@ -205,20 +205,25 @@ fi
 # ---------------------------------------------------------------------------
 
 mkdir -p "$OUT_DIR"
-rm -f "$out_archive" "${out_archive}.sha256"
+# Pre-compute an absolute path so both archive arms (and the subshell-cd'd
+# zip arm in particular) refer to the same target without relying on $OLDPWD
+# (caller-controlled, not set inside this script) or GNU-only
+# `realpath --relative-to=`.
+out_archive_abs="$(cd "$OUT_DIR" && pwd)/$(basename "$out_archive")"
+rm -f "$out_archive_abs" "${out_archive_abs}.sha256"
 
 case "$archive_ext" in
   tar.gz)
-    tar -C "$work" -czf "$out_archive" "$bundle_name"
+    tar -C "$work" -czf "$out_archive_abs" "$bundle_name"
     ;;
   zip)
     # zip preserves the executable bit on Unix-style tools; Windows users
     # extract via Explorer or `tar -xf` (Win10+ ships bsdtar).
-    ( cd "$work" && zip -qr "$(realpath -m --relative-to="$work" "$OLDPWD/$out_archive")" "$bundle_name" )
+    ( cd "$work" && zip -qr "$out_archive_abs" "$bundle_name" )
     ;;
 esac
 
-sha256sum "$out_archive" | awk '{print $1}' > "${out_archive}.sha256"
+sha256sum "$out_archive_abs" | awk '{print $1}' > "${out_archive_abs}.sha256"
 
-echo "OK: $out_archive ($(du -h "$out_archive" | cut -f1))"
-echo "    sha256 $(cat "${out_archive}.sha256")"
+echo "OK: $out_archive_abs ($(du -h "$out_archive_abs" | cut -f1))"
+echo "    sha256 $(cat "${out_archive_abs}.sha256")"
