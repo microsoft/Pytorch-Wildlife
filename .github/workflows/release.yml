@@ -478,3 +478,306 @@ jobs:
           # See publish-testpypi-cpu comment above — TestPyPI sandbox,
           # duplicate-version uploads treated as no-ops on retry.
           skip-existing: true
+
+  # ---------------------------------------------------------------------------
+  # RP-4 (2026-05-26) — CLI tarball matrix.
+  #
+  # Build per-platform tarballs of the `spe` / `spe-gpu` CLI with bundled
+  # libonnxruntime, layout matching `installer/sparrow-engine-install.sh:531`.
+  # Output naming: sparrow-engine-{cpu,gpu}-{ver}-{platform}.tar.gz (+ .sha256).
+  #
+  # Build jobs run on every tag push AND workflow_dispatch (target=build-only
+  # or testpypi); the publish-cli-release-assets job below only attaches to
+  # a GH Release on actual prod tags (no hyphen).
+  # ---------------------------------------------------------------------------
+
+  build-cli-linux-cpu:
+    name: Build CLI tarball (sparrow-engine-cpu, Linux x86_64)
+    runs-on: ubuntu-latest
+    container:
+      # manylinux_2_28 = glibc 2.28 floor, matches build-cpu-linux's wheel target.
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          /opt/python/cp311-cp311/bin/python -m pip install --user rustup-init
+          rustup-init -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Stage ORT runtime (pip onnxruntime, capi/libonnxruntime.so.X.Y.Z)
+        run: |
+          /opt/python/cp311-cp311/bin/python -m venv /tmp/ort-venv
+          /tmp/ort-venv/bin/pip install --quiet "onnxruntime>=1.25.1,<1.26"
+          ORT_CAPI=$(/tmp/ort-venv/bin/python -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
+          echo "ORT_STAGE_DIR=$ORT_CAPI" >> $GITHUB_ENV
+          ls -la "$ORT_CAPI"/libonnxruntime.so.*
+
+      - name: Build spe (release, CPU flavor, load-dynamic via ort_resolver)
+        working-directory: sparrow-engine
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo build --release -p sparrow-engine-cli --bin spe \
+            --no-default-features --features cpu
+
+      - name: Hard gate — no DT_NEEDED libonnxruntime (load-dynamic invariant)
+        working-directory: sparrow-engine
+        run: |
+          readelf -d target/release/spe | grep -E 'NEEDED' | tee /tmp/needed.txt
+          if grep -q 'libonnxruntime' /tmp/needed.txt; then
+            echo "FAIL: spe has DT_NEEDED libonnxruntime — load-dynamic contract violated (RP-3/RP-4)"
+            exit 1
+          fi
+
+      - name: Package tarball
+        working-directory: sparrow-engine
+        env:
+          FLAVOR: cpu
+          PLATFORM: linux-x86_64
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            VERSION="0.0.0-ci-${GITHUB_SHA::8}"
+          fi
+          VERSION="$VERSION" ./scripts/package_cli_tarball.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-cpu-linux
+          path: |
+            sparrow-engine/dist/sparrow-engine-cpu-*-linux-x86_64.tar.gz
+            sparrow-engine/dist/sparrow-engine-cpu-*-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+
+  build-cli-linux-gpu:
+    name: Build CLI tarball (sparrow-engine-gpu, Linux x86_64)
+    runs-on: ubuntu-latest
+    container:
+      # Same Rocky 8 / glibc 2.28 image as build-gpu-linux.
+      image: nvidia/cuda:12.6.3-cudnn-devel-rockylinux8
+    steps:
+      - name: Install build prerequisites
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            ca-certificates git gcc gcc-c++ make pkgconfig \
+            python3.11 python3.11-devel python3.11-pip binutils
+          ln -sf /usr/bin/python3.11 /usr/local/bin/python3
+          ln -sf /usr/bin/python3.11 /usr/local/bin/python
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          python3 -m pip install --user rustup-init
+          rustup-init -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Stage ORT GPU runtime (onnxruntime-gpu + CUDA provider sidecars)
+        run: |
+          python3 -m venv /tmp/ort-venv
+          /tmp/ort-venv/bin/pip install --quiet "onnxruntime-gpu>=1.25.1,<1.26"
+          ORT_CAPI=$(/tmp/ort-venv/bin/python -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
+          echo "ORT_STAGE_DIR=$ORT_CAPI" >> $GITHUB_ENV
+          ls -la "$ORT_CAPI"/libonnxruntime*.so* | head -20
+
+      - name: Build spe-gpu (release, GPU flavor, load-dynamic via ort_resolver)
+        working-directory: sparrow-engine
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo build --release -p sparrow-engine-cli --bin spe-gpu \
+            --no-default-features --features gpu
+
+      - name: Hard gate — no DT_NEEDED libonnxruntime (load-dynamic invariant)
+        working-directory: sparrow-engine
+        run: |
+          readelf -d target/release/spe-gpu | grep -E 'NEEDED' | tee /tmp/needed.txt
+          if grep -q 'libonnxruntime' /tmp/needed.txt; then
+            echo "FAIL: spe-gpu has DT_NEEDED libonnxruntime — load-dynamic contract violated (RP-3/RP-4)"
+            exit 1
+          fi
+
+      - name: Package tarball
+        working-directory: sparrow-engine
+        env:
+          FLAVOR: gpu
+          PLATFORM: linux-x86_64
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            VERSION="0.0.0-ci-${GITHUB_SHA::8}"
+          fi
+          VERSION="$VERSION" ./scripts/package_cli_tarball.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-gpu-linux
+          path: |
+            sparrow-engine/dist/sparrow-engine-gpu-*-linux-x86_64.tar.gz
+            sparrow-engine/dist/sparrow-engine-gpu-*-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+
+  build-cli-macos-arm64:
+    name: Build CLI tarball (sparrow-engine-cpu, macOS arm64)
+    runs-on: macos-14
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Stage ORT runtime
+        run: |
+          python3 -m venv /tmp/ort-venv
+          /tmp/ort-venv/bin/pip install --quiet "onnxruntime>=1.25.1,<1.26"
+          ORT_CAPI=$(/tmp/ort-venv/bin/python -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
+          echo "ORT_STAGE_DIR=$ORT_CAPI" >> $GITHUB_ENV
+
+      - name: Build spe (release, CPU flavor, macOS arm64)
+        working-directory: sparrow-engine
+        run: |
+          cargo build --release -p sparrow-engine-cli --bin spe \
+            --no-default-features --features cpu
+
+      - name: Hard gate — no LC_LOAD_DYLIB libonnxruntime (load-dynamic invariant)
+        working-directory: sparrow-engine
+        run: |
+          otool -L target/release/spe | tee /tmp/loaded.txt
+          if grep -q 'libonnxruntime' /tmp/loaded.txt; then
+            echo "FAIL: spe has LC_LOAD_DYLIB libonnxruntime — load-dynamic contract violated"
+            exit 1
+          fi
+
+      - name: Package tarball
+        working-directory: sparrow-engine
+        env:
+          FLAVOR: cpu
+          PLATFORM: macos-aarch64
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            VERSION="0.0.0-ci-${GITHUB_SHA::8}"
+          fi
+          VERSION="$VERSION" ./scripts/package_cli_tarball.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-cpu-macos-arm64
+          path: |
+            sparrow-engine/dist/sparrow-engine-cpu-*-macos-aarch64.tar.gz
+            sparrow-engine/dist/sparrow-engine-cpu-*-macos-aarch64.tar.gz.sha256
+          if-no-files-found: error
+
+  build-cli-windows:
+    name: Build CLI tarball (sparrow-engine-cpu, Windows x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Stage ORT runtime
+        shell: bash
+        run: |
+          python3 -m venv /tmp/ort-venv
+          /tmp/ort-venv/Scripts/pip install --quiet "onnxruntime>=1.25.1,<1.26"
+          ORT_CAPI=$(/tmp/ort-venv/Scripts/python -c "import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / 'capi')")
+          echo "ORT_STAGE_DIR=$ORT_CAPI" >> $GITHUB_ENV
+
+      - name: Build spe.exe (release, CPU flavor, Windows x86_64)
+        working-directory: sparrow-engine
+        shell: bash
+        run: |
+          cargo build --release -p sparrow-engine-cli --bin spe \
+            --no-default-features --features cpu
+
+      # Windows DLL link verification: dumpbin (MSVC) lists imports.
+      - name: Hard gate — no onnxruntime.dll in import table (load-dynamic invariant)
+        working-directory: sparrow-engine
+        shell: pwsh
+        run: |
+          $imports = & dumpbin /dependents target\release\spe.exe
+          if ($imports -match 'onnxruntime\.dll') {
+            Write-Error "FAIL: spe.exe imports onnxruntime.dll - load-dynamic contract violated"
+            exit 1
+          }
+
+      - name: Package zip
+        working-directory: sparrow-engine
+        shell: bash
+        env:
+          FLAVOR: cpu
+          PLATFORM: windows-x86_64
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            VERSION="0.0.0-ci-${GITHUB_SHA::8}"
+          fi
+          VERSION="$VERSION" ./scripts/package_cli_tarball.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-cpu-windows
+          path: |
+            sparrow-engine/dist/sparrow-engine-cpu-*-windows-x86_64.zip
+            sparrow-engine/dist/sparrow-engine-cpu-*-windows-x86_64.zip.sha256
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Attach CLI tarballs as GitHub Release assets on prod tag push.
+  # Hyphenated tags (RC / pre) skip publish; build jobs still ran above.
+  # ---------------------------------------------------------------------------
+
+  publish-cli-release-assets:
+    name: Attach CLI tarballs to GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    needs:
+      - build-cli-linux-cpu
+      - build-cli-linux-gpu
+      - build-cli-macos-arm64
+      - build-cli-windows
+    runs-on: ubuntu-latest
+    permissions:
+      # softprops/action-gh-release needs write access to create / append the
+      # GH Release. The wheel publish jobs above use OIDC for PyPI; this job
+      # uses standard GITHUB_TOKEN scoped to contents:write.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: dist
+          merge-multiple: true
+
+      - name: Show collected dist/
+        run: ls -la dist/
+
+      - name: Validate tag matches tarball version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          got=$(ls dist/sparrow-engine-cpu-*-linux-x86_64.tar.gz | head -1 \
+            | sed -E 's|.*/sparrow-engine-cpu-([^-]+)-linux-x86_64\.tar\.gz|\1|')
+          echo "Tag version:     $tag_version"
+          echo "Tarball version: $got"
+          if [ "$tag_version" != "$got" ]; then
+            echo "FAIL: tag ($tag_version) and tarball ($got) versions disagree."
+            exit 1
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            dist/sparrow-engine-cpu-*-linux-x86_64.tar.gz
+            dist/sparrow-engine-cpu-*-linux-x86_64.tar.gz.sha256
+            dist/sparrow-engine-gpu-*-linux-x86_64.tar.gz
+            dist/sparrow-engine-gpu-*-linux-x86_64.tar.gz.sha256
+            dist/sparrow-engine-cpu-*-macos-aarch64.tar.gz
+            dist/sparrow-engine-cpu-*-macos-aarch64.tar.gz.sha256
+            dist/sparrow-engine-cpu-*-windows-x86_64.zip
+            dist/sparrow-engine-cpu-*-windows-x86_64.zip.sha256
