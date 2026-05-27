@@ -23,6 +23,17 @@ cd "$(dirname "$0")"
 
 : "${SPARROW_ENGINE_FLAVOR:=both}"
 
+# OS detection. Linux is the canonical wheel target; Windows is supported
+# for the GPU wheel (Phase J / 2026-05-26 — `pip install sparrow-engine-gpu`
+# on Windows). The Linux-specific maturin `--compatibility linux` flag and
+# the `auditwheel repair` post-build step are skipped on Windows; the
+# nvidia-* runtime deps are gated with PEP 508 `sys_platform == 'linux'`
+# markers because those packages publish Linux-only wheels.
+IS_WINDOWS=0
+case "${OSTYPE:-$(uname -s)}" in
+    msys*|cygwin*|win32*|MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;;
+esac
+
 # Use uv-managed maturin if available; falls back to PATH lookup.
 MATURIN="${MATURIN:-maturin}"
 FLAVOR_SENTINEL="python/sparrow_engine/_flavor.py"
@@ -111,17 +122,33 @@ build_gpu() {
     # extension-module --features gpu` (below) overrides the
     # `[tool.maturin] features = [...]` block, so the substitution was
     # functionally inert and a future-fragility hazard.
+    #
+    # PEP 508 `; sys_platform == 'linux'` markers gate the nvidia-* CUDA
+    # runtime deps to Linux. Those packages (nvidia-cudnn-cu12,
+    # nvidia-cublas-cu12, nvidia-curand-cu12, nvidia-cufft-cu12) publish
+    # only Linux x86_64 wheels on PyPI; without markers, `pip install
+    # sparrow-engine-gpu` on Windows would fail at dep resolution.
+    # onnxruntime-gpu DOES ship Windows wheels, so no marker on that one.
+    # The bash string is double-quoted so the embedded TOML `"` get
+    # backslash-escaped while the PEP 508 single-quoted `'linux'` stays
+    # literal.
     sed -i \
         -e 's|^name = "sparrow-engine"$|name = "sparrow-engine-gpu"|' \
         -e 's|^description = "Camera-trap ML inference engine — Python bindings (sparrow-engine CPU pipeline)"$|description = "Camera-trap ML inference engine — Python bindings (sparrow-engine GPU pipeline)"|' \
-        -e 's|"onnxruntime>=1.25.1,<1.26"|"onnxruntime-gpu>=1.25.1,<1.26", "nvidia-cudnn-cu12>=9,<10", "nvidia-cublas-cu12", "nvidia-curand-cu12", "nvidia-cufft-cu12"|' \
+        -e "s|\"onnxruntime>=1.25.1,<1.26\"|\"onnxruntime-gpu>=1.25.1,<1.26\", \"nvidia-cudnn-cu12>=9,<10; sys_platform == 'linux'\", \"nvidia-cublas-cu12; sys_platform == 'linux'\", \"nvidia-curand-cu12; sys_platform == 'linux'\", \"nvidia-cufft-cu12; sys_platform == 'linux'\"|" \
         pyproject.toml
     write_flavor_sentinel gpu
 
     # Build the GPU wheel. Phase E removes the libnvjpeg DT_NEEDED edge;
     # auditwheel repair below keeps ORT external while validating the wheel.
+    # `--compatibility linux` is Linux-only; on Windows maturin auto-picks
+    # the `win_amd64` platform tag.
+    local compat_args=()
+    if [[ "$IS_WINDOWS" -eq 0 ]]; then
+        compat_args+=(--compatibility linux)
+    fi
     "$MATURIN" build --release \
-        --compatibility linux \
+        "${compat_args[@]}" \
         --no-default-features \
         --features extension-module \
         --features gpu
@@ -147,22 +174,28 @@ build_gpu() {
         exit 1
     fi
 
-    cleanup_dir "$repair_dir"
-    mkdir -p "$repair_dir"
-    auditwheel repair \
-        --plat manylinux_2_28_x86_64 \
-        --exclude libonnxruntime.so.1 \
-        --wheel-dir "$repair_dir/" \
-        "$wheel"
+    # auditwheel repair is Linux-only (it patches ELF DT_NEEDED entries via
+    # patchelf). On Windows the maturin output wheel is already in the
+    # right shape (no DT_NEEDED equivalent — Windows DLL loading is name-
+    # based at runtime), so skip the repair step entirely.
+    if [[ "$IS_WINDOWS" -eq 0 ]]; then
+        cleanup_dir "$repair_dir"
+        mkdir -p "$repair_dir"
+        auditwheel repair \
+            --plat manylinux_2_28_x86_64 \
+            --exclude libonnxruntime.so.1 \
+            --wheel-dir "$repair_dir/" \
+            "$wheel"
 
-    local repaired_wheel
-    repaired_wheel="$(ls -t "$repair_dir"/sparrow_engine_gpu-*.whl 2>/dev/null | head -1 || true)"
-    if [[ -z "$repaired_wheel" ]]; then
-        echo "[build.sh] ERROR: auditwheel repair did not produce sparrow_engine_gpu-*.whl" >&2
-        exit 1
+        local repaired_wheel
+        repaired_wheel="$(ls -t "$repair_dir"/sparrow_engine_gpu-*.whl 2>/dev/null | head -1 || true)"
+        if [[ -z "$repaired_wheel" ]]; then
+            echo "[build.sh] ERROR: auditwheel repair did not produce sparrow_engine_gpu-*.whl" >&2
+            exit 1
+        fi
+        rm -f "$wheel"
+        wheel="$repaired_wheel"
     fi
-    rm -f "$wheel"
-    wheel="$repaired_wheel"
 
     # Use source-local scratch space; this workflow forbids system temp dirs.
     tmpdir="$(mktemp -d .wheel-metadata.XXXXXX)"
