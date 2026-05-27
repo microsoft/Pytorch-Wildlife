@@ -16,6 +16,7 @@
 //! `sparrow-engine-gpu`.
 
 mod engine_dispatch;
+mod ort_resolver;
 
 // Mutual exclusivity + presence guard: cargo's `required-features`
 // keys on each `[[bin]]` already prevent builds with neither feature,
@@ -498,6 +499,13 @@ fn reset_sigpipe() {}
 
 fn main() {
     reset_sigpipe();
+    // RP-4 (Path B, tarball CLI): resolve bundled libonnxruntime from
+    // <bundle_root>/lib/ before any engine call. No-op when running from
+    // `cargo run` / system install / when ORT_DYLIB_PATH is already set.
+    // Must run before init_tracing (which itself reads RUST_LOG, not ORT
+    // env, but ordering is cheap insurance) and before any clap or engine
+    // touchpoint. Single-threaded program entry — set_var is sound here.
+    ort_resolver::init_ort_env();
     init_tracing();
     let cli = Cli::parse();
 
