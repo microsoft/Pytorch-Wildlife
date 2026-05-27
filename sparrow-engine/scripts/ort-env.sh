@@ -8,8 +8,13 @@
 #
 # End users don't need this:
 #   - Docker: ORT is bundled in the container image
-#   - CLI release binary: ships with static ORT (~35MB, no dependencies)
-#   - Python wheel: maturin sets rpath to pip onnxruntime at build time
+#   - CLI release tarball (RP-4 2026-05-26): bundles `libonnxruntime.so.X.Y.Z`
+#     under `lib/` and resolves it via the in-binary
+#     `ort_resolver::init_ort_env()` shim; no `LD_LIBRARY_PATH` shell setup
+#     required. See `installer/sparrow-engine-install.sh --cli`.
+#   - Python wheel (RP-3 2026-05-23): the `_discover_ort_dylib()` shim in
+#     `sparrow_engine.__init__` sets `ORT_DYLIB_PATH` from the pip
+#     `onnxruntime[-gpu]` install at import time.
 #
 # GPU is the default. Prefers onnxruntime-gpu over onnxruntime-cpu.
 # Sets: ORT_CAPI, ORT_LIB_LOCATION, ORT_PREFER_DYNAMIC_LINK, LD_LIBRARY_PATH.

@@ -106,19 +106,22 @@ ensure_cli_bin() {
     ( cd "$SPARROW_ENGINE_DIR" && cargo build --release -p sparrow-engine-cli )
     [[ -x "$CLI_BIN" ]] || FAIL "CLI build finished but $CLI_BIN still missing"
   fi
-  # Preflight: CLAUDE.md says ship build is static (~35MB with static ORT).
-  # If readelf shows DT_NEEDED libonnxruntime, the dev box's dynamic-ORT
-  # pipeline produced this binary — running it inside a clean container
-  # without ORT will fail at ELF load. That is a build-pipeline drift
-  # (T-2 ticket), not a per-cell bug; FAIL the whole script so the harness
-  # remains faithful to the design contract. Do NOT mount ORT into the CLI
-  # cell as a workaround — D2=HYBRID specifically forbids that.
+  # Preflight: production CLI must NOT DT_NEEDED libonnxruntime.
+  # The release tarballs (RP-4 / 2026-05-26) bundle `libonnxruntime.so.X.Y.Z`
+  # under `lib/` and resolve it at runtime via the in-binary
+  # `ort_resolver::init_ort_env()` shim (PW commit cdbdb39). The `ort`
+  # crate's `load-dynamic` feature in sparrow-engine-{cpu,gpu}/Cargo.toml
+  # means `libonnxruntime` is `dlopen`'d, never DT_NEEDED-linked. If
+  # readelf shows DT_NEEDED libonnxruntime, the dev box is producing a
+  # statically-broken binary that contradicts the documented load-dynamic
+  # contract — fail the harness rather than mount ORT into the clean-room
+  # container as a workaround (D2=HYBRID forbids that).
   if command -v readelf >/dev/null 2>&1; then
     if readelf -d "$CLI_BIN" 2>/dev/null | grep -q 'NEEDED.*libonnxruntime'; then
-      FAIL "CLI binary is dynamic (DT_NEEDED libonnxruntime.so.*); CLAUDE.md says ship build is static (~35MB with static ORT). Build pipeline drift — see T-2 ticket. Rebuild via static-CLI pipeline or revisit T-2."
+      FAIL "CLI binary has DT_NEEDED libonnxruntime.so.* — load-dynamic contract violated (RP-3 / RP-4). Check sparrow-engine-{cpu,gpu}/Cargo.toml has \`ort\` built with \`load-dynamic\`."
     fi
   else
-    LOG "warning: readelf not available — skipping CLI static-link preflight check"
+    LOG "warning: readelf not available — skipping CLI load-dynamic preflight check"
   fi
 }
 
@@ -226,22 +229,13 @@ if [[ "$wheel_py" != "$container_py" ]]; then
   exit 2
 fi
 python3 -m venv /opt/venv
-# ORT pin matches docs/benchmarks.md §8.3 L231. Drop --quiet so pip
-# warnings/errors stay visible (otherwise pip silences them on success).
-/opt/venv/bin/pip install "onnxruntime>=1.24.4,<1.25" "/clean_room/$WHEEL_NAME"
-# Pip onnxruntime ships only libonnxruntime.so.X.Y.Z; sparrow-engine cdylib has
-# DT_NEEDED libonnxruntime.so.1, so create the missing soname symlinks.
-# Same workaround as sparrow-engine/scripts/test.sh + docs/benchmarks.md §8.3 L234-237.
-# This reproduces a documented project workaround in-harness, NOT
-# dev-env papering-over.
-ORT_DIR=$(/opt/venv/bin/python -c "import onnxruntime, os; print(os.path.dirname(onnxruntime.__file__))")/capi
-for base in libonnxruntime libonnxruntime_providers_shared; do
-  versioned=$(ls "$ORT_DIR/${base}.so."* 2>/dev/null | head -n1) || true
-  if [[ -n "$versioned" ]]; then
-    [[ -e "$ORT_DIR/${base}.so" ]]   || ln -sf "$(basename "$versioned")" "$ORT_DIR/${base}.so"
-    [[ -e "$ORT_DIR/${base}.so.1" ]] || ln -sf "$(basename "$versioned")" "$ORT_DIR/${base}.so.1"
-  fi
-done
+# ORT pin matches sparrow-engine-python/pyproject.toml Requires-Dist
+# (>=1.25.1,<1.26). The CLI tarball ships its own bundled libonnxruntime
+# (RP-4); this branch tests the *Python wheel* install path, where the
+# RP-3 `_discover_ort_dylib()` shim auto-discovers `libonnxruntime.so.X.Y.Z`
+# from the pip onnxruntime install at import time — no manual symlink
+# dance required.
+/opt/venv/bin/pip install "onnxruntime>=1.25.1,<1.26" "/clean_room/$WHEEL_NAME"
 /opt/venv/bin/python -c "import sparrow_engine; print(\"sparrow-engine \" + sparrow_engine.__version__ if hasattr(sparrow_engine, \"__version__\") else \"sparrow-engine imported\")"
 '
 }

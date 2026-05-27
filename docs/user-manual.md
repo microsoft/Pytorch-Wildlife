@@ -230,9 +230,9 @@ The following constraints are baked into the engine. If you onboard a new model,
 
 **Plain words**: rc-file = the shell startup file (`~/.bashrc`, `~/.zshrc`, or PowerShell profile) that runs when you open a new terminal.
 
-> **⚠️ Important — read before invoking the CLI binary directly**
+> **Note — calling the CLI binary by full path**
 >
-> The wrapper sources `ort-env.sh` so the `spe` (or `spe-gpu`) command found on `PATH` has the right `LD_LIBRARY_PATH` baked in. If you call the binary by its **full path** (e.g., `~/.sparrow_engine/bin/spe`, or after copying it to a deploy location), the dynamic linker has no idea where `libonnxruntime.so.1` lives and you get `cannot open shared object file`. Full repro + workaround is at **§13.6 LD_LIBRARY_PATH for CLI binaries**; the short version is: prepend `LD_LIBRARY_PATH=<onnxruntime-libs>` when invoking the binary outside the wrapper-PATH context. This surfaces at install time so you see it before you write the first script that invokes `spe` by full path.
+> The release tarballs ship as `<install-prefix>/bin/spe` (or `spe-gpu`) with the matching `lib/libonnxruntime.so.X.Y.Z` next to them. The `spe` binary discovers this `lib/` directory at startup via `ort_resolver::init_ort_env()` (relative to `current_exe()`), so calling it by full path (e.g. `~/.sparrow_engine/bin/spe detect …`) works without any `LD_LIBRARY_PATH` shell setup. The legacy `ort-env.sh` wrapper is dev-only — production users do not need to source anything. **Caveat**: if you copy `bin/spe` somewhere ELSE without also copying the sibling `lib/` directory, the resolver falls through silently and ORT cannot dlopen; set `ORT_DYLIB_PATH=/abs/path/to/libonnxruntime.so.X.Y.Z` to point at any libonnxruntime install of your choice.
 
 ---
 
@@ -270,7 +270,7 @@ pip install sparrow-engine-gpu nvidia-nvjpeg-cu12 nvidia-cuda-runtime-cu12
 
 `import sparrow_engine` auto-preloads `libnvjpeg.so.12` from the sidecar wheel with `ctypes.CDLL(..., RTLD_GLOBAL)`. The `sparrow-engine-gpu` wheel does not bundle `libnvjpeg.so.12`.
 
-For the standalone CLI binary `spe-gpu`, the Python preload does not run. Point the dynamic linker at the sidecar library directory before invoking the CLI:
+For the standalone CLI binary `spe-gpu`, the Python preload does not run. The release tarball bundles `libonnxruntime.so.X.Y.Z` + the CUDA provider sidecars under `lib/` (auto-resolved by `ort_resolver`), but does NOT bundle `libnvjpeg.so.12` (host responsibility). Point the dynamic linker at the sidecar library directory before invoking the CLI:
 
 ```bash
 NVJPEG_DIR=$(python -c "from importlib.resources import files; print(files('nvidia.nvjpeg') / 'lib')")
@@ -1678,16 +1678,16 @@ DeepFaune FP32:                    DeepFaune FP16:
 
 ---
 
-### 13.6 LD_LIBRARY_PATH for CLI binaries
+### 13.6 CLI binary cannot find libonnxruntime
 
 ```
 $ /home/me/.sparrow_engine/bin/spe detect IMG.jpg
 error while loading shared libraries: libonnxruntime.so.1: cannot open shared object file
 ```
 
-**Why**: the CLI binary doesn't bake an RPATH/RUNPATH that points at the wheel-installed ORT. It uses the dynamic linker, which needs `LD_LIBRARY_PATH`.
-**What**: the sparrow-engine install wrapper sets up `scripts/ort-env.sh` to point at the right place; the rc-file block sources it via `PATH` + an alias.
-**Fix**: when invoking the CLI directly (not via the `spe` alias), prepend `LD_LIBRARY_PATH=<onnxruntime-libs>`. Phase 4.2 manual test MT-4.2-12 surfaced this.
+**Why**: the release tarball normally places `bin/spe` and `lib/libonnxruntime.so.X.Y.Z` next to each other under the same install prefix; `ort_resolver::init_ort_env()` walks one directory up from `current_exe()` to find that `lib/`. If you moved `bin/spe` somewhere else without the sibling `lib/`, the resolver falls through silently and the `ort` crate has no path to dlopen.
+**What**: either restore the `<prefix>/bin/spe` ↔ `<prefix>/lib/libonnxruntime.so.X.Y.Z` pairing (the layout the tarball + `installer/sparrow-engine-install.sh --cli` produces), or set `ORT_DYLIB_PATH` to an explicit absolute path.
+**Fix**: `ORT_DYLIB_PATH=/abs/path/to/libonnxruntime.so.X.Y.Z spe detect IMG.jpg`. Original Phase 4.2 MT-4.2-12 surfaced the underlying constraint; RP-4 (2026-05-26) closed the common-case path via the in-binary resolver.
 
 ---
 
