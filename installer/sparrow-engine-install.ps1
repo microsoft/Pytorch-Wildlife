@@ -55,6 +55,10 @@ $Script:SentinelEnd        = '# <<< sparrow-engine <<<'
 # `file:///%TEMP%/sparrow-engine-release/v{ver}/` dev placeholder). Honors
 # `$env:SPARROW_ENGINE_RELEASE_BASE` for staging mirrors / internal proxies.
 $Script:DefaultReleaseBase = "https://github.com/microsoft/Pytorch-Wildlife/releases/download/v$Script:SparrowEngineVersion/"
+# Helper-script base = immutable raw-tag path. Helper scripts (probe.ps1,
+# probe_gpu_quality.ps1) live in the tagged source tree, NOT as release
+# assets. E-R2-1 fix. Override via `$env:SPARROW_ENGINE_HELPER_BASE`.
+$Script:DefaultHelperBase  = "https://raw.githubusercontent.com/microsoft/Pytorch-Wildlife/refs/tags/v$Script:SparrowEngineVersion/installer/"
 # Helper-script cache dir for piped install (B-01) — used when invoked via
 # `iex (irm <url>)` and no probe.ps1 / probe_gpu_quality.ps1 exists on disk
 # next to the wrapper.
@@ -101,8 +105,7 @@ function Resolve-Helper {
     $cachePath = Join-Path $Script:HelperCacheDir $Name
     if (Test-Path -LiteralPath $cachePath) { return $cachePath }
 
-    $base = Get-ReleaseBase
-    if (-not $base.EndsWith('/')) { $base += '/' }
+    $base = Get-HelperBase
     $url = "$base$Name"
     if (-not (Test-Path -LiteralPath $Script:HelperCacheDir)) {
         New-Item -ItemType Directory -Force -Path $Script:HelperCacheDir | Out-Null
@@ -113,7 +116,7 @@ function Resolve-Helper {
         Invoke-WebRequest -Uri $url -OutFile $tmpPath -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop | Out-Null
     } catch {
         if (Test-Path -LiteralPath $tmpPath) { Remove-Item -LiteralPath $tmpPath -Force -ErrorAction SilentlyContinue }
-        Die 4 "failed to fetch $Name from $url (piped install fallback): $($_.Exception.Message)"
+        Die 4 "failed to fetch $Name from $url (piped install fallback; download install.ps1 + probe.ps1 + probe_gpu_quality.ps1 from the same tag and run from disk if your network blocks raw.githubusercontent.com): $($_.Exception.Message)"
     }
     Move-Item -LiteralPath $tmpPath -Destination $cachePath -Force
     return $cachePath
@@ -200,6 +203,15 @@ function Get-ReleaseBase {
     # Returns the URL prefix. Defaults to the public GH Releases asset URL
     # (Phase E B-02 fix). Operator override via $env:SPARROW_ENGINE_RELEASE_BASE.
     $base = if ($env:SPARROW_ENGINE_RELEASE_BASE) { $env:SPARROW_ENGINE_RELEASE_BASE } else { $Script:DefaultReleaseBase }
+    if (-not $base.EndsWith('/')) { $base += '/' }
+    return $base
+}
+
+function Get-HelperBase {
+    # Returns the URL prefix for helper scripts (probe.ps1, probe_gpu_quality.ps1).
+    # Distinct from Get-ReleaseBase: helpers live in the tagged source tree,
+    # not as release assets. E-R2-1 fix. Override via $env:SPARROW_ENGINE_HELPER_BASE.
+    $base = if ($env:SPARROW_ENGINE_HELPER_BASE) { $env:SPARROW_ENGINE_HELPER_BASE } else { $Script:DefaultHelperBase }
     if (-not $base.EndsWith('/')) { $base += '/' }
     return $base
 }

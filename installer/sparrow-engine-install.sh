@@ -31,6 +31,12 @@ SPARROW_ENGINE_STATE_FILE="$SPARROW_ENGINE_PREFIX/installed.json"
 # (was: file:///tmp/sparrow-engine-release/v${ver}). Operator override via
 # `SPARROW_ENGINE_RELEASE_BASE=<url>` (staging mirror / internal proxy).
 SPARROW_ENGINE_RELEASE_BASE_DEFAULT="https://github.com/microsoft/Pytorch-Wildlife/releases/download/v${SPARROW_ENGINE_VERSION}"
+# Helper-script base = immutable raw-tag path. Helper scripts (probe.sh,
+# probe_gpu_quality.sh) are NOT published as release assets — they only
+# live in the tagged source tree. Phase E round-2 fix for E-R2-1 (the
+# release_base()/probe.sh URL returned 404). Operator override via
+# `SPARROW_ENGINE_HELPER_BASE=<url>` for testing against a local mirror.
+SPARROW_ENGINE_HELPER_BASE_DEFAULT="https://raw.githubusercontent.com/microsoft/Pytorch-Wildlife/refs/tags/v${SPARROW_ENGINE_VERSION}/installer"
 # Helper-script cache dir for piped install (B-01). Used when the wrapper
 # is invoked via `curl ... | sh` / `bash <(curl ...)` and no probe.sh /
 # probe_gpu_quality.sh exists on disk next to the wrapper.
@@ -453,6 +459,17 @@ release_base() {
     printf '%s' "${rb%/}"
 }
 
+# Helper-script base URL. Distinct from release_base() because helper
+# scripts live in the tagged source tree (raw.githubusercontent.com), not
+# as release assets. E-R2-1 fix.
+helper_base() {
+    local hb="${SPARROW_ENGINE_HELPER_BASE:-}"
+    if [ -z "$hb" ]; then
+        hb="$SPARROW_ENGINE_HELPER_BASE_DEFAULT"
+    fi
+    printf '%s' "${hb%/}"
+}
+
 # Resolve a helper script (probe.sh, probe_gpu_quality.sh) — either
 # co-located on disk next to this wrapper (disk install) OR fetched once
 # from the release URL into $SPARROW_ENGINE_HELPER_CACHE (piped install via
@@ -464,11 +481,34 @@ release_base() {
 # Prints the absolute resolved path to stdout.
 locate_helper() {
     local name=$1
-    local local_path cache_path rb url ua
-    local_path="$(dirname "$0")/$name"
-    if [ -f "$local_path" ]; then
-        printf '%s' "$local_path"
-        return 0
+    local local_path cache_path hb url ua self self_base
+    # E-R2-2 fix: only consult the on-disk adjacent file when $0 points at a
+    # real file path. Under piped invocation (`curl ... | sh`,
+    # `bash <(curl ...)`) $0 is the shell name (`bash`, `/bin/sh`, `-bash`)
+    # and dirname "$0" is `.` — sourcing `./probe.sh` from the user's cwd
+    # would execute an unrelated / stale / hostile script. Skip the disk
+    # leg entirely in that case and go straight to cache/fetch.
+    self=$0
+    if [ -f "$self" ]; then
+        case "$(basename -- "$self")" in
+            bash|sh|-bash|-sh|dash|zsh)
+                # Defensive: a sourced wrapper can leave $0 = bash but still
+                # be a real file. Treat as piped.
+                self_base=""
+                ;;
+            *)
+                self_base="$(dirname -- "$self")"
+                ;;
+        esac
+    else
+        self_base=""
+    fi
+    if [ -n "$self_base" ]; then
+        local_path="$self_base/$name"
+        if [ -f "$local_path" ]; then
+            printf '%s' "$local_path"
+            return 0
+        fi
     fi
     cache_path="$SPARROW_ENGINE_HELPER_CACHE/$name"
     if [ -f "$cache_path" ]; then
@@ -476,17 +516,17 @@ locate_helper() {
         return 0
     fi
     if ! command -v curl >/dev/null 2>&1; then
-        die 8 "$name not found at $local_path and curl unavailable for fallback fetch"
+        die 8 "$name not found on disk and curl unavailable for fallback fetch"
     fi
-    rb=$(release_base)
-    url="$rb/$name"
+    hb=$(helper_base)
+    url="$hb/$name"
     ua="sparrow-engine-install/${SPARROW_ENGINE_VERSION} (${OS:-unknown}/${ARCH:-unknown})"
     mkdir -p "$SPARROW_ENGINE_HELPER_CACHE"
     say "fetching $name from $url" >&2
     if ! curl -fsSL -A "$ua" --connect-timeout 10 --max-time 60 \
               -o "$cache_path.tmp" "$url"; then
         rm -f "$cache_path.tmp"
-        die 4 "failed to fetch $name from $url (piped install fallback)"
+        die 4 "failed to fetch $name from $url (piped install fallback; download install.sh + probe.sh + probe_gpu_quality.sh from the same tag and run from disk if your network blocks raw.githubusercontent.com)"
     fi
     mv "$cache_path.tmp" "$cache_path"
     printf '%s' "$cache_path"
