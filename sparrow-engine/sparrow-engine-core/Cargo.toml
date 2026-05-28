@@ -1,6 +1,6 @@
 [package]
 name = "sparrow-engine-core"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 description = "Phase 3.8 — sparrow-engine workspace device-agnostic core. Zero ORT/CUDA/nvjpeg deps."
 

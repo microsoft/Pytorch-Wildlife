@@ -24,7 +24,7 @@ set -euo pipefail
 # Phase F release-CI step on every published GH Release (`vX.Y.Z`). The
 # `SPARROW_ENGINE_VERSION` env var overrides this for advanced users
 # wanting to install an older or newer release.
-SPARROW_ENGINE_VERSION="${SPARROW_ENGINE_VERSION:-0.1.13}"
+SPARROW_ENGINE_VERSION="${SPARROW_ENGINE_VERSION:-0.1.14}"
 SPARROW_ENGINE_PREFIX="${SPARROW_ENGINE_PREFIX:-$HOME/.sparrow-engine}"
 SPARROW_ENGINE_STATE_FILE="$SPARROW_ENGINE_PREFIX/installed.json"
 # Default release base = public GH Releases asset URL. Phase E B-02 fix
