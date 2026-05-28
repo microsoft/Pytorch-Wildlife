@@ -206,27 +206,38 @@ jobs:
           # CPU and GPU images drift into different ORT runtimes — which is
           # the exact root cause B-06/B-07 fixed in round 1. Cheap grep guard
           # in CI is simpler than refactoring to a shared build-arg source.
+          #
+          # OQ-2026-05-28-5: also pin both ARG defaults to the canonical
+          # sparrow-engine/docker/.ort-version source so the constraint has
+          # a single named home. Bump that file + both Dockerfile ARG
+          # defaults atomically; CI fails otherwise.
           cpu_ort="$(awk '/^ARG[[:space:]]+ORT_VERSION=/{
             sub(/^ARG[[:space:]]+ORT_VERSION=/, ""); print; exit
           }' sparrow-engine/docker/Dockerfile.cpu)"
           gpu_ort="$(awk '/^ARG[[:space:]]+ORT_VERSION=/{
             sub(/^ARG[[:space:]]+ORT_VERSION=/, ""); print; exit
           }' sparrow-engine/docker/Dockerfile.gpu)"
-          if [ -z "$cpu_ort" ] || [ -z "$gpu_ort" ]; then
-            echo "::error::could not extract ARG ORT_VERSION from one or both Dockerfiles"
-            echo "  Dockerfile.cpu: '${cpu_ort:-<missing>}'"
-            echo "  Dockerfile.gpu: '${gpu_ort:-<missing>}'"
+          canonical_ort="$(cat sparrow-engine/docker/.ort-version | tr -d '[:space:]')"
+          if [ -z "$cpu_ort" ] || [ -z "$gpu_ort" ] || [ -z "$canonical_ort" ]; then
+            echo "::error::could not extract ORT_VERSION from one of the three sources"
+            echo "  Dockerfile.cpu:           '${cpu_ort:-<missing>}'"
+            echo "  Dockerfile.gpu:           '${gpu_ort:-<missing>}'"
+            echo "  docker/.ort-version:      '${canonical_ort:-<missing>}'"
             exit 2
           fi
-          echo "Dockerfile.cpu ARG ORT_VERSION: $cpu_ort"
-          echo "Dockerfile.gpu ARG ORT_VERSION: $gpu_ort"
-          if [ "$cpu_ort" != "$gpu_ort" ]; then
-            echo "::error::ARG ORT_VERSION drift: Dockerfile.cpu=$cpu_ort, Dockerfile.gpu=$gpu_ort"
-            echo "  -> bump both Dockerfiles atomically; ORT-side ABI must match across CPU and GPU images."
+          echo "Dockerfile.cpu ARG ORT_VERSION:    $cpu_ort"
+          echo "Dockerfile.gpu ARG ORT_VERSION:    $gpu_ort"
+          echo "docker/.ort-version (canonical):   $canonical_ort"
+          if [ "$cpu_ort" != "$gpu_ort" ] || [ "$cpu_ort" != "$canonical_ort" ]; then
+            echo "::error::ORT_VERSION drift: cpu=$cpu_ort, gpu=$gpu_ort, canonical=$canonical_ort"
+            echo "  -> bump docker/.ort-version + both Dockerfile ARG defaults atomically;"
+            echo "     ORT-side ABI must match across CPU and GPU images, and the canonical"
+            echo "     source must agree with both Dockerfile defaults."
             echo "  Refs: docs/review/phase4.5-cleanup-audit-fix-f/round_02/fixer_report.md § F-R2-6"
+            echo "        OQ-2026-05-28-5 (canonical .ort-version hoist)"
             exit 1
           fi
-          echo "PASS: Dockerfile.cpu and Dockerfile.gpu agree on ORT_VERSION=$cpu_ort."
+          echo "PASS: Dockerfile.cpu, Dockerfile.gpu, and docker/.ort-version agree on ORT_VERSION=$cpu_ort."
 
   # -------- CPU build matrix --------
 
