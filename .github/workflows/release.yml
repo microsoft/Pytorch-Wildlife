@@ -109,15 +109,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" != "push" ] || ! [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "Not a tag-push trigger (event=${GITHUB_EVENT_NAME}, ref=${GITHUB_REF}). Skipping check."
+          # Trigger taxonomy (Phase F R2 F-R2-4):
+          #   tag-push       : enforce tag ↔ cli ↔ py three-way agreement (release-critical).
+          #   workflow_dispatch: enforce cli ↔ py two-way agreement (manual release rehearsal
+          #                     — no tag yet, but Cargo/Python must already agree so a follow-up
+          #                     tag-push doesn't blow up).
+          #   branch-push / PR: skip (most common dev case; pre-tag drift is intentional and
+          #                     gets caught at workflow_dispatch / tag-push time).
+          mode=""
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            mode="tag-push"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            mode="workflow-dispatch"
+          else
+            echo "Non-release trigger (event=${GITHUB_EVENT_NAME}, ref=${GITHUB_REF}). Skipping check."
             exit 0
           fi
-          # Strip optional leading 'v' from the tag name. Prerelease tags
-          # (anything with a hyphen) flow through this check too — prerelease
-          # publishes are gated separately downstream, but the version sources
-          # must still agree.
-          tag_version="${GITHUB_REF_NAME#v}"
+          echo "Enforcement mode: $mode"
+          # Strip optional leading 'v' from the tag name. Empty string on
+          # workflow_dispatch (no tag context); tag-version comparisons below
+          # are gated on `mode == tag-push` so the empty value is never read
+          # for enforcement in that path.
+          tag_version=""
+          if [ "$mode" = "tag-push" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+          fi
 
           # sparrow-engine-cli Cargo.toml [package].version — awk-extracted (no python heredoc,
           # no cargo / jq install). Looks for the `version = "..."` line under the `[package]`
@@ -143,21 +159,27 @@ jobs:
             exit 2
           fi
 
-          echo "Tag version (stripped 'v'):           $tag_version"
+          echo "Tag version (stripped 'v'):           ${tag_version:-<n/a — workflow_dispatch>}"
           echo "sparrow-engine-cli Cargo.toml:        $cli_version"
           echo "sparrow-engine-python pyproject.toml: $py_version"
 
           fail=0
-          if [ "$tag_version" != "$cli_version" ]; then
-            echo "::error::tag ($tag_version) ≠ sparrow-engine-cli Cargo.toml ($cli_version)"
-            echo "  -> bump sparrow-engine/sparrow-engine-cli/Cargo.toml [package].version to '$tag_version' before re-tagging."
-            fail=1
+          if [ "$mode" = "tag-push" ]; then
+            if [ "$tag_version" != "$cli_version" ]; then
+              echo "::error::tag ($tag_version) ≠ sparrow-engine-cli Cargo.toml ($cli_version)"
+              echo "  -> bump sparrow-engine/sparrow-engine-cli/Cargo.toml [package].version to '$tag_version' before re-tagging."
+              fail=1
+            fi
+            if [ "$tag_version" != "$py_version" ]; then
+              echo "::error::tag ($tag_version) ≠ sparrow-engine-python pyproject.toml ($py_version)"
+              echo "  -> bump sparrow-engine/sparrow-engine-python/pyproject.toml [project].version to '$tag_version' before re-tagging."
+              fail=1
+            fi
           fi
-          if [ "$tag_version" != "$py_version" ]; then
-            echo "::error::tag ($tag_version) ≠ sparrow-engine-python pyproject.toml ($py_version)"
-            echo "  -> bump sparrow-engine/sparrow-engine-python/pyproject.toml [project].version to '$tag_version' before re-tagging."
-            fail=1
-          fi
+          # cli ↔ py agreement is enforced on BOTH tag-push and workflow_dispatch
+          # (F-R2-4 round-2 fix): a workflow_dispatch release rehearsal must surface
+          # version drift before tag-push time, otherwise the manual dispatch path
+          # gives false-PASS while the eventual tag still fails.
           if [ "$cli_version" != "$py_version" ]; then
             echo "::error::sparrow-engine-cli Cargo.toml ($cli_version) ≠ sparrow-engine-python pyproject.toml ($py_version)"
             fail=1
@@ -166,9 +188,45 @@ jobs:
             echo ""
             echo "FAIL: version consistency guard (Phase F B-03)."
             echo "Refs: docs/review/phase4.5-cleanup-audit-fix-f/round_01/reviewer_review.md § B-03"
+            echo "      docs/review/phase4.5-cleanup-audit-fix-f/round_02/fixer_report.md § F-R2-4"
             exit 1
           fi
-          echo "PASS: all three version sources agree on '$tag_version'."
+          if [ "$mode" = "tag-push" ]; then
+            echo "PASS: all three version sources agree on '$tag_version'."
+          else
+            echo "PASS (workflow_dispatch): cli ↔ py agree on '$cli_version' (tag check skipped — no tag context)."
+          fi
+
+      - name: Compare ORT_VERSION across Dockerfile.cpu and Dockerfile.gpu
+        shell: bash
+        run: |
+          set -euo pipefail
+          # F-R2-6 (round 2): ARG ORT_VERSION is duplicated across the two
+          # Dockerfiles. A future ORT bump must touch both atomically or the
+          # CPU and GPU images drift into different ORT runtimes — which is
+          # the exact root cause B-06/B-07 fixed in round 1. Cheap grep guard
+          # in CI is simpler than refactoring to a shared build-arg source.
+          cpu_ort="$(awk '/^ARG[[:space:]]+ORT_VERSION=/{
+            sub(/^ARG[[:space:]]+ORT_VERSION=/, ""); print; exit
+          }' sparrow-engine/docker/Dockerfile.cpu)"
+          gpu_ort="$(awk '/^ARG[[:space:]]+ORT_VERSION=/{
+            sub(/^ARG[[:space:]]+ORT_VERSION=/, ""); print; exit
+          }' sparrow-engine/docker/Dockerfile.gpu)"
+          if [ -z "$cpu_ort" ] || [ -z "$gpu_ort" ]; then
+            echo "::error::could not extract ARG ORT_VERSION from one or both Dockerfiles"
+            echo "  Dockerfile.cpu: '${cpu_ort:-<missing>}'"
+            echo "  Dockerfile.gpu: '${gpu_ort:-<missing>}'"
+            exit 2
+          fi
+          echo "Dockerfile.cpu ARG ORT_VERSION: $cpu_ort"
+          echo "Dockerfile.gpu ARG ORT_VERSION: $gpu_ort"
+          if [ "$cpu_ort" != "$gpu_ort" ]; then
+            echo "::error::ARG ORT_VERSION drift: Dockerfile.cpu=$cpu_ort, Dockerfile.gpu=$gpu_ort"
+            echo "  -> bump both Dockerfiles atomically; ORT-side ABI must match across CPU and GPU images."
+            echo "  Refs: docs/review/phase4.5-cleanup-audit-fix-f/round_02/fixer_report.md § F-R2-6"
+            exit 1
+          fi
+          echo "PASS: Dockerfile.cpu and Dockerfile.gpu agree on ORT_VERSION=$cpu_ort."
 
   # -------- CPU build matrix --------
 
