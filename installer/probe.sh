@@ -18,6 +18,18 @@
 #       bash installer/probe.sh                # writes verdict to stdout
 #       SPARROW_ENGINE_INSTALL_FLAVOR=gpu bash installer/probe.sh    # honors override
 #
+#   Cache-source form (used by the install.sh wrapper after the Phase E B-01 fix):
+#       # install.sh fetches probe.sh once into a cache dir, then sources it:
+#       probe_path=$(locate_helper probe.sh)        # returns disk path
+#       . "$probe_path"
+#       probe_cuda                                  # caller invokes explicitly
+#       echo "$SPARROW_ENGINE_DETECTED_FLAVOR"
+#
+#   In all source/cache-source modes the standalone-invocation block at the
+#   bottom of this file detects ${BASH_SOURCE[0]} != $0 and SKIPS auto-running
+#   probe_cuda. Auto-run fires only when bash is invoked with probe.sh as the
+#   entry-point argv[0] (e.g. `bash installer/probe.sh`).
+#
 # Env vars set
 #   SPARROW_ENGINE_DETECTED_FLAVOR        cpu | gpu
 #   SPARROW_ENGINE_DETECTED_PROBE_REASON  short string explaining the decision
