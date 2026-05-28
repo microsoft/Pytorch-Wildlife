@@ -65,3 +65,25 @@ dependencies = ["onnxruntime>=1.25.1,<1.26"]
 features = ["extension-module", "cpu"]
 python-source = "python"
 module-name = "sparrow_engine._sparrow_engine_core"
+
+# Phase F audit-fix round 1 (2026-05-28, B-04): NO `[project.scripts]` block.
+#
+# `pip install sparrow-engine` ships the Python API only (`import sparrow_engine`).
+# It does NOT install the `spe` / `spe-gpu` / `sparrow-engine-server` CLI binaries
+# in `$VIRTUAL_ENV/bin/`. Those ship via:
+#   - CLI tarball (`scripts/package_cli_tarball.sh` -> GitHub Release assets,
+#     consumed by `installer/sparrow-engine-install.sh`)
+#   - Homebrew formula (`sparrow-engine`, `sparrow-engine-gpu`)
+#   - Direct `cargo install --path sparrow-engine-cli`
+#
+# Adding `[project.scripts]` here would require a Python `main()` callable, but
+# the Rust CLI binaries are NOT bundled in this wheel — it is a PyO3
+# extension-module wheel (see `tool.maturin.module-name` above). The three
+# rejected alternatives (Python shim that subprocess-execs a system `spe`;
+# split into a maturin `bin`-mode wheel; vendor the binary as wheel data) all
+# either degrade UX or violate Phase 3.8 Phase C wheel-size discipline. Full
+# rationale in `docs/review/phase4.5-cleanup-audit-fix-f/round_01/reviewer_review.md § B-04`.
+#
+# Phase G doc sweep owns updating `docs/install.md` + `docs/master_plan.md` to
+# reflect this (Phase 2.5 functionality-consistency rule is satisfied by
+# Python-API ↔ CLI-subcommand parity, not by pip installing the binary).
