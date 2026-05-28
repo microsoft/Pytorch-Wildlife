@@ -254,7 +254,7 @@ Under the stdin-pipe form the wrapper detects that `$0` is the shell name and sk
 | Clean-room from-source build | Developers; reproducibility | `cd sparrow-engine && ./scripts/build_all_flavors.sh` (workspace root) |
 | GitHub Releases binary | End users; production | `bash installer/sparrow-engine-install.sh --cli` |
 | pip install Python wheel | Notebook + script users (Python API only — no `spe` CLI binary; use the Homebrew, installer, or tarball rows above for the CLI) | `pip install sparrow-engine` (CPU) or `pip install sparrow-engine-gpu` |
-| Docker image pull | Server deployments | `docker pull sparrow-engine:cpu` (or `:gpu`) |
+| Docker image | Server deployments | Build locally from `sparrow-engine/Dockerfile.{cpu,gpu}` OR download pre-built tarballs from Zenodo via `sparrow/scripts/download_sparrow_engine_images.sh` — see §2.8 for the full flow. No `docker pull` from a registry today. |
 
 **Cite**: `docs/install.md § Per-consumer install paths` (lines 163-220); `sparrow-engine/scripts/build_all_flavors.sh`; `installer/homebrew/{sparrow-engine,sparrow-engine-gpu}.rb` + `installer/homebrew/README.md` (Homebrew tap source-of-truth).
 
@@ -345,6 +345,117 @@ ONLINE machine:                        OFFLINE machine:
 **How**: download once from a connected machine; transfer via USB; the wrapper accepts a local `file://` URL via `SPARROW_ENGINE_RELEASE_BASE`.
 
 **Cite**: `docs/install.md § Air-gapped / offline install`.
+
+---
+
+### 2.8 Docker image deployment
+
+Sparrow Engine ships as a self-contained HTTP server in two Docker flavors. Operators running a sparrow stack, or anyone who wants the engine on a remote server, typically use this path.
+
+#### Image inventory
+
+| Image | Compressed download | Loaded size | GPU |
+|---|---|---|---|
+| `sparrow-engine-server:sparrow-combined` | ~43 MB | ~170 MB | CPU only |
+| `sparrow-engine-server-gpu:sparrow-combined` | ~1.5 GB | ~3.7 GB | CUDA 12 + cuDNN bundled; requires NVIDIA Container Toolkit on the host |
+
+Both flavors expose the same 15-route axum HTTP API on port 8080: `/v1/detect`, `/v1/detect/batch`, `/v1/classify`, `/v1/pipeline`, `/v1/detect_audio`, plus `/v1/catalog`, `/v1/models`, `/v1/manifest`, `/healthz`, `/v1/health`, `/openapi.json`, and the inference-log + drift endpoints from Phase 4. See §7 for the full request / response schemas.
+
+#### Why no `docker pull`?
+
+There is no `docker pull sparrow-engine:cpu` or equivalent — `release.yml` does not push images to a container registry (GHCR / Docker Hub / etc.) today. Rationale: the audience that needs Docker is operators deploying the sparrow webapp stack, and that audience already runs the sparrow companion repo which provides a Zenodo-backed download script. Registry publish is tracked at `sparrow-engine-dev:docs/ideas.md § Sparrow Studio Web Integration follow-ups → SW-1` and will land alongside the cross-repo CI auto-PR work.
+
+#### Option A — download pre-built tarballs from Zenodo
+
+Fastest path. ~3 min on a decent link. No build toolchain needed. Uses sparrow companion repo's downloader script which knows the current Zenodo record + expected SHA-256 digests + handles the `docker load` + canonical retag step.
+
+```bash
+git clone https://github.com/Clamps251/sparrow.git
+cd sparrow
+./scripts/download_sparrow_engine_images.sh                 # CPU + GPU (~1.55 GB compressed)
+./scripts/download_sparrow_engine_images.sh --cpu-only       # CPU only (~43 MB compressed)
+./scripts/download_sparrow_engine_images.sh --gpu-only       # GPU only (~1.5 GB compressed)
+./scripts/download_sparrow_engine_images.sh --help           # full flag list
+```
+
+The script:
+1. Downloads `sparrow-engine-{cpu,gpu}-prior-pin-<sha>.tar.zst` from the pinned Zenodo record into `./.sparrow-engine-cache/`
+2. Verifies SHA-256 against the digests recorded in `sparrow-engine/sparrow-engine.version`
+3. `docker load`s each tarball
+4. Retags the loaded image as the canonical `sparrow-engine-server[-gpu]:sparrow-combined` so `docker-compose.yml` finds it
+
+**Pin caveat**: the Zenodo record is refreshed manually per release, not on every commit. The downloader script's hardcoded record reflects whatever sparrow's `sparrow-engine.version` was pinned to when the script last shipped. Check the current pin SHA against this repo's HEAD before trusting the tarballs include the latest fixes; if you need bleeding edge, use Option B.
+
+#### Option B — build from source
+
+~10 min the first time; cached layers on subsequent builds. Always reflects the current source tree at HEAD. Recommended when you need fixes that post-date the latest Zenodo refresh.
+
+```bash
+git clone --branch sparrow-engine-dev https://github.com/microsoft/Pytorch-Wildlife.git
+cd Pytorch-Wildlife/sparrow-engine
+docker build -f docker/Dockerfile.cpu -t sparrow-engine-server:sparrow-combined .
+docker build -f docker/Dockerfile.gpu -t sparrow-engine-server-gpu:sparrow-combined .  # GPU only
+```
+
+The Dockerfiles are multi-stage:
+- `Dockerfile.cpu`: builder stage = `rust:bookworm`; runtime stage = `debian:bookworm-slim` + bundled `libonnxruntime.so.1.25.1`. No CUDA dependencies. Outputs a 170 MB image.
+- `Dockerfile.gpu`: builder stage = `rust:bookworm`; runtime stage = `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` + bundled `libonnxruntime.so.1.25.1` + CUDA provider sidecars. Requires NVIDIA Container Toolkit at run time. Outputs a 3.7 GB image.
+
+ORT version is centralized at `docker/.ort-version` (single source of truth; both Dockerfiles default `ARG ORT_VERSION` agrees with it; CI gate at `release.yml § Compare ORT_VERSION` enforces the 3-way agreement).
+
+#### Run the server
+
+After either Option A or B. The container expects models mounted read-only at `/models` (see [Model zoo](#model-zoo) for the download path).
+
+```bash
+# CPU — minimal
+docker run -d --rm --name sparrow-engine -p 8080:8080 \
+  -v $HOME/.sparrow-engine/models:/models:ro \
+  -e SPARROW_ENGINE_DEVICE=cpu \
+  sparrow-engine-server:sparrow-combined
+
+# GPU — requires NVIDIA Container Toolkit installed on the host
+docker run -d --rm --name sparrow-engine-gpu -p 8080:8080 --gpus all \
+  -v $HOME/.sparrow-engine/models:/models:ro \
+  -e SPARROW_ENGINE_DEVICE=cuda:0 \
+  sparrow-engine-server-gpu:sparrow-combined
+
+# Verify
+curl -fsS http://localhost:8080/healthz
+curl -fsS http://localhost:8080/openapi.json | jq '.paths | keys | length'  # 15
+curl -fsS -X POST -F "image=@test.jpg" "http://localhost:8080/v1/detect?model=MDV6-yolov10-e"
+```
+
+#### Or use the bundled `docker-compose.yml`
+
+Includes Docker-Compose-best-practices defaults: resource limits (4 GB / 4 CPU for CPU, 8 GB / 4 CPU + GPU reservation for GPU), `init: true` for proper signal handling, `restart: unless-stopped`, `read_only: true` filesystem, `no-new-privileges: true`, JSON log rotation (50 MB × 5 files), 30s graceful stop.
+
+```bash
+cd Pytorch-Wildlife/sparrow-engine/docker
+docker compose --profile cpu up -d                # CPU
+docker compose --profile gpu up -d                # GPU (requires nvidia-container-toolkit)
+docker compose --profile cpu logs -f              # tail logs
+docker compose --profile cpu down                 # stop
+```
+
+The Compose file mounts `${SPARROW_ENGINE_MODEL_DIR:-./models}` read-only into the container. Set the env var to point at an absolute models path, or place the models under `sparrow-engine/docker/models/` before bringing the stack up. Both flavors share the same 8080 host port via `profiles:` so only one can run at a time per host.
+
+#### Operator env vars
+
+| Variable | Default | Notes |
+|---|---|---|
+| `SPARROW_ENGINE_DEVICE` | `cpu` / `cuda:0` | Image-dependent — CPU image uses `cpu`; GPU image uses `cuda:0`. Override for multi-GPU hosts. |
+| `SPARROW_ENGINE_MODEL_DIR` | `/models` (inside container) | The Compose file maps the host directory to this path. |
+| `SPARROW_ENGINE_LOG_FORMAT` | `pretty` (Compose) / `json` (raw `docker run`) | `json` for production log aggregation; `pretty` for dev. |
+| `SPARROW_ENGINE_BIND_ADDR` | `0.0.0.0:8080` | Override for non-standard ports. |
+| `SPARROW_ENGINE_LOG_LEVEL` | `info` | `debug` for boot-trace + per-request tracing. |
+
+#### Cross-references
+- Full HTTP API + request/response schemas: §7
+- Server boot lifecycle + cold-start characteristics: §11
+- Sparrow Studio Web stack consumes these images via digest pin: `sparrow/sparrow-engine/sparrow-engine.version` + `sparrow/scripts/sync_sparrow_engine.sh` in the companion repo
+
+**Cite**: `sparrow-engine/docker/{Dockerfile.cpu,Dockerfile.gpu,docker-compose.yml,.ort-version}`; `sparrow/scripts/download_sparrow_engine_images.sh` + `sparrow/sparrow-engine/sparrow-engine.version`.
 
 ---
 

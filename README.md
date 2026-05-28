@@ -125,6 +125,72 @@ environment. Check the installed version with
 See [§6 of the user manual](docs/user-manual.md#6-python-package--sparrow-engine)
 for the full API surface and GPU sidecar options.
 
+### Docker image (server deployments)
+
+Sparrow Engine ships as a self-contained HTTP server in two Docker flavors. Both expose `/v1/detect`, `/v1/classify`, `/v1/detect_audio`, `/healthz`, `/openapi.json` on port 8080.
+
+| Image | Size | GPU |
+|---|---|---|
+| `sparrow-engine-server:sparrow-combined` | ~170 MB | CPU only |
+| `sparrow-engine-server-gpu:sparrow-combined` | ~3.7 GB | CUDA 12 + cuDNN bundled; requires NVIDIA Container Toolkit on the host |
+
+Two ways to get the image. Neither pulls from a container registry — there is no public `docker pull sparrow-engine` because no central registry push is wired into CI (intentional today; see [user manual §2.8](docs/user-manual.md#28-docker-image-deployment) for rationale).
+
+**Option A — download pre-built tarballs from Zenodo** (~3 min on a decent link, no build toolchain needed). Uses the sparrow companion repo's downloader script which knows the current Zenodo record + expected SHA-256 digests:
+
+```bash
+git clone https://github.com/Clamps251/sparrow.git
+cd sparrow
+./scripts/download_sparrow_engine_images.sh                 # CPU + GPU
+./scripts/download_sparrow_engine_images.sh --cpu-only       # CPU only (~43 MB compressed)
+./scripts/download_sparrow_engine_images.sh --gpu-only       # GPU only (~1.5 GB compressed)
+```
+
+The script verifies SHA-256 + `docker load`s + retags as `sparrow-engine-server[-gpu]:sparrow-combined`. **Caveat**: the Zenodo record is refreshed manually per release, not on every commit, so the published tarballs may lag the latest source by one or more releases. The current record's pin commit is recorded in `sparrow/sparrow-engine/sparrow-engine.version` after the download; if you need the absolute latest fixes, use Option B.
+
+**Option B — build from source** (~10 min the first time; cached layers on subsequent builds; always reflects the current source tree):
+
+```bash
+git clone --branch sparrow-engine-dev https://github.com/microsoft/Pytorch-Wildlife.git
+cd Pytorch-Wildlife/sparrow-engine
+docker build -f docker/Dockerfile.cpu -t sparrow-engine-server:sparrow-combined .
+docker build -f docker/Dockerfile.gpu -t sparrow-engine-server-gpu:sparrow-combined .  # GPU
+```
+
+**Run the server** (after either Option A or B). The container expects models mounted read-only at `/models`:
+
+```bash
+# CPU
+docker run -d --rm --name sparrow-engine -p 8080:8080 \
+  -v $HOME/.sparrow-engine/models:/models:ro \
+  -e SPARROW_ENGINE_DEVICE=cpu \
+  sparrow-engine-server:sparrow-combined
+
+# GPU (requires NVIDIA Container Toolkit on the host)
+docker run -d --rm --name sparrow-engine-gpu -p 8080:8080 --gpus all \
+  -v $HOME/.sparrow-engine/models:/models:ro \
+  -e SPARROW_ENGINE_DEVICE=cuda:0 \
+  sparrow-engine-server-gpu:sparrow-combined
+
+# Verify
+curl -fsS http://localhost:8080/healthz
+curl -fsS http://localhost:8080/openapi.json | jq '.paths | keys'
+```
+
+**Or use the bundled `docker-compose.yml`** (resource limits, healthcheck, log rotation, read-only filesystem all pre-configured):
+
+```bash
+cd Pytorch-Wildlife/sparrow-engine/docker
+docker compose --profile cpu up -d        # CPU
+docker compose --profile gpu up -d        # GPU
+docker compose --profile cpu logs -f      # tail logs
+docker compose --profile cpu down         # stop
+```
+
+The Compose file mounts `${SPARROW_ENGINE_MODEL_DIR:-./models}` read-only into the container; set the env var or place models at `sparrow-engine/docker/models/` before bringing the stack up. Models can also be downloaded via the [Model zoo](#model-zoo) section below.
+
+For full HTTP API documentation, request shapes, response schemas, and operator-grade env-var reference: [§7 of the user manual](docs/user-manual.md#7-http-api-server--sparrow-engine-server).
+
 ---
 
 > 📖 **[Read the full user manual →](docs/user-manual.md)**
