@@ -8,6 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Phase 4.5 audit-fix Phase F (CI + Docker + release plumbing) — Round 1**
+  2026-05-28 (HEAD `3052a70`, `6c6bbaf`); Round 2 hardening 2026-05-28.
+  - **B-03**: new `check-version-consistency` preflight job in `.github/workflows/release.yml`
+    enforces `git tag ↔ sparrow-engine-cli/Cargo.toml [package].version ↔
+    sparrow-engine-python/pyproject.toml [project].version` agreement on tag-push.
+    Round 2 (F-R2-4) extended enforcement to `workflow_dispatch` for the cli ↔ py pair
+    so manual release rehearsals catch drift before tag-push time. All 8 release build
+    jobs gain `needs: check-version-consistency`. `scripts/package_cli_tarball.sh`
+    defaults VERSION from `cargo metadata` on `sparrow-engine-cli/Cargo.toml` when the
+    caller doesn't set it, anchoring the tarball name on the same SSOT.
+  - **B-04**: PyPI wheels (`sparrow-engine`, `sparrow-engine-gpu`) are decided Python-API
+    only — the CLI binaries (`spe`, `spe-gpu`) and `sparrow-engine-server` do NOT ship
+    via `pip`. Decision rationale in `sparrow-engine-python/pyproject.toml` `[tool.maturin]`
+    comment (3 alternatives investigated, rejected on wheel-size + per-platform-binary
+    grounds). Round 2 (F-R2-2) extended `[project].description` with the warning so the
+    routing is visible on the PyPI project page; install via brew, system installer
+    (`sparrow-engine-install.{sh,ps1}`), or GitHub Release tarball.
+  - **B-06**: CPU Docker image (`docker/Dockerfile.cpu`) — bumped `ARG ORT_VERSION`
+    from `1.24.2` → `1.25.1` (aligns with `onnxruntime>=1.25.1,<1.26` pin in
+    `pyproject.toml` and the `api-24` ORT API the `sparrow-engine-cpu` Rust binding
+    requires post commit `5c86dbf`). Added
+    `RUN ln -sf libonnxruntime.so.1 /usr/local/lib/libonnxruntime.so && ldconfig`
+    after the existing `RUN ldconfig` so `dlopen("libonnxruntime.so")` (bare unversioned
+    name emitted by `ort/load-dynamic` when `ORT_DYLIB_PATH` is unset) resolves via
+    `/usr/local/lib` filesystem search. Symlink anchored on the ldconfig-managed SONAME
+    `libonnxruntime.so.1` — version-bump-resilient.
+  - **B-07**: GPU Docker image (`docker/Dockerfile.gpu`) — same ORT bump `1.24.2` →
+    `1.25.1` (root cause identical to B-06: `api-24` Rust binding ↔ ORT 1.24.2 runtime
+    mismatch caused the GPU server to boot and list models, then silently spin on the
+    first CUDA EP / Session creation call). Same defensive
+    `ln -sf libonnxruntime.so.1 /usr/local/lib/libonnxruntime.so && ldconfig` for parity
+    with B-06. Round 2 verified end-to-end via CPU + GPU image rebuilds + `/health` smoke
+    + GPU `POST /v1/detect` against MDv6 — see
+    `docs/review/phase4.5-cleanup-audit-fix-f/round_02/docker_smoke_results.txt`.
+  - **F-R2-6** (round 2): new `check-version-consistency` step asserts
+    `ARG ORT_VERSION` matches across `Dockerfile.cpu` and `Dockerfile.gpu`. Cheap grep
+    guard against future ORT-bump drift (root cause family for B-06/B-07).
+  - **build.sh / package_cli_tarball.sh observability** (round 1 `6c6bbaf`):
+    `build.sh` post-build prints `[project.scripts]` entry-point names extracted from
+    the built wheel via `wheel unpack` (returns 0 on absence — pure diagnostic).
+    `package_cli_tarball.sh` defaults `VERSION` from `cargo metadata` when unset
+    (CI callers pass explicit VERSION; the default keeps local invocations consistent).
+
 ### Changed
 
 - **Phase 4 (Sparrow Engine-side data primitives for sibling integration) substantively complete**
