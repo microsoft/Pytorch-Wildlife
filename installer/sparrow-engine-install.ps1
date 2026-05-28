@@ -45,18 +45,24 @@ param(
 
 # ----- Constants ---------------------------------------------------------
 
-$Script:SparrowEngineVersion       = if ($Version) { $Version } elseif ($env:SPARROW_ENGINE_VERSION) { $env:SPARROW_ENGINE_VERSION } else { '0.1.0' }
+$Script:SparrowEngineVersion       = if ($Version) { $Version } elseif ($env:SPARROW_ENGINE_VERSION) { $env:SPARROW_ENGINE_VERSION } else { '0.1.12' }
 $Script:InstallRoot        = Join-Path $env:LOCALAPPDATA 'Programs\sparrow-engine'         # %LocalAppData%\Programs\sparrow-engine
 $Script:UserSparrowEngineDir       = Join-Path $env:USERPROFILE '.sparrow-engine'                  # state file + RC sentinel home
 $Script:StateFile          = Join-Path $Script:UserSparrowEngineDir 'installed.json'
 $Script:SentinelStart      = '# >>> sparrow-engine >>>'
 $Script:SentinelEnd        = '# <<< sparrow-engine <<<'
-# Dev default mirrors sparrow-engine-install.sh's SPARROW_ENGINE_RELEASE_BASE_DEFAULT
-# (`file:///tmp/sparrow-engine-release/v{ver}`) — symmetric `file://` fallback
-# so the dev workflow is the same on Linux/macOS and Windows. Public
-# hosting (`https://...`) lights up post-R3 per
-# `docs/release_dev_plan.md § R3`. PS1 inquisitor LOW-5 / lead D-4.
-$Script:DefaultReleaseBase = ('file:///{0}/sparrow-engine-release/v{1}/' -f ($env:TEMP -replace '\\','/'), $Script:SparrowEngineVersion)
+# Default release base = public GH Releases asset URL (Phase E B-02 fix; was
+# `file:///%TEMP%/sparrow-engine-release/v{ver}/` dev placeholder). Honors
+# `$env:SPARROW_ENGINE_RELEASE_BASE` for staging mirrors / internal proxies.
+$Script:DefaultReleaseBase = "https://github.com/microsoft/Pytorch-Wildlife/releases/download/v$Script:SparrowEngineVersion/"
+# Helper-script base = immutable raw-tag path. Helper scripts (probe.ps1,
+# probe_gpu_quality.ps1) live in the tagged source tree, NOT as release
+# assets. E-R2-1 fix. Override via `$env:SPARROW_ENGINE_HELPER_BASE`.
+$Script:DefaultHelperBase  = "https://raw.githubusercontent.com/microsoft/Pytorch-Wildlife/refs/tags/v$Script:SparrowEngineVersion/installer/"
+# Helper-script cache dir for piped install (B-01) — used when invoked via
+# `iex (irm <url>)` and no probe.ps1 / probe_gpu_quality.ps1 exists on disk
+# next to the wrapper.
+$Script:HelperCacheDir     = Join-Path $env:LOCALAPPDATA ("sparrow-engine\cache\v" + $Script:SparrowEngineVersion)
 
 # ----- Logging ------------------------------------------------------------
 
@@ -74,17 +80,53 @@ function Die {
 
 function Get-ScriptDir {
     if ($PSScriptRoot) { return $PSScriptRoot }
-    return (Split-Path -Parent $MyInvocation.MyCommand.Path)
+    if ($MyInvocation.MyCommand.Path) {
+        return (Split-Path -Parent $MyInvocation.MyCommand.Path)
+    }
+    return $null
+}
+
+# Resolve a helper script (probe.ps1, probe_gpu_quality.ps1) — either
+# co-located on disk next to this wrapper (disk install) OR fetched once
+# from the release URL into $Script:HelperCacheDir (piped install via
+# `iex (irm <url>)`). Phase E B-01 fix: piped invocation previously failed
+# because $PSScriptRoot is empty when invoked as a script block.
+# The fetch path uses Get-ReleaseBase which honors $env:SPARROW_ENGINE_RELEASE_BASE.
+# Returns the absolute resolved path; throws via Die on failure.
+function Resolve-Helper {
+    param([Parameter(Mandatory)][string]$Name)
+
+    $scriptDir = Get-ScriptDir
+    if ($scriptDir) {
+        $localPath = Join-Path $scriptDir $Name
+        if (Test-Path -LiteralPath $localPath) { return $localPath }
+    }
+
+    $cachePath = Join-Path $Script:HelperCacheDir $Name
+    if (Test-Path -LiteralPath $cachePath) { return $cachePath }
+
+    $base = Get-HelperBase
+    $url = "$base$Name"
+    if (-not (Test-Path -LiteralPath $Script:HelperCacheDir)) {
+        New-Item -ItemType Directory -Force -Path $Script:HelperCacheDir | Out-Null
+    }
+    $tmpPath = "$cachePath.tmp"
+    Write-Info "fetching $Name from $url"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $tmpPath -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop | Out-Null
+    } catch {
+        if (Test-Path -LiteralPath $tmpPath) { Remove-Item -LiteralPath $tmpPath -Force -ErrorAction SilentlyContinue }
+        Die 4 "failed to fetch $Name from $url (piped install fallback; download install.ps1 + probe.ps1 + probe_gpu_quality.ps1 from the same tag and run from disk if your network blocks raw.githubusercontent.com): $($_.Exception.Message)"
+    }
+    Move-Item -LiteralPath $tmpPath -Destination $cachePath -Force
+    return $cachePath
 }
 
 function Invoke-Probe {
-    # Dot-source installer/probe.ps1 (sibling file). probe_cuda sets
-    # $env:SPARROW_ENGINE_DETECTED_FLAVOR + $env:SPARROW_ENGINE_DETECTED_PROBE_REASON and
+    # Dot-source installer/probe.ps1 (sibling file or fetched cache copy).
+    # probe_cuda sets $env:SPARROW_ENGINE_DETECTED_FLAVOR + reason and
     # writes 'cpu' or 'gpu' to the pipeline.
-    $probe = Join-Path (Get-ScriptDir) 'probe.ps1'
-    if (-not (Test-Path -LiteralPath $probe)) {
-        Die 8 "probe.ps1 not found beside sparrow-engine-install.ps1 (looked at $probe)."
-    }
+    $probe = Resolve-Helper -Name 'probe.ps1'
     . $probe
     if (-not (Get-Command -Name probe_cuda -ErrorAction SilentlyContinue)) {
         Die 8 "probe.ps1 did not define probe_cuda; cannot resolve flavor."
@@ -125,10 +167,7 @@ function Test-GpuQuality {
     if ($ResolvedFlavor -ne 'gpu') {
         return
     }
-    $probeQ = Join-Path (Get-ScriptDir) 'probe_gpu_quality.ps1'
-    if (-not (Test-Path -LiteralPath $probeQ)) {
-        Die 8 "probe_gpu_quality.ps1 not found beside sparrow-engine-install.ps1 (looked at $probeQ)."
-    }
+    $probeQ = Resolve-Helper -Name 'probe_gpu_quality.ps1'
     . $probeQ
     if (-not (Get-Command -Name probe_gpu_quality -ErrorAction SilentlyContinue)) {
         Die 8 "probe_gpu_quality.ps1 did not define probe_gpu_quality."
@@ -161,11 +200,18 @@ function Resolve-Mode {
 # ----- Release URL -------------------------------------------------------
 
 function Get-ReleaseBase {
-    # Returns the URL prefix. Defaults to `file:///%TEMP%/sparrow-engine-release/...`
-    # (dev path; mirrors sparrow-engine-install.sh SPARROW_ENGINE_RELEASE_BASE_DEFAULT).
-    # The exit-14 fence (SPARROW_ENGINE_RELEASE_BASE unset AND dev tarball absent)
-    # fires inside Install-CliFlavor below, after the tarball name is known.
+    # Returns the URL prefix. Defaults to the public GH Releases asset URL
+    # (Phase E B-02 fix). Operator override via $env:SPARROW_ENGINE_RELEASE_BASE.
     $base = if ($env:SPARROW_ENGINE_RELEASE_BASE) { $env:SPARROW_ENGINE_RELEASE_BASE } else { $Script:DefaultReleaseBase }
+    if (-not $base.EndsWith('/')) { $base += '/' }
+    return $base
+}
+
+function Get-HelperBase {
+    # Returns the URL prefix for helper scripts (probe.ps1, probe_gpu_quality.ps1).
+    # Distinct from Get-ReleaseBase: helpers live in the tagged source tree,
+    # not as release assets. E-R2-1 fix. Override via $env:SPARROW_ENGINE_HELPER_BASE.
+    $base = if ($env:SPARROW_ENGINE_HELPER_BASE) { $env:SPARROW_ENGINE_HELPER_BASE } else { $Script:DefaultHelperBase }
     if (-not $base.EndsWith('/')) { $base += '/' }
     return $base
 }
@@ -343,18 +389,6 @@ function Install-CliFlavor {
     $tarball = "sparrow-engine-$ResolvedFlavor-$Script:SparrowEngineVersion-$($oa.Os)-$($oa.Arch).zip"
     $url = "$base$tarball"
     $sha = "$url.sha256"
-
-    # Fence against unset SPARROW_ENGINE_RELEASE_BASE before public hosting (exit 14).
-    # Mirrors sparrow-engine-install.sh::install_cli_binary lines 483-490.
-    if (-not $env:SPARROW_ENGINE_RELEASE_BASE) {
-        # Strip `file:///` prefix and convert forward-slashes back to native
-        # for the on-disk existence check.
-        $devUrlNoScheme = $base -replace '^file:///', ''
-        $devTarballNative = (Join-Path ($devUrlNoScheme -replace '/','\') $tarball)
-        if (-not (Test-Path -LiteralPath $devTarballNative)) {
-            Die 14 "SPARROW_ENGINE_RELEASE_BASE unset and no public release URL has shipped yet (dev default $devTarballNative missing)."
-        }
-    }
 
     if ($DryRun) { Write-Info "[dry-run] would download $url + verify sha256 + extract to $Script:InstallRoot"; return }
     $staging = Join-Path $env:TEMP ("sparrow-engine-stage-" + [Guid]::NewGuid().ToString('N'))

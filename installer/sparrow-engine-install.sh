@@ -20,10 +20,27 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # Constants
 # -----------------------------------------------------------------------------
-SPARROW_ENGINE_VERSION="0.1.0"
+# SPARROW_ENGINE_VERSION is the pinned default release tag. Bumped per
+# Phase F release-CI step on every published GH Release (`vX.Y.Z`). The
+# `SPARROW_ENGINE_VERSION` env var overrides this for advanced users
+# wanting to install an older or newer release.
+SPARROW_ENGINE_VERSION="${SPARROW_ENGINE_VERSION:-0.1.12}"
 SPARROW_ENGINE_PREFIX="${SPARROW_ENGINE_PREFIX:-$HOME/.sparrow-engine}"
 SPARROW_ENGINE_STATE_FILE="$SPARROW_ENGINE_PREFIX/installed.json"
-SPARROW_ENGINE_RELEASE_BASE_DEFAULT="file:///tmp/sparrow-engine-release/v${SPARROW_ENGINE_VERSION}"
+# Default release base = public GH Releases asset URL. Phase E B-02 fix
+# (was: file:///tmp/sparrow-engine-release/v${ver}). Operator override via
+# `SPARROW_ENGINE_RELEASE_BASE=<url>` (staging mirror / internal proxy).
+SPARROW_ENGINE_RELEASE_BASE_DEFAULT="https://github.com/microsoft/Pytorch-Wildlife/releases/download/v${SPARROW_ENGINE_VERSION}"
+# Helper-script base = immutable raw-tag path. Helper scripts (probe.sh,
+# probe_gpu_quality.sh) are NOT published as release assets — they only
+# live in the tagged source tree. Phase E round-2 fix for E-R2-1 (the
+# release_base()/probe.sh URL returned 404). Operator override via
+# `SPARROW_ENGINE_HELPER_BASE=<url>` for testing against a local mirror.
+SPARROW_ENGINE_HELPER_BASE_DEFAULT="https://raw.githubusercontent.com/microsoft/Pytorch-Wildlife/refs/tags/v${SPARROW_ENGINE_VERSION}/installer"
+# Helper-script cache dir for piped install (B-01). Used when the wrapper
+# is invoked via `curl ... | sh` / `bash <(curl ...)` and no probe.sh /
+# probe_gpu_quality.sh exists on disk next to the wrapper.
+SPARROW_ENGINE_HELPER_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/sparrow-engine/v${SPARROW_ENGINE_VERSION}"
 SENTINEL_BEGIN="# >>> sparrow-engine >>>"
 SENTINEL_END="# <<< sparrow-engine <<<"
 
@@ -122,7 +139,6 @@ Exit codes (canonical: docs/design/phase4.1-install-selector/final_design.md §2
   11 cuDNN <9.10 (driver layer-2 probe failure)
   12 Cross-flavor install attempted without --reprobe
   13 Manual rc-file edit detected without --force-rc-overwrite
-  14 SPARROW_ENGINE_RELEASE_BASE unset and no public hosting yet
 
 See docs/install.md for the user guide.
 EOF
@@ -214,12 +230,11 @@ resolve_flavor() {
         # Honor --flavor auto: ignore SPARROW_ENGINE_INSTALL_FLAVOR env so probe runs.
         unset SPARROW_ENGINE_INSTALL_FLAVOR
 
-        # probe.sh is owned by coder-probe; we source it.
+        # probe.sh is owned by coder-probe; we source it. Resolved via
+        # locate_helper to support both disk install (adjacent on disk) and
+        # piped install (`curl ... | sh`) — see locate_helper definition.
         local probe_path
-        probe_path="$(dirname "$0")/probe.sh"
-        if [ ! -f "$probe_path" ]; then
-            die 1 "probe.sh not found at $probe_path (expected co-located with sparrow-engine-install.sh)"
-        fi
+        probe_path=$(locate_helper probe.sh)
 
         # Source the probe; it defines probe_cuda which echoes "cpu" or "gpu"
         # AND exports SPARROW_ENGINE_DETECTED_FLAVOR + SPARROW_ENGINE_DETECTED_PROBE_REASON.
@@ -278,10 +293,7 @@ gpu_quality_check() {
         return 0
     fi
     local probeq_path
-    probeq_path="$(dirname "$0")/probe_gpu_quality.sh"
-    if [ ! -f "$probeq_path" ]; then
-        die 1 "probe_gpu_quality.sh not found at $probeq_path (expected co-located with sparrow-engine-install.sh)"
-    fi
+    probeq_path=$(locate_helper probe_gpu_quality.sh)
     # shellcheck source=installer/probe_gpu_quality.sh
     # shellcheck disable=SC1091
     . "$probeq_path"
@@ -438,15 +450,86 @@ install_python_wheel() {
 release_base() {
     local rb="${SPARROW_ENGINE_RELEASE_BASE:-}"
     if [ -z "$rb" ]; then
-        # No public URL has shipped yet (final_design §2.7 + exit-14 contract).
-        # Fall through to the dev default (file:///tmp/...) — tarball-not-found
-        # surfaces as a download error with code 4 rather than 14.
-        # If a future release keeps the placeholder unset AND the dev tarball is
-        # absent, exit 14 fires from the explicit-check below.
+        # Default = public GH Releases asset URL (Phase E B-02 fix; was
+        # file:///tmp/... dev placeholder). Honors operator override via
+        # SPARROW_ENGINE_RELEASE_BASE for staging mirrors / internal proxies.
         rb="$SPARROW_ENGINE_RELEASE_BASE_DEFAULT"
     fi
     # Strip trailing slashes for consistent join.
     printf '%s' "${rb%/}"
+}
+
+# Helper-script base URL. Distinct from release_base() because helper
+# scripts live in the tagged source tree (raw.githubusercontent.com), not
+# as release assets. E-R2-1 fix.
+helper_base() {
+    local hb="${SPARROW_ENGINE_HELPER_BASE:-}"
+    if [ -z "$hb" ]; then
+        hb="$SPARROW_ENGINE_HELPER_BASE_DEFAULT"
+    fi
+    printf '%s' "${hb%/}"
+}
+
+# Resolve a helper script (probe.sh, probe_gpu_quality.sh) — either
+# co-located on disk next to this wrapper (disk install) OR fetched once
+# from the release URL into $SPARROW_ENGINE_HELPER_CACHE (piped install via
+# `curl ... | sh` / `bash <(curl ...)`). Phase E B-01 fix: piped invocation
+# previously failed with "probe.sh not found at /dev/fd/probe.sh" because
+# dirname "$0" pointed at the process-substitution fd, not the source repo.
+# The fetch path uses release_base() which honors SPARROW_ENGINE_RELEASE_BASE
+# — no manual env-var setup required for the default GH Releases URL.
+# Prints the absolute resolved path to stdout.
+locate_helper() {
+    local name=$1
+    local local_path cache_path hb url ua self self_base
+    # E-R2-2 fix: only consult the on-disk adjacent file when $0 points at a
+    # real file path. Under piped invocation (`curl ... | sh`,
+    # `bash <(curl ...)`) $0 is the shell name (`bash`, `/bin/sh`, `-bash`)
+    # and dirname "$0" is `.` — sourcing `./probe.sh` from the user's cwd
+    # would execute an unrelated / stale / hostile script. Skip the disk
+    # leg entirely in that case and go straight to cache/fetch.
+    self=$0
+    if [ -f "$self" ]; then
+        case "$(basename -- "$self")" in
+            bash|sh|-bash|-sh|dash|zsh)
+                # Defensive: a sourced wrapper can leave $0 = bash but still
+                # be a real file. Treat as piped.
+                self_base=""
+                ;;
+            *)
+                self_base="$(dirname -- "$self")"
+                ;;
+        esac
+    else
+        self_base=""
+    fi
+    if [ -n "$self_base" ]; then
+        local_path="$self_base/$name"
+        if [ -f "$local_path" ]; then
+            printf '%s' "$local_path"
+            return 0
+        fi
+    fi
+    cache_path="$SPARROW_ENGINE_HELPER_CACHE/$name"
+    if [ -f "$cache_path" ]; then
+        printf '%s' "$cache_path"
+        return 0
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        die 8 "$name not found on disk and curl unavailable for fallback fetch"
+    fi
+    hb=$(helper_base)
+    url="$hb/$name"
+    ua="sparrow-engine-install/${SPARROW_ENGINE_VERSION} (${OS:-unknown}/${ARCH:-unknown})"
+    mkdir -p "$SPARROW_ENGINE_HELPER_CACHE"
+    say "fetching $name from $url" >&2
+    if ! curl -fsSL -A "$ua" --connect-timeout 10 --max-time 60 \
+              -o "$cache_path.tmp" "$url"; then
+        rm -f "$cache_path.tmp"
+        die 4 "failed to fetch $name from $url (piped install fallback; download install.sh + probe.sh + probe_gpu_quality.sh from the same tag and run from disk if your network blocks raw.githubusercontent.com)"
+    fi
+    mv "$cache_path.tmp" "$cache_path"
+    printf '%s' "$cache_path"
 }
 
 # Atomic-ish HTTP fetch with retry. Permanent-4xx aborts; transient retries.
@@ -532,16 +615,6 @@ install_cli_binary() {
     sha_file="${tarball}.sha256"
     url="${rb}/${tarball}"
     sha_url="${rb}/${sha_file}"
-
-    # Fence against unset SPARROW_ENGINE_RELEASE_BASE before public hosting (exit 14).
-    if [ -z "${SPARROW_ENGINE_RELEASE_BASE:-}" ]; then
-        # Dev default is file:///tmp/...; if the file isn't there, surface 14 early.
-        local dev_path
-        dev_path="${SPARROW_ENGINE_RELEASE_BASE_DEFAULT#file://}/${tarball}"
-        if [ ! -f "$dev_path" ]; then
-            die 14 "SPARROW_ENGINE_RELEASE_BASE unset and no public release URL has shipped yet (dev default $dev_path missing)"
-        fi
-    fi
 
     if [ "$dry_run" -eq 1 ]; then
         say "[dry-run] would fetch $url"

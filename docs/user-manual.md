@@ -191,7 +191,17 @@ The following constraints are baked into the engine. If you onboard a new model,
 **What**: from a clone of the repo, run the wrapper with no flags; it auto-picks flavor.
 **How**: the wrapper writes binaries to `~/.sparrow-engine/bin/` and (if Python is active) installs the matching wheel into that environment.
 
-**Footgun**: the `curl … | sh` and `iwr … | iex` one-liners DO NOT WORK today (the wrapper resolves `probe.sh` relative to `$0`, which becomes `bash` under stdin pipes). Use the local-clone form. Tracked for post-public-release.
+**Piped one-liner** (as of v0.1.13+; works on macOS / Linux / Windows):
+
+```
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/microsoft/Pytorch-Wildlife/refs/tags/v0.1.13/installer/sparrow-engine-install.sh | bash
+
+# Windows
+iwr -useb https://raw.githubusercontent.com/microsoft/Pytorch-Wildlife/refs/tags/v0.1.13/installer/sparrow-engine-install.ps1 | iex
+```
+
+Under the stdin-pipe form the wrapper detects that `$0` is the shell name and skips the on-disk lookup; it fetches `probe.sh` + `probe_gpu_quality.sh` from the matching `refs/tags/v<ver>/installer/` raw URL into `${XDG_CACHE_HOME:-~/.cache}/sparrow-engine/v<ver>/` (Linux/macOS) or `%LOCALAPPDATA%\sparrow-engine\cache\v<ver>\` (Windows) on first invocation. Override the helper URL via `SPARROW_ENGINE_HELPER_BASE` for internal mirrors.
 
 ---
 
@@ -312,7 +322,6 @@ python -c "import sparrow_engine; sparrow_engine.Engine(...)"
 | 9 | Platform unsupported (e.g., GPU on macOS) |
 | 11 | cuDNN < 9.10 — BLOCKING; see Gotchas §13.1 |
 | 12 | Cross-flavor install attempted without `--reprobe` |
-| 14 | `SPARROW_ENGINE_RELEASE_BASE` unset (pre-public-release) |
 
 **Cite**: `docs/install.md § Error message catalog`.
 
