@@ -619,6 +619,45 @@ fn dirs_default_model_dir() -> PathBuf {
     }
 }
 
+/// First-user hint shown when the resolved model directory is missing or empty.
+/// Hardcoded URL + DOI (no env var workaround) so the message stays self-contained
+/// and copy-pasteable on a fresh box. Bootstrap script lives in the sparrow-engine-dev
+/// branch of microsoft/Pytorch-Wildlife.
+const BOOTSTRAP_HINT: &str = "First run? Populate the model directory:\n  \
+    bash -c \"$(curl -fsSL https://raw.githubusercontent.com/microsoft/Pytorch-Wildlife/sparrow-engine-dev/sparrow-engine/scripts/download_models.sh)\"\n\n\
+    Or set SPARROW_ENGINE_MODEL_DIR to an existing model directory.\n\
+    (Zenodo v0.4.0 bundle: https://doi.org/10.5281/zenodo.20360316)";
+
+/// Surface an actionable error when the resolved model directory is missing or
+/// contains no per-model `manifest.toml`. Intercepts BEFORE `Engine::new`, so the
+/// user gets a setup hint instead of a cryptic `Model manifest not found: …`
+/// from the engine's typed error.
+fn check_model_dir_populated(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if !dir.exists() {
+        return Err(format!(
+            "No models found: directory does not exist: {}\n\n{}",
+            dir.display(),
+            BOOTSTRAP_HINT
+        )
+        .into());
+    }
+    let has_manifest = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .any(|e| e.path().join("manifest.toml").is_file())
+        })
+        .unwrap_or(false);
+    if !has_manifest {
+        return Err(format!(
+            "No models found in {}.\n\n{}",
+            dir.display(),
+            BOOTSTRAP_HINT
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// Create an Engine with the given global options.
 fn create_engine(
     device_str: &str,
@@ -626,6 +665,7 @@ fn create_engine(
 ) -> Result<Engine, Box<dyn std::error::Error>> {
     let device = parse_device(device_str)?;
     let dir = resolve_model_dir(model_dir);
+    check_model_dir_populated(&dir)?;
     let config = EngineConfig::new(device, dir);
     let engine = Engine::new(config)?;
     Ok(engine)
