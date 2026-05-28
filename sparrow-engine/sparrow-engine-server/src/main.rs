@@ -10,10 +10,26 @@ use clap::Parser;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
+mod ort_resolver;
+
 /// Sync entry point. Parse argv with `clap` BEFORE building a tokio runtime
 /// so `--help` / `--version` / `-h` / `-V` exit cleanly without spinning up
 /// the runtime, ORT, the model catalog, or a TCP listener (MT-4.1-26).
 fn main() {
+    // Phase D round-2 B-09 root-cause fix: locate + set ORT_DYLIB_PATH from
+    // the tarball/wheel `lib/` directory BEFORE clap parsing (which is
+    // cheap, but symmetric with the CLI placement) and BEFORE any
+    // `Engine::new` call (which triggers `Session::builder()` → ORT
+    // dlopen). When the binary is launched from an RP-4 tarball layout or
+    // a Docker image with the bundled dylib, this avoids the silent
+    // dlopen retry loop that Lane 5 reported as a deadlock.
+    //
+    // No-op when ORT_DYLIB_PATH is already set (dev `source
+    // scripts/ort-env.sh`), when `current_exe()` doesn't sit in a
+    // `bin/`-next-to-`lib/` layout (e.g. `cargo run`), or when no
+    // `libonnxruntime` is found in the resolved `lib/`.
+    ort_resolver::init_ort_env();
+
     let cli = Cli::parse();
     boot_trace("after cli parse");
 
