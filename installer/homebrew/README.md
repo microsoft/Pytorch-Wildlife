@@ -11,11 +11,12 @@ the rest of the codebase.
   the `spe` binary with bundled `libonnxruntime`.
 - `sparrow-engine-gpu.rb` — GPU formula. brew-Linux x86_64 only. Ships
   `spe-gpu` with bundled `libonnxruntime` + ORT CUDA provider sidecars.
-  Adds a wrapper script that auto-discovers ALL 6 required CUDA sidecar
-  libs (`libcudnn.so.9`, `libnvjpeg.so.12`, `libnvrtc.so.12`,
+  Adds a wrapper script that auto-discovers all 8 required CUDA sidecar
+  SONAMEs (`libcudnn.so.9`, `libnvjpeg.so.12`, `libnvrtc.so.12`,
   `libcudart.so.12`, `libcublas.so.12` + `libcublasLt.so.12`,
-  `libcurand.so.10`, `libcufft.so.11`) from common host locations at
-  startup (no `LD_LIBRARY_PATH` manual setup required).
+  `libcurand.so.10`, `libcufft.so.11`) — 7 pip packages, since `libcublas`
+  and `libcublasLt` ship together in `nvidia-cublas-cu12` — from common
+  host locations at startup (no `LD_LIBRARY_PATH` manual setup required).
 
 Both formulas point at the GH Release tarballs produced by RP-4
 (`.github/workflows/release.yml § build-cli-*` + `publish-cli-release-assets`).
@@ -43,8 +44,9 @@ share the model cache at `~/.sparrow-engine/models/`.
 ## The wrapper script (GPU only)
 
 `brew install sparrow-engine-gpu` generates `bin/spe-gpu` as a small
-POSIX shell wrapper (not a symlink) that auto-discovers ALL 6 hard-
-required CUDA sidecar libraries before `exec`'ing the real binary at
+POSIX shell wrapper (not a symlink) that auto-discovers all 8 hard-
+required CUDA sidecar SONAMEs (across 7 pip packages — see table below)
+before `exec`'ing the real binary at
 `libexec/bin/spe-gpu`. The discovery loop covers, per library, the same
 9 candidate locations (pip wheel under `~/.sparrow-engine/cuda-sidecars`,
 PyTorch / TensorFlow / JAX bundles, system CUDA, apt, HPC, RHEL). The
@@ -64,13 +66,13 @@ Required libs (matches `probe_gpu_quality.sh:144-150`):
 | `nvidia-cufft-cu12`             | `libcufft.so.11`   |
 
 Override the search via `SPARROW_ENGINE_CUDA_LIB_DIR=/some/path
-spe-gpu …` — the wrapper skips auto-discovery for all 6 libs when this
+spe-gpu …` — the wrapper skips auto-discovery for all 8 SONAMEs when this
 env var is set. Brew rewrites the wrapper on every `(re)install`; do
 NOT edit it in place.
 
-Full caveats block (with the 9 location list and the 6-lib table)
-appears at the end of `brew install` output, or run `brew info
-sparrow-engine-gpu`.
+Full caveats block (with the 9 location list and the 7-package /
+8-SONAME table) appears at the end of `brew install` output, or run
+`brew info sparrow-engine-gpu`.
 
 ## Bootstrapping the tap repo (one-time, operator action — DONE 2026-05-27)
 

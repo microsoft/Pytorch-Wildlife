@@ -156,7 +156,10 @@ bash scripts/download_models.sh --dest /custom/path
 Point Sparrow Engine at the directory (only needed if you used `--dest`; the default location is auto-detected):
 
 ```bash
+# Default path (auto-detected — env var only needed if you want to be explicit):
 export SPARROW_ENGINE_MODEL_DIR=$(realpath ~/.sparrow-engine/models)
+# Custom path (required if you used `--dest /opt/sparrow-models`):
+export SPARROW_ENGINE_MODEL_DIR=/opt/sparrow-models
 spe models list                                 # confirms catalog discovery
 spe detect --model MDV6-yolov10-e --print image.jpg
 ```
