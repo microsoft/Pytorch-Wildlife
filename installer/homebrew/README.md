@@ -11,9 +11,11 @@ the rest of the codebase.
   the `spe` binary with bundled `libonnxruntime`.
 - `sparrow-engine-gpu.rb` — GPU formula. brew-Linux x86_64 only. Ships
   `spe-gpu` with bundled `libonnxruntime` + ORT CUDA provider sidecars.
-  Adds a wrapper script that auto-discovers `libcudnn.so.9` +
-  `libnvjpeg.so.12` from common host locations at startup (no
-  `LD_LIBRARY_PATH` manual setup required).
+  Adds a wrapper script that auto-discovers ALL 6 required CUDA sidecar
+  libs (`libcudnn.so.9`, `libnvjpeg.so.12`, `libnvrtc.so.12`,
+  `libcudart.so.12`, `libcublas.so.12` + `libcublasLt.so.12`,
+  `libcurand.so.10`, `libcufft.so.11`) from common host locations at
+  startup (no `LD_LIBRARY_PATH` manual setup required).
 
 Both formulas point at the GH Release tarballs produced by RP-4
 (`.github/workflows/release.yml § build-cli-*` + `publish-cli-release-assets`).
@@ -41,19 +43,34 @@ share the model cache at `~/.sparrow-engine/models/`.
 ## The wrapper script (GPU only)
 
 `brew install sparrow-engine-gpu` generates `bin/spe-gpu` as a small
-POSIX shell wrapper (not a symlink) that auto-discovers
-`libcudnn.so.9` + `libnvjpeg.so.12` from 7 common cuDNN locations and 4
-common nvJPEG locations before `exec`'ing the real binary at
-`libexec/bin/spe-gpu`. This eliminates the `LD_LIBRARY_PATH` setup
-production users would otherwise need.
+POSIX shell wrapper (not a symlink) that auto-discovers ALL 6 hard-
+required CUDA sidecar libraries before `exec`'ing the real binary at
+`libexec/bin/spe-gpu`. The discovery loop covers, per library, the same
+9 candidate locations (pip wheel under `~/.sparrow-engine/cuda-sidecars`,
+PyTorch / TensorFlow / JAX bundles, system CUDA, apt, HPC, RHEL). The
+wrapper eliminates the `LD_LIBRARY_PATH` setup production users would
+otherwise need.
+
+Required libs (matches `probe_gpu_quality.sh:144-150`):
+
+| pip package                     | library            |
+|---------------------------------|--------------------|
+| `nvidia-cudnn-cu12`             | `libcudnn.so.9`    |
+| `nvidia-nvjpeg-cu12`            | `libnvjpeg.so.12`  |
+| `nvidia-cuda-nvrtc-cu12`        | `libnvrtc.so.12`   |
+| `nvidia-cuda-runtime-cu12`      | `libcudart.so.12`  |
+| `nvidia-cublas-cu12`            | `libcublas.so.12` + `libcublasLt.so.12` (same dir) |
+| `nvidia-curand-cu12`            | `libcurand.so.10`  |
+| `nvidia-cufft-cu12`             | `libcufft.so.11`   |
 
 Override the search via `SPARROW_ENGINE_CUDA_LIB_DIR=/some/path
-spe-gpu …` — the wrapper skips auto-discovery when this env var is
-set. Brew rewrites the wrapper on every `(re)install`; do NOT edit it
-in place.
+spe-gpu …` — the wrapper skips auto-discovery for all 6 libs when this
+env var is set. Brew rewrites the wrapper on every `(re)install`; do
+NOT edit it in place.
 
-Full caveats block (with the 7 + 4 location lists) appears at the end
-of `brew install` output, or run `brew info sparrow-engine-gpu`.
+Full caveats block (with the 9 location list and the 6-lib table)
+appears at the end of `brew install` output, or run `brew info
+sparrow-engine-gpu`.
 
 ## Bootstrapping the tap repo (one-time, operator action — DONE 2026-05-27)
 
