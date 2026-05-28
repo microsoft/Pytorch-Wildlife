@@ -1313,11 +1313,16 @@ fn extract_audio_params(manifest: &ModelManifest) -> Result<(u32, f32, f32, f32)
     let sample_rate = match &manifest.preprocess_method {
         PreprocessMethod::MelSpectrogram { sample_rate, .. } => *sample_rate,
         PreprocessMethod::RawAudio { .. } => {
-            return Err(SparrowEngineError::InvalidManifest(format!(
-                "AudioModel (GPU): manifest '{}' uses preprocess = raw_audio. \
-                 GPU raw_audio inference is not yet implemented — use the CPU \
-                 wheel/binary (`spe` not `spe-gpu`, `import sparrow_engine` from the \
-                 CPU wheel) or open an issue for the GPU raw_audio path.",
+            // Phase D round 2 B-08: RawAudio routes through
+            // `RawAudioModel` (parallel struct) — `AudioModel` is
+            // mel-only. The engine dispatcher in
+            // `engine.rs::load_from_manifest` selects the right
+            // variant before reaching this helper, so a RawAudio
+            // landing here is an engine-side wiring bug, not a
+            // user-facing error.
+            return Err(SparrowEngineError::Ort(format!(
+                "internal: AudioModel::extract_audio_params received RawAudio manifest '{}'; \
+                 should have been dispatched to RawAudioModel by engine.rs::load_from_manifest",
                 manifest.id
             )));
         }

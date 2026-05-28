@@ -81,7 +81,7 @@ pub fn detect(handle: &ModelHandle, image: &ImageInput, opts: &DetectOpts) -> Re
             id: inner.manifest.id.clone(),
             method: inner.manifest.postprocess_method.as_str().to_string(),
         }),
-        LoadedModelInner::Audio(_) => Err(SparrowEngineError::IsAudioModel {
+        LoadedModelInner::Audio(_) | LoadedModelInner::AudioRaw(_) => Err(SparrowEngineError::IsAudioModel {
             id: inner.manifest.id.clone(),
             method: inner.manifest.preprocess_method.as_str().to_string(),
         }),

@@ -68,6 +68,7 @@ use crate::kernels::center_crop::CenterCropKernel;
 use crate::kernels::letterbox::LetterboxKernel;
 use crate::kernels::resize::ResizeKernel;
 use crate::models::audio::AudioModel;
+use crate::models::audio_raw::RawAudioModel;
 use crate::models::classifier::{ClassifierModel, JpegDecoder};
 use crate::models::tiled::TiledModel;
 use crate::models::yolo::YoloModel;
@@ -103,6 +104,13 @@ pub(crate) enum LoadedModelInner {
     Classifier(ClassifierModel),
     Tiled(TiledModel),
     Audio(Box<AudioModel>),
+    /// Phase D round 2 B-08: raw-audio classifiers (Perch 2 / perch-v2)
+    /// whose ONNX consumes raw f32 samples directly with no mel pipeline.
+    /// Held inline (not boxed) because `RawAudioModel` is small (single
+    /// Mutex<Session> + ~50 bytes of params) — the
+    /// `large_enum_variant` lint that motivated boxing `Audio` does not
+    /// apply.
+    AudioRaw(RawAudioModel),
 }
 
 // SAFETY: every per-model type is `Send + Sync` (each declares its own
@@ -380,11 +388,23 @@ impl Engine {
                 manifest_dir,
             )?),
             ModelType::AudioDetector | ModelType::AudioClassifier => {
-                LoadedModelInner::Audio(Box::new(AudioModel::load_from_manifest(
-                    &self.inner.ctx,
-                    &manifest_owned,
-                    manifest_dir,
-                )?))
+                // Phase D round 2 B-08: dispatch on preprocess variant.
+                // RawAudio (Perch 2) bypasses the mel pipeline entirely;
+                // MelSpectrogram is the existing AudioModel path.
+                match manifest_owned.preprocess_method {
+                    manifest::PreprocessMethod::RawAudio { .. } => {
+                        LoadedModelInner::AudioRaw(RawAudioModel::load_from_manifest(
+                            &self.inner.ctx,
+                            &manifest_owned,
+                            manifest_dir,
+                        )?)
+                    }
+                    _ => LoadedModelInner::Audio(Box::new(AudioModel::load_from_manifest(
+                        &self.inner.ctx,
+                        &manifest_owned,
+                        manifest_dir,
+                    )?)),
+                }
             }
         };
 

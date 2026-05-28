@@ -38,16 +38,12 @@ pub use sparrow_engine_types::AudioRange;
 // ---------------------------------------------------------------------------
 
 /// Validate that a manifest represents an audio model that the GPU flavor
-/// supports. Currently: mel-spectrogram only. RawAudio (e.g. Perch 2) loads
-/// fine in the CPU flavor but is not yet wired to GPU — explicit reject here.
+/// supports. Phase D round 2 B-08: both `MelSpectrogram` and `RawAudio`
+/// are accepted (raw audio routes through the parallel
+/// [`crate::models::audio_raw::RawAudioModel`]).
 pub(crate) fn validate_audio_model(manifest: &ModelManifest) -> Result<()> {
     match &manifest.preprocess_method {
-        PreprocessMethod::MelSpectrogram { .. } => Ok(()),
-        PreprocessMethod::RawAudio { .. } => Err(SparrowEngineError::InvalidManifest(format!(
-            "detect_audio (GPU): manifest '{}' uses preprocess = raw_audio. \
-             GPU raw_audio inference is not yet implemented — use the CPU wheel/binary.",
-            manifest.id
-        ))),
+        PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. } => Ok(()),
         other => Err(SparrowEngineError::NotAnAudioModel {
             id: manifest.id.clone(),
             method: other.as_str().to_string(),
@@ -81,6 +77,7 @@ pub fn detect_audio(
             };
             model.detect(audio, &gpu_opts)
         }
+        LoadedModelInner::AudioRaw(model) => model.detect(audio, opts, &inner.labels),
         _ => Err(SparrowEngineError::NotAnAudioModel {
             id: inner.manifest.id.clone(),
             method: inner.manifest.preprocess_method.as_str().to_string(),
@@ -111,6 +108,9 @@ pub fn detect_audio_streaming(
                 strategy: GpuAudioDetectOpts::default_strategy_streaming(),
             };
             model.detect_streaming(audio, &gpu_opts, on_segment)
+        }
+        LoadedModelInner::AudioRaw(model) => {
+            model.detect_streaming(audio, opts, &inner.labels, on_segment)
         }
         _ => Err(SparrowEngineError::NotAnAudioModel {
             id: inner.manifest.id.clone(),
