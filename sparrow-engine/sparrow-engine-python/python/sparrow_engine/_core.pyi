@@ -37,6 +37,9 @@ class ClassifyResult:
     image_size: tuple[int, int]
     processing_time_ms: float
     classifications: list[Classification]
+    # First classification (highest-confidence) if any; None on empty result.
+    # Convenience for the common `result.top1.label` idiom.
+    top1: Optional[Classification]
     def __len__(self) -> int: ...
 
 class PipelineDetection:
@@ -74,6 +77,10 @@ class AudioResult:
 class ModelInfo:
     id: str
     model_type: str
+    # Manifest [model].subtype: "standard" for normal detectors, "overhead"
+    # for top-down / drone-imagery detectors (HerdNet, OWL). Derived from
+    # model_type when the native ModelInfo only carries the broader type.
+    subtype: str
     default: bool
     version: Optional[str]
     description: Optional[str]

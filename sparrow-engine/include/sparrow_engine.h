@@ -635,3 +635,18 @@ char *sparrow_engine_engine_model_info(const SparrowEngine *engine, const char *
  * `engine` must be a valid engine pointer.
  */
 char *sparrow_engine_engine_list_models_extended(const SparrowEngine *engine);
+
+/**
+ * Returns a pointer to a static, null-terminated UTF-8 string with the
+ * sparrow-engine-cpu crate version (matches `[package].version` in
+ * `sparrow-engine-cpu/Cargo.toml`). Caller MUST NOT free.
+ *
+ * Phase D B-12: useful for installer / Studio Local / brew `test do` smoke
+ * tests — a zero-arg, zero-allocation entry point that proves DLL load +
+ * symbol resolution without spinning up an engine. Byte-for-byte mirror of
+ * the GPU FFI surface (G5 acceptance gate enforces CPU/GPU symbol parity).
+ *
+ * # Safety
+ * Thread-safe. Returned pointer is valid for the lifetime of the process.
+ */
+const char *sparrow_engine_version(void);
