@@ -34,3 +34,4 @@ EXPORTS
     sparrow_engine_image_brightness
     sparrow_engine_verify_model
     sparrow_engine_verify_result_free
+    sparrow_engine_version

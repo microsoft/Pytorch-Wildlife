@@ -1,8 +1,10 @@
 //
 // Phase 3.8 Phase A S7 closure: when `--features ffi` is on, the cdylib must
-// expose all 34 symbols listed in `exports.def`. Without `--features ffi` the
-// cdylib still builds but emits zero `sparrow_engine_*` symbols (the `sparrow_engine_*; local: *;`
-// filter in `exports.map` plus the absence of `pub mod ffi` produce that).
+// expose all 35 symbols listed in `exports.def` (34 Phase C baseline + 1
+// sparrow_engine_version added in Phase D round 2). Without `--features ffi`
+// the cdylib still builds but emits zero `sparrow_engine_*` symbols (the
+// `sparrow_engine_*; local: *;` filter in `exports.map` plus the absence of
+// `pub mod ffi` produce that).
 //
 // Two test approaches:
 //   1. Compile-time link smoke test — references 5 symbols through the Rust
@@ -26,7 +28,7 @@
 
 #[test]
 fn ffi_link_smoke_for_sample_symbols() {
-    // We name 5 of the 34 symbols. If any disappear from `sparrow-engine-cpu/src/ffi.rs`
+    // We name 5 of the 35 symbols. If any disappear from `sparrow-engine-cpu/src/ffi.rs`
     // (e.g., a refactor accidentally drops `#[no_mangle]` or `pub`), this test
     // fails to compile. We pin a function-pointer reference so the compiler has
     // a reason to resolve them.
@@ -150,14 +152,69 @@ fn cdylib_exports_match_exports_def() {
         extra
     );
 
-    // Sanity: count matches (34 per Phase C FFI V2 audio inventory).
+    // Sanity: count matches (35 per Phase D round 2 — 34 Phase C baseline
+    // + sparrow_engine_version added in round 2 to mirror the GPU surface).
     assert_eq!(
         expected.len(),
-        34,
-        "exports.def line count drifted from Phase C baseline (was 34, now {})",
+        35,
+        "exports.def line count drifted from Phase D round-2 baseline (was 35, now {})",
         expected.len()
     );
     assert_eq!(actual.len(), expected.len());
+}
+
+// -----------------------------------------------------------------------------
+// Test 3: cross-flavor parity — CPU exports.def and GPU exports.def must
+// declare the IDENTICAL set of sparrow_engine_* symbols. Phase 3.8 Phase C
+// G5 acceptance gate invariant: a consumer cannot rely on flavor-specific
+// FFI symbols because both flavors ship as `libsparrow_engine.so`.
+// -----------------------------------------------------------------------------
+//
+// This is a static-file diff, not a build-output diff, so it runs even when
+// the GPU flavor hasn't been compiled on this host. The CPU cdylib symbol
+// surface is asserted by test 2 above.
+
+#[test]
+fn exports_def_parity_with_gpu_flavor() {
+    use std::path::PathBuf;
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir.parent().expect("workspace root");
+    let cpu_def = manifest_dir.join("exports.def");
+    let gpu_def = workspace_root
+        .join("sparrow-engine-gpu")
+        .join("exports.def");
+
+    if !gpu_def.exists() {
+        eprintln!(
+            "SKIP exports_def_parity_with_gpu_flavor: {:?} not found (sparse checkout?)",
+            gpu_def
+        );
+        return;
+    }
+
+    let parse = |path: &PathBuf| -> std::collections::BTreeSet<String> {
+        let content = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("failed to read {:?}: {}", path, e));
+        content
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| l.starts_with("sparrow_engine_"))
+            .map(|l| l.to_string())
+            .collect()
+    };
+
+    let cpu_syms = parse(&cpu_def);
+    let gpu_syms = parse(&gpu_def);
+
+    let cpu_only: Vec<_> = cpu_syms.difference(&gpu_syms).cloned().collect();
+    let gpu_only: Vec<_> = gpu_syms.difference(&cpu_syms).cloned().collect();
+    assert!(
+        cpu_only.is_empty() && gpu_only.is_empty(),
+        "CPU/GPU exports.def drift — G5 parity violated.\n  CPU-only: {:?}\n  GPU-only: {:?}",
+        cpu_only,
+        gpu_only
+    );
 }
 
 #[cfg(not(target_os = "linux"))]

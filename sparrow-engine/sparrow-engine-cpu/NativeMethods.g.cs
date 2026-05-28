@@ -384,6 +384,22 @@ namespace SparrowEngine.Native
         [DllImport(__DllName, EntryPoint = "sparrow_engine_engine_list_models_extended", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* sparrow_engine_engine_list_models_extended(void* engine);
 
+        /// <summary>
+        ///  Returns a pointer to a static, null-terminated UTF-8 string with the
+        ///  sparrow-engine-cpu crate version (matches `[package].version` in
+        ///  `sparrow-engine-cpu/Cargo.toml`). Caller MUST NOT free.
+        ///
+        ///  Phase D B-12: useful for installer / Studio Local / brew `test do` smoke
+        ///  tests — a zero-arg, zero-allocation entry point that proves DLL load +
+        ///  symbol resolution without spinning up an engine. Byte-for-byte mirror of
+        ///  the GPU FFI surface (G5 acceptance gate enforces CPU/GPU symbol parity).
+        ///
+        ///  # Safety
+        ///  Thread-safe. Returned pointer is valid for the lifetime of the process.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* sparrow_engine_version();
+
 
     }
 

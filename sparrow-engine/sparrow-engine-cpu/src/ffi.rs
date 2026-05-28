@@ -2044,6 +2044,29 @@ pub unsafe extern "C" fn sparrow_engine_engine_list_models_extended(
     }
 }
 
+// ===========================================================================
+// Version / metadata exports
+// ===========================================================================
+
+/// Returns a pointer to a static, null-terminated UTF-8 string with the
+/// sparrow-engine-cpu crate version (matches `[package].version` in
+/// `sparrow-engine-cpu/Cargo.toml`). Caller MUST NOT free.
+///
+/// Phase D B-12: useful for installer / Studio Local / brew `test do` smoke
+/// tests — a zero-arg, zero-allocation entry point that proves DLL load +
+/// symbol resolution without spinning up an engine. Byte-for-byte mirror of
+/// the GPU FFI surface (G5 acceptance gate enforces CPU/GPU symbol parity).
+///
+/// # Safety
+/// Thread-safe. Returned pointer is valid for the lifetime of the process.
+#[no_mangle]
+pub extern "C" fn sparrow_engine_version() -> *const c_char {
+    // concat! evaluates at compile time; appending "\0" lets us reuse the
+    // static byte slice as a C string without a runtime CString allocation.
+    static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+    VERSION.as_ptr() as *const c_char
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
