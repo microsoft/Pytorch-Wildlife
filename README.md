@@ -139,7 +139,7 @@ Sparrow Engine doesn't ship the ONNX model weights in the repo. They live in a p
 
 **Zenodo DOI**: [10.5281/zenodo.20360316](https://doi.org/10.5281/zenodo.20360316) (v0.4.0) — concept DOI [10.5281/zenodo.20348978](https://doi.org/10.5281/zenodo.20348978) always resolves to the latest version.
 
-Download all 16 models to `./models/`:
+Download all 16 models to `~/.sparrow-engine/models/` (the default model dir read by `spe`, `sparrow-engine-server`, and the Python wheel):
 
 ```bash
 bash scripts/download_models.sh
@@ -153,10 +153,10 @@ bash scripts/download_models.sh --list          # list available model IDs
 bash scripts/download_models.sh --dest /custom/path
 ```
 
-Point Sparrow Engine at the directory:
+Point Sparrow Engine at the directory (only needed if you used `--dest`; the default location is auto-detected):
 
 ```bash
-export SPARROW_ENGINE_MODELS_DIR=$(realpath ./models)
+export SPARROW_ENGINE_MODEL_DIR=$(realpath ~/.sparrow-engine/models)
 spe models list                                 # confirms catalog discovery
 spe detect --model MDV6-yolov10-e --print image.jpg
 ```

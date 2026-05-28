@@ -8,7 +8,7 @@
 # (i.e. `<dest>/<model_id>/manifest.toml` + `model.onnx` + `labels.txt`).
 #
 # Usage:
-#   bash scripts/download_models.sh                    # all 16 models to ./models/
+#   bash scripts/download_models.sh                    # all 16 models to ~/.sparrow-engine/models/
 #   bash scripts/download_models.sh --dest /path       # custom destination dir
 #   bash scripts/download_models.sh MDV6-yolov10-e ... # specific model(s) only
 #   bash scripts/download_models.sh --list             # show available models
@@ -16,9 +16,12 @@
 #   bash scripts/download_models.sh --no-verify        # skip SHA-256 check (faster, unsafe)
 #
 # After the script completes, point sparrow-engine at the directory:
-#   export SPARROW_ENGINE_MODELS_DIR=$(realpath ./models)
+#   export SPARROW_ENGINE_MODEL_DIR=$(realpath ~/.sparrow-engine/models)
 #   spe list-models     # lists the 16 catalog entries
 #   spe detect --model MDV6-yolov10-e --image /path/to/image.jpg
+#
+# (No explicit env var is needed if the default ~/.sparrow-engine/models is
+# used — the CLI / server / Python wheels all default to that path.)
 #
 # Override the Zenodo record (e.g. to test a newer version):
 #   ZENODO_RECORD=<id> bash scripts/download_models.sh
@@ -54,7 +57,11 @@ ALL_MODELS=(
 )
 
 # ---- Defaults ----
-DEST="./models"
+# Default destination matches the CLI / server / Python default
+# (`dirs_default_model_dir` in sparrow-engine-cli/src/main.rs). Picking the
+# same path means a no-arg `download_models.sh` followed by a no-arg `spe
+# detect` works without any env-var ceremony. Phase D round-2 D-R2-4 fix.
+DEST="${HOME:-.}/.sparrow-engine/models"
 VERIFY=1
 FORCE=0
 SELECTED=()
@@ -177,7 +184,7 @@ echo "======================================================================"
 echo "Downloaded ${#SELECTED[@]} model(s) to: $(realpath "$DEST")"
 echo ""
 echo "Load with sparrow-engine:"
-echo "  export SPARROW_ENGINE_MODELS_DIR=$(realpath "$DEST")"
+echo "  export SPARROW_ENGINE_MODEL_DIR=$(realpath "$DEST")"
 echo "  spe list-models"
 echo "  spe detect --model MDV6-yolov10-e --image /path/to/image.jpg"
 echo ""
