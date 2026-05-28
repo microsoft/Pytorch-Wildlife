@@ -253,7 +253,7 @@ Under the stdin-pipe form the wrapper detects that `$0` is the shell name and sk
 | **Homebrew tap** | End users on macOS arm64 + brew-Linux x86_64; zero setup | `brew tap microsoft/sparrow-engine && brew install sparrow-engine` (CPU) or `brew install sparrow-engine-gpu` (Linux + NVIDIA only — auto-discovers cuDNN / nvJPEG; see §2.5) |
 | Clean-room from-source build | Developers; reproducibility | `cd sparrow-engine && ./scripts/build_all_flavors.sh` (workspace root) |
 | GitHub Releases binary | End users; production | `bash installer/sparrow-engine-install.sh --cli` |
-| pip install Python wheel | Notebook + script users | `pip install sparrow-engine` (CPU) or `pip install sparrow-engine-gpu` |
+| pip install Python wheel | Notebook + script users (Python API only — no `spe` CLI binary; use the Homebrew, installer, or tarball rows above for the CLI) | `pip install sparrow-engine` (CPU) or `pip install sparrow-engine-gpu` |
 | Docker image pull | Server deployments | `docker pull sparrow-engine:cpu` (or `:gpu`) |
 
 **Cite**: `docs/install.md § Per-consumer install paths` (lines 163-220); `sparrow-engine/scripts/build_all_flavors.sh`; `installer/homebrew/{sparrow-engine,sparrow-engine-gpu}.rb` + `installer/homebrew/README.md` (Homebrew tap source-of-truth).
