@@ -26,20 +26,25 @@ class SparrowEngineGpu < Formula
 
   def caveats
     <<~EOS
-      sparrow-engine-gpu auto-discovers cuDNN 9 + nvJPEG + nvRTC from common
-      host locations at startup via a small wrapper script that brew installs
-      alongside the binary. The wrapper checks (in order):
+      sparrow-engine-gpu auto-discovers ALL required CUDA sidecar libraries
+      from common host locations at startup via a small wrapper script that
+      brew installs alongside the binary. The wrapper covers the 6 hard-
+      required libs from probe_gpu_quality.sh (libcudnn.so.9, libnvjpeg.so.12,
+      libnvrtc.so.12, libcudart.so.12, libcublas.so.12 + libcublasLt.so.12,
+      libcurand.so.10, libcufft.so.11) and checks (in order, per lib):
 
-        1. SPARROW_ENGINE_CUDA_LIB_DIR (user override; honoured if set)
-        2. ~/.sparrow-engine/cuda-sidecars/lib/python*/site-packages/nvidia/cudnn/lib
+        1. SPARROW_ENGINE_CUDA_LIB_DIR (user override; honoured if set,
+           wrapper skips all auto-discovery for that flavor)
+        2. ~/.sparrow-engine/cuda-sidecars/lib/python*/site-packages/nvidia/<pkg>/lib
         3. /usr/lib/python3/dist-packages/torch/lib   (Lambda Stack / PyTorch)
         4. /usr/lib/python3/dist-packages/tensorflow  (Lambda Stack / TF)
-        5. /usr/local/cuda/lib64                      (NVIDIA CUDA toolkit)
-        6. /usr/lib/x86_64-linux-gnu                  (Ubuntu apt nvidia-cudnn)
-        7. /opt/nvidia/cuda/lib64                     (HPC-style CUDA installs)
+        5. /usr/lib/python3/dist-packages/jax_cuda12_plugin  (JAX)
+        6. /usr/local/cuda/lib64                      (NVIDIA CUDA toolkit)
+        7. /usr/lib/x86_64-linux-gnu                  (Ubuntu apt nvidia-*)
+        8. /opt/nvidia/cuda/lib64                     (HPC-style CUDA installs)
+        9. /usr/lib64                                 (RHEL / Fedora)
 
-      If libcudnn.so.9 / libnvjpeg.so.12 / libnvrtc.so are not in any of these,
-      install them via ONE of:
+      If a required lib is not found in any of these, install ONE of:
 
       Option A — system CUDA (Ubuntu / Debian, recommended for servers):
         sudo apt install nvidia-cuda-toolkit nvidia-cudnn
@@ -57,8 +62,9 @@ class SparrowEngineGpu < Formula
         https://github.com/microsoft/Pytorch-Wildlife/blob/sparrow-engine-dev/docs/user-manual.md
 
       The tarball is ~256 MB — bundles libonnxruntime + ORT CUDA provider
-      sidecars. NVIDIA-managed shared libraries (cuDNN / cuBLAS / nvJPEG /
-      nvRTC / CUDA runtime) are NOT bundled (NVIDIA license forbids redistribution).
+      sidecars. NVIDIA-managed shared libraries (cuDNN / cuBLAS / cuRAND /
+      cuFFT / nvJPEG / nvRTC / CUDA runtime) are NOT bundled (NVIDIA license
+      forbids redistribution).
     EOS
   end
 
@@ -88,21 +94,25 @@ class SparrowEngineGpu < Formula
       SE_LIBEXEC="#{libexec}"
 
       add_lib_dir() {
-        # $1 must contain libcudnn.so.9 / libnvjpeg.so.12 / libnvrtc.so to be
-        # useful; caller already checked existence.
+        # $1 must contain the required .so to be useful; caller already
+        # checked existence.
         case ":$LD_LIBRARY_PATH:" in
           *":$1:"*) ;;
           *) LD_LIBRARY_PATH="$1${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
         esac
       }
 
-      if [ -n "$SPARROW_ENGINE_CUDA_LIB_DIR" ]; then
-        # Honour user override verbatim — no auto-discovery.
-        LD_LIBRARY_PATH="$SPARROW_ENGINE_CUDA_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-      else
-        # Auto-discover libcudnn.so.9 from common locations.
+      # discover_sidecar <pip-package-subpath> <library-filename>
+      #
+      # Walks the standard CUDA sidecar search path (pip wheel under
+      # ~/.sparrow-engine/cuda-sidecars, then PyTorch/TF bundles, then
+      # system CUDA, apt, HPC, RHEL) and prepends the first dir containing
+      # the named library to LD_LIBRARY_PATH. Returns silently if no dir
+      # matches — the runtime check in probe_gpu_quality.sh / spe-gpu
+      # itself produces the operator-facing error.
+      discover_sidecar() {
         for dir in \\
-          "$HOME/.sparrow-engine/cuda-sidecars"/lib/python*/site-packages/nvidia/cudnn/lib \\
+          "$HOME/.sparrow-engine/cuda-sidecars"/lib/python*/site-packages/nvidia/$1/lib \\
           /usr/lib/python3/dist-packages/torch/lib \\
           /usr/lib/python3/dist-packages/tensorflow \\
           /usr/lib/python3/dist-packages/jax_cuda12_plugin \\
@@ -110,45 +120,30 @@ class SparrowEngineGpu < Formula
           /usr/lib/x86_64-linux-gnu \\
           /opt/nvidia/cuda/lib64 \\
           /usr/lib64; do
-          if [ -e "$dir/libcudnn.so.9" ]; then
+          if [ -e "$dir/$2" ]; then
             add_lib_dir "$dir"
-            break
+            return 0
           fi
         done
+        return 1
+      }
 
-        # Auto-discover libnvjpeg.so.12 from common locations (separate
-        # search because cuDNN and nvJPEG often live in different dirs).
-        for dir in \\
-          "$HOME/.sparrow-engine/cuda-sidecars"/lib/python*/site-packages/nvidia/nvjpeg/lib \\
-          /usr/lib/python3/dist-packages/torch/lib \\
-          /usr/local/cuda/lib64 \\
-          /usr/lib/x86_64-linux-gnu \\
-          /opt/nvidia/cuda/lib64 \\
-          /usr/lib64; do
-          if [ -e "$dir/libnvjpeg.so.12" ]; then
-            add_lib_dir "$dir"
-            break
-          fi
-        done
-
-        # Auto-discover libnvrtc.so / libnvrtc.so.12 from common locations.
-        # cudarc (sparrow-engine-gpu kernel-compile path) dlopens nvrtc at
-        # runtime; without it, the first GPU inference panics on fresh
-        # containers with no system CUDA. B-05 fix — same 7-location search
-        # as cuDNN (pip wheel ships in `nvidia/cuda_nvrtc/lib`).
-        for dir in \\
-          "$HOME/.sparrow-engine/cuda-sidecars"/lib/python*/site-packages/nvidia/cuda_nvrtc/lib \\
-          /usr/lib/python3/dist-packages/torch/lib \\
-          /usr/lib/python3/dist-packages/tensorflow \\
-          /usr/local/cuda/lib64 \\
-          /usr/lib/x86_64-linux-gnu \\
-          /opt/nvidia/cuda/lib64 \\
-          /usr/lib64; do
-          if [ -e "$dir/libnvrtc.so" ] || [ -e "$dir/libnvrtc.so.12" ]; then
-            add_lib_dir "$dir"
-            break
-          fi
-        done
+      if [ -n "$SPARROW_ENGINE_CUDA_LIB_DIR" ]; then
+        # Honour user override verbatim — no auto-discovery.
+        LD_LIBRARY_PATH="$SPARROW_ENGINE_CUDA_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      else
+        # E-R2-3: cover ALL 6 hard-required libs from probe_gpu_quality.sh
+        # _required_libs (lines 144-150). Each entry pairs the pip-wheel
+        # subpath under nvidia/<pkg>/lib with the canonical .so filename.
+        # libcublasLt.so.12 ships in the same dir as libcublas.so.12 so the
+        # cublas entry covers both.
+        discover_sidecar cudnn         libcudnn.so.9
+        discover_sidecar nvjpeg        libnvjpeg.so.12
+        discover_sidecar cuda_nvrtc    libnvrtc.so.12
+        discover_sidecar cuda_runtime  libcudart.so.12
+        discover_sidecar cublas        libcublas.so.12
+        discover_sidecar curand        libcurand.so.10
+        discover_sidecar cufft         libcufft.so.11
       fi
 
       export LD_LIBRARY_PATH
