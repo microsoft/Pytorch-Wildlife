@@ -175,7 +175,7 @@ build_gpu() {
     # literal.
     sed -i \
         -e 's|^name = "sparrow-engine"$|name = "sparrow-engine-gpu"|' \
-        -e 's|^description = "Camera-trap ML inference engine — Python bindings (sparrow-engine CPU pipeline)"$|description = "Camera-trap ML inference engine — Python bindings (sparrow-engine GPU pipeline)"|' \
+        -e 's|^description = "Camera-trap ML inference engine — Python API only (sparrow-engine CPU pipeline)\. The CLI binary (spe / spe-gpu) and HTTP server are NOT shipped via pip; install them via brew, the system installer (sparrow-engine-install\.sh / \.ps1), or the GitHub Release tarball\. See https://github\.com/microsoft/Pytorch-Wildlife/blob/sparrow-engine-dev/docs/user-manual\.md"$|description = "Camera-trap ML inference engine — Python API only (sparrow-engine GPU pipeline). The CLI binary (spe / spe-gpu) and HTTP server are NOT shipped via pip; install them via brew, the system installer (sparrow-engine-install.sh / .ps1), or the GitHub Release tarball. See https://github.com/microsoft/Pytorch-Wildlife/blob/sparrow-engine-dev/docs/user-manual.md"|' \
         -e "s|\"onnxruntime>=1.25.1,<1.26\"|\"onnxruntime-gpu>=1.25.1,<1.26\", \"nvidia-cudnn-cu12>=9,<10; sys_platform == 'linux'\", \"nvidia-cublas-cu12; sys_platform == 'linux'\", \"nvidia-curand-cu12; sys_platform == 'linux'\", \"nvidia-cufft-cu12; sys_platform == 'linux'\"|" \
         pyproject.toml
     write_flavor_sentinel gpu
