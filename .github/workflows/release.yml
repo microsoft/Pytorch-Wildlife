@@ -826,6 +826,101 @@ jobs:
             sparrow-engine/dist/sparrow-engine-cpu-*-linux-x86_64.tar.gz.sha256
           if-no-files-found: error
 
+  # ---------------------------------------------------------------------------
+  # OQ-2026-05-28-1 — server-boot-smoke
+  #
+  # Regression guard for B-09 (server boot deadlock). Root cause: with
+  # ORT_DYLIB_PATH unset, the `ort` crate's load-dynamic path entered a long
+  # internal retry loop that LOOKED like a hang. Fix: port ort_resolver into
+  # sparrow-engine-server's main() so the server self-resolves ORT from the
+  # adjacent `lib/` directory in the RP-4 tarball layout.
+  #
+  # Without this smoke job, removing ort_resolver from server main would
+  # silently regress: the server would build fine, the unit tests would pass,
+  # and the bug would only surface when a real operator booted the binary.
+  # This job builds the server, stages an RP-4 tarball layout, starts the
+  # binary with NO ORT_DYLIB_PATH override, and polls /healthz with a 30s
+  # timeout. If ort_resolver regresses, the poll times out and CI fails.
+  # ---------------------------------------------------------------------------
+
+  server-boot-smoke:
+    name: Smoke test sparrow-engine-server boot + /healthz
+    needs: [check-installer-ps1-bom, check-version-consistency, build-cli-linux-cpu]
+    runs-on: ubuntu-latest
+    container:
+      # manylinux_2_28 — same glibc floor + ORT layout as build-cli-linux-cpu,
+      # so a successful smoke here implies a successful smoke on any release
+      # consumer with glibc >= 2.28.
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Stage ORT runtime (pip onnxruntime, capi/libonnxruntime.so.X.Y.Z)
+        run: |
+          ORT_VENV="$RUNNER_TEMP/ort-venv"
+          rm -rf "$ORT_VENV"
+          /opt/python/cp311-cp311/bin/python -m venv "$ORT_VENV"
+          "$ORT_VENV/bin/pip" install --quiet "onnxruntime>=1.25.1,<1.26"
+          ORT_CAPI=$("$ORT_VENV/bin/python" -c 'import onnxruntime, pathlib; print(pathlib.Path(onnxruntime.__file__).parent / "capi")')
+          echo "ORT_STAGE_DIR=$ORT_CAPI" >> "$GITHUB_ENV"
+
+      - name: Build sparrow-engine-server (release, CPU flavor, load-dynamic)
+        working-directory: sparrow-engine
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo build --release -p sparrow-engine-server \
+            --no-default-features --features cpu
+
+      - name: Stage RP-4 tarball layout (bin/ + lib/)
+        working-directory: sparrow-engine
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/server-stage"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/bin" "$STAGE/lib"
+          cp target/release/sparrow-engine-server "$STAGE/bin/"
+          # Copy libonnxruntime.so.X.Y.Z so ort_resolver's `lib/` walk finds
+          # it. Intentionally do NOT create libonnxruntime.so symlink: the
+          # whole point of the resolver is to handle this case.
+          cp "$ORT_STAGE_DIR"/libonnxruntime.so.* "$STAGE/lib/"
+          ls -la "$STAGE/bin/" "$STAGE/lib/"
+          echo "SERVER_STAGE=$STAGE" >> "$GITHUB_ENV"
+
+      - name: Boot server + poll /healthz (30s timeout)
+        run: |
+          set -euo pipefail
+          # NO ORT_DYLIB_PATH export — ort_resolver MUST set it from the
+          # adjacent lib/ dir. If this regresses, the server hangs at
+          # `Engine::new` and the poll times out below.
+          export SPARROW_ENGINE_BIND_ADDR=127.0.0.1:19250
+          "$SERVER_STAGE/bin/sparrow-engine-server" > "$RUNNER_TEMP/server.log" 2>&1 &
+          SERVER_PID=$!
+          echo "server PID: $SERVER_PID"
+
+          DEADLINE=$(( $(date +%s) + 30 ))
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            if curl -fsS http://127.0.0.1:19250/healthz >/dev/null 2>&1; then
+              echo "PASS: /healthz returned 200 within 30s"
+              echo "--- server.log ---"
+              cat "$RUNNER_TEMP/server.log"
+              kill "$SERVER_PID" 2>/dev/null || true
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "FAIL: /healthz did not return 200 within 30s — server boot regression"
+          echo "--- server.log ---"
+          cat "$RUNNER_TEMP/server.log" || true
+          kill "$SERVER_PID" 2>/dev/null || true
+          exit 1
+
   build-cli-linux-gpu:
     name: Build CLI tarball (sparrow-engine-gpu, Linux x86_64)
     runs-on: ubuntu-latest
@@ -1077,11 +1172,13 @@ jobs:
       && needs['build-cli-linux-cpu'].result == 'success'
       && needs['build-cli-linux-gpu'].result == 'success'
       && needs['build-cli-macos-arm64'].result == 'success'
+      && needs['server-boot-smoke'].result == 'success'
     needs:
       - build-cli-linux-cpu
       - build-cli-linux-gpu
       - build-cli-macos-arm64
       - build-cli-windows
+      - server-boot-smoke
     runs-on: ubuntu-latest
     permissions:
       # softprops/action-gh-release needs write access to create / append the
