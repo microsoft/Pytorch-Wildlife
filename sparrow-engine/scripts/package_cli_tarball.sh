@@ -52,6 +52,31 @@ set -euo pipefail
 
 : "${FLAVOR:?FLAVOR=cpu|gpu required}"
 : "${TARBALL_PLATFORM:?TARBALL_PLATFORM=linux-x86_64|macos-aarch64|windows-x86_64 required}"
+
+# Default VERSION from sparrow-engine-cli's Cargo.toml when the caller did
+# not supply one. This consolidates the version source with the binary's
+# `CARGO_PKG_VERSION` (Phase D B-03 — `spe --version` reads the same value),
+# so the tarball name and the binary it ships agree by construction on
+# local invocations. CI explicitly passes a tag-derived VERSION and is
+# unaffected; the reviewer-added `check-version-consistency` job on
+# release.yml enforces `cli_version == py_version == tag_version` on
+# tag-push, so this default lines up with the gated CI value too.
+#
+# Documented cwd is sparrow-engine/ (workspace root); the manifest probe
+# is relative to that. Skip the default silently when cargo / jq are
+# unavailable (non-cargo callers fall through to the existing hard-error).
+if [[ -z "${VERSION:-}" ]] \
+   && command -v cargo >/dev/null 2>&1 \
+   && command -v jq >/dev/null 2>&1 \
+   && [[ -f sparrow-engine-cli/Cargo.toml ]]; then
+  VERSION="$(cargo metadata --no-deps --format-version 1 \
+               --manifest-path sparrow-engine-cli/Cargo.toml \
+             | jq -r '.packages[] | select(.name=="sparrow-engine-cli") | .version')"
+  if [[ -n "$VERSION" ]]; then
+    echo "[package_cli_tarball.sh] VERSION defaulted from sparrow-engine-cli Cargo.toml: $VERSION"
+  fi
+fi
+
 : "${VERSION:?VERSION=X.Y.Z required}"
 OUT_DIR="${OUT_DIR:-dist}"
 BIN_DIR="${BIN_DIR:-target/release}"

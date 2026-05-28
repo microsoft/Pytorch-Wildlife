@@ -62,6 +62,43 @@ PY
     fi
 }
 
+# Diagnostic: extract the wheel's dist-info/entry_points.txt and print it
+# so log readers can confirm whether the wheel ships [project.scripts]-
+# derived console scripts (spe / spe-gpu / sparrow-engine-server, per a
+# future B-04 follow-up). Observability only — never fails the build.
+#
+# `wheel unpack` is already pulled in by build_gpu's METADATA patch, so
+# this adds no new dep surface on Linux; CPU-only builds also need it.
+# Scratch dir lives under the source tree (workflow forbids /tmp).
+report_console_scripts() {
+    local wheel="$1"
+    if [[ -z "$wheel" || ! -f "$wheel" ]]; then
+        echo "[build.sh] report_console_scripts: wheel not found ($wheel); skipping." >&2
+        return 0
+    fi
+    local base scratch
+    base="$(basename "$wheel")"
+    scratch="$(mktemp -d .console-scripts.XXXXXX)"
+    # Always tear down the scratch dir, even if unpack errors. Subshell so
+    # the trap does not leak out of this function.
+    (
+        trap 'cleanup_dir "$scratch"' EXIT
+        if ! uv run --no-project --with wheel python -m wheel unpack "$wheel" -d "$scratch" >/dev/null 2>&1; then
+            echo "[build.sh] console scripts in $base: (wheel unpack failed; cannot inspect)"
+            exit 0
+        fi
+        local ep
+        ep="$(find "$scratch" -name entry_points.txt -path '*.dist-info/entry_points.txt' | head -1)"
+        echo "[build.sh] console scripts in $base:"
+        if [[ -n "$ep" && -f "$ep" ]]; then
+            sed 's/^/    /' "$ep"
+        else
+            echo "    (no [project.scripts] block — entry_points.txt absent)"
+        fi
+    )
+    cleanup_dir "$scratch"
+}
+
 build_cpu() {
     echo "[build.sh] Building CPU wheel (sparrow-engine, onnxruntime)..."
 
@@ -86,6 +123,10 @@ build_cpu() {
     remove_flavor_sentinel
     trap - EXIT
     echo "[build.sh] CPU wheel built."
+
+    local cpu_wheel
+    cpu_wheel="$(ls -t ../target/wheels/sparrow_engine-*.whl 2>/dev/null | head -1 || true)"
+    report_console_scripts "$cpu_wheel"
 }
 
 build_gpu() {
@@ -134,7 +175,7 @@ build_gpu() {
     # literal.
     sed -i \
         -e 's|^name = "sparrow-engine"$|name = "sparrow-engine-gpu"|' \
-        -e 's|^description = "Camera-trap ML inference engine — Python bindings (sparrow-engine CPU pipeline)"$|description = "Camera-trap ML inference engine — Python bindings (sparrow-engine GPU pipeline)"|' \
+        -e 's|^description = "Camera-trap ML inference engine — Python API only (sparrow-engine CPU pipeline)\. The CLI binary (spe / spe-gpu) and HTTP server are NOT shipped via pip; install them via brew, the system installer (sparrow-engine-install\.sh / \.ps1), or the GitHub Release tarball\. See https://github\.com/microsoft/Pytorch-Wildlife/blob/sparrow-engine-dev/docs/user-manual\.md"$|description = "Camera-trap ML inference engine — Python API only (sparrow-engine GPU pipeline). The CLI binary (spe / spe-gpu) and HTTP server are NOT shipped via pip; install them via brew, the system installer (sparrow-engine-install.sh / .ps1), or the GitHub Release tarball. See https://github.com/microsoft/Pytorch-Wildlife/blob/sparrow-engine-dev/docs/user-manual.md"|' \
         -e "s|\"onnxruntime>=1.25.1,<1.26\"|\"onnxruntime-gpu>=1.25.1,<1.26\", \"nvidia-cudnn-cu12>=9,<10; sys_platform == 'linux'\", \"nvidia-cublas-cu12; sys_platform == 'linux'\", \"nvidia-curand-cu12; sys_platform == 'linux'\", \"nvidia-cufft-cu12; sys_platform == 'linux'\"|" \
         pyproject.toml
     write_flavor_sentinel gpu
@@ -236,6 +277,10 @@ build_gpu() {
     trap - EXIT
     cleanup_gpu
     echo "[build.sh] GPU wheel built and Provides-Dist patched."
+
+    local gpu_wheel
+    gpu_wheel="$(ls -t ../target/wheels/sparrow_engine_gpu-*.whl 2>/dev/null | head -1 || true)"
+    report_console_scripts "$gpu_wheel"
 }
 
 case "$SPARROW_ENGINE_FLAVOR" in

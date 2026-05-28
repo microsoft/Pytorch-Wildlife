@@ -32,7 +32,14 @@ COPY sparrow-engine-cli/ sparrow-engine-cli/
 COPY sparrow-engine-python/ sparrow-engine-python/
 COPY vendor/ vendor/
 
-ARG ORT_VERSION=1.24.2
+# Phase F audit-fix round 1 (2026-05-28, B-07): bumped 1.24.2 -> 1.25.1.
+# `gpu-prior-pin-21e9e44` worked with 1.24.2 because at that pin the binary was DT_NEEDED-linked to ORT.
+# Commit 5c86dbf (after the pin) switched `sparrow-engine-gpu/Cargo.toml` to `ort/load-dynamic` + `api-24`.
+# `api-24` targets ORT runtime 1.25.x; against 1.24.2 the server boots and lists models but the first
+# Session creation / CUDA EP option call hits an API field absent in 1.24.2 and silently spins
+# (Lane 3 finding F6 — every model load hangs forever, 0% CPU, no log). Bumping to 1.25.1 aligns the
+# Docker ORT to the Python wheel's `>=1.25.1,<1.26` pin and to the api-24 surface the Rust binding expects.
+ARG ORT_VERSION=1.25.1
 RUN mkdir -p /build/ort-lib && \
     curl -sL https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz | \
     tar xz --strip-components=1 -C /build/ort-lib
@@ -56,6 +63,14 @@ COPY --from=builder /build/ort-lib/lib/libonnxruntime.so* /usr/local/lib/
 COPY --from=builder /build/ort-lib/lib/libonnxruntime_providers_cuda.so* /usr/local/lib/
 COPY --from=builder /build/ort-lib/lib/libonnxruntime_providers_shared.so* /usr/local/lib/
 RUN ldconfig
+# Phase F audit-fix round 1 (2026-05-28, B-07 defensive symlink): mirror Dockerfile.cpu's B-06 fix.
+# `sparrow-engine-server` (GPU build) is also `ort/load-dynamic` per sparrow-engine-gpu/Cargo.toml.
+# With `ORT_DYLIB_PATH` unset, the dlopen path is platform-default — on some glibc / ld.so.cache
+# configurations that resolves to bare `libonnxruntime.so`. Adding the unversioned symlink anchored
+# on the ldconfig-managed SONAME `libonnxruntime.so.1` is harmless when the resolver already finds
+# the SONAME directly, and covers the bare-name fallback case. No ENV LD_LIBRARY_PATH workaround.
+# Refs: Phase C Lane 3 finding F6 + Phase F reviewer_review.md B-07.
+RUN ln -sf libonnxruntime.so.1 /usr/local/lib/libonnxruntime.so && ldconfig
 
 RUN groupadd -g 1000 sparrow-engine 2>/dev/null || true && useradd -u 1000 -g 1000 -s /sbin/nologin sparrow-engine 2>/dev/null || true
 USER 1000:1000

@@ -27,7 +27,8 @@ build-backend = "maturin"
 [project]
 name = "sparrow-engine"
 version = "0.1.12"
-description = "Camera-trap ML inference engine — Python bindings (sparrow-engine CPU pipeline)"
+description = "Camera-trap ML inference engine — Python API only (sparrow-engine CPU pipeline). The CLI binary (spe / spe-gpu) and HTTP server are NOT shipped via pip; install them via brew, the system installer (sparrow-engine-install.sh / .ps1), or the GitHub Release tarball. See https://github.com/microsoft/Pytorch-Wildlife/blob/sparrow-engine-dev/docs/user-manual.md"
+readme = "../../README.md"
 requires-python = ">=3.11"
 # Floor bumped 3.10 → 3.11 (2026-05-07): onnxruntime / onnxruntime-gpu
 # 1.24.4+ dropped Python 3.10 (METADATA `Requires-Python: >=3.11`).
@@ -65,3 +66,25 @@ dependencies = ["onnxruntime>=1.25.1,<1.26"]
 features = ["extension-module", "cpu"]
 python-source = "python"
 module-name = "sparrow_engine._sparrow_engine_core"
+
+# Phase F audit-fix round 1 (2026-05-28, B-04): NO `[project.scripts]` block.
+#
+# `pip install sparrow-engine` ships the Python API only (`import sparrow_engine`).
+# It does NOT install the `spe` / `spe-gpu` / `sparrow-engine-server` CLI binaries
+# in `$VIRTUAL_ENV/bin/`. Those ship via:
+#   - CLI tarball (`scripts/package_cli_tarball.sh` -> GitHub Release assets,
+#     consumed by `installer/sparrow-engine-install.sh`)
+#   - Homebrew formula (`sparrow-engine`, `sparrow-engine-gpu`)
+#   - Direct `cargo install --path sparrow-engine-cli`
+#
+# Adding `[project.scripts]` here would require a Python `main()` callable, but
+# the Rust CLI binaries are NOT bundled in this wheel — it is a PyO3
+# extension-module wheel (see `tool.maturin.module-name` above). The three
+# rejected alternatives (Python shim that subprocess-execs a system `spe`;
+# split into a maturin `bin`-mode wheel; vendor the binary as wheel data) all
+# either degrade UX or violate Phase 3.8 Phase C wheel-size discipline. Full
+# rationale in `docs/review/phase4.5-cleanup-audit-fix-f/round_01/reviewer_review.md § B-04`.
+#
+# Phase G doc sweep owns updating `docs/install.md` + `docs/master_plan.md` to
+# reflect this (Phase 2.5 functionality-consistency rule is satisfied by
+# Python-API ↔ CLI-subcommand parity, not by pip installing the binary).

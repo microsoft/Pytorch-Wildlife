@@ -70,12 +70,170 @@ jobs:
       - name: Verify installer/*.ps1 files start with UTF-8 BOM if non-ASCII
         run: python3 installer/check_ps1_bom.py
 
+  # ---------------------------------------------------------------------------
+  # Preflight: version consistency guard (Phase F audit-fix round 1, B-03).
+  #
+  # Asserts at tag-push time that the three version sources agree:
+  #   1. git tag                                  (refs/tags/vX.Y.Z, stripped 'v')
+  #   2. sparrow-engine-cli/Cargo.toml            ([package].version — the source `spe --version` reads via CARGO_PKG_VERSION at sparrow-engine-cli/src/main.rs:43)
+  #   3. sparrow-engine-python/pyproject.toml     ([project].version — the source the PyPI wheel METADATA carries)
+  #
+  # All three MUST equal each other before any wheel / CLI tarball build starts.
+  # A mismatch means the tag was cut without bumping one of the manifests, which
+  # would either (a) ship a wheel whose METADATA disagrees with PyPI's stored
+  # version (publish-pypi-cpu's existing tag-vs-wheel check would catch THAT but
+  # too late — the GPU build also runs unnecessarily) or (b) ship a CLI tarball
+  # whose `spe --version` output disagrees with the wheel users see in `pip show`.
+  #
+  # Surfaced by Phase 4.5 lane 1 finding L1-F5 (MT-4.5-97/-98/-102): `spe --version`
+  # reported `0.1.0` while PyPI shipped 0.1.12 and brew shipped 0.1.10. Once Phase D
+  # bumps sparrow-engine-cli/Cargo.toml in lockstep with pyproject.toml, this guard
+  # prevents future drift.
+  #
+  # Gated to tag-push: workflow_dispatch / push-to-branch don't carry a tag-name
+  # commitment so the comparison is N/A and the job no-ops (skipped by `if:`).
+  # This means downstream `needs:` lists can include this job without slowing
+  # non-release runs.
+  # ---------------------------------------------------------------------------
+  check-version-consistency:
+    name: Preflight — version consistency (tag ↔ Cargo.toml ↔ pyproject.toml)
+    # Runs on every trigger. The internal step short-circuits with a PASS
+    # message on non-tag-push triggers so downstream `needs:` are unambiguously
+    # satisfied across workflow_dispatch / branch-push / tag-push. (Relying on
+    # GitHub's "skipped jobs satisfy needs" implicit rule is fragile when the
+    # downstream's own `if:` interacts with needs.* results.)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare git tag, sparrow-engine-cli Cargo.toml, sparrow-engine-python pyproject.toml
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Trigger taxonomy (Phase F R2 F-R2-4):
+          #   tag-push       : enforce tag ↔ cli ↔ py three-way agreement (release-critical).
+          #   workflow_dispatch: enforce cli ↔ py two-way agreement (manual release rehearsal
+          #                     — no tag yet, but Cargo/Python must already agree so a follow-up
+          #                     tag-push doesn't blow up).
+          #   branch-push / PR: skip (most common dev case; pre-tag drift is intentional and
+          #                     gets caught at workflow_dispatch / tag-push time).
+          mode=""
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            mode="tag-push"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            mode="workflow-dispatch"
+          else
+            echo "Non-release trigger (event=${GITHUB_EVENT_NAME}, ref=${GITHUB_REF}). Skipping check."
+            exit 0
+          fi
+          echo "Enforcement mode: $mode"
+          # Strip optional leading 'v' from the tag name. Empty string on
+          # workflow_dispatch (no tag context); tag-version comparisons below
+          # are gated on `mode == tag-push` so the empty value is never read
+          # for enforcement in that path.
+          tag_version=""
+          if [ "$mode" = "tag-push" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+          fi
+
+          # sparrow-engine-cli Cargo.toml [package].version — awk-extracted (no python heredoc,
+          # no cargo / jq install). Looks for the `version = "..."` line under the `[package]`
+          # section header, stops at the next `[…]` section.
+          cli_version="$(awk '
+            /^\[package\][[:space:]]*$/      { in_pkg = 1; next }
+            in_pkg && /^\[/                  { in_pkg = 0 }
+            in_pkg && /^version[[:space:]]*=/{ match($0, /"[^"]+"/); print substr($0, RSTART+1, RLENGTH-2); exit }
+          ' sparrow-engine/sparrow-engine-cli/Cargo.toml)"
+          if [ -z "$cli_version" ]; then
+            echo "::error::could not extract [package].version from sparrow-engine/sparrow-engine-cli/Cargo.toml"
+            exit 2
+          fi
+
+          # sparrow-engine-python pyproject.toml [project].version — same awk pattern against [project].
+          py_version="$(awk '
+            /^\[project\][[:space:]]*$/      { in_proj = 1; next }
+            in_proj && /^\[/                 { in_proj = 0 }
+            in_proj && /^version[[:space:]]*=/{ match($0, /"[^"]+"/); print substr($0, RSTART+1, RLENGTH-2); exit }
+          ' sparrow-engine/sparrow-engine-python/pyproject.toml)"
+          if [ -z "$py_version" ]; then
+            echo "::error::could not extract [project].version from sparrow-engine/sparrow-engine-python/pyproject.toml"
+            exit 2
+          fi
+
+          echo "Tag version (stripped 'v'):           ${tag_version:-<n/a — workflow_dispatch>}"
+          echo "sparrow-engine-cli Cargo.toml:        $cli_version"
+          echo "sparrow-engine-python pyproject.toml: $py_version"
+
+          fail=0
+          if [ "$mode" = "tag-push" ]; then
+            if [ "$tag_version" != "$cli_version" ]; then
+              echo "::error::tag ($tag_version) ≠ sparrow-engine-cli Cargo.toml ($cli_version)"
+              echo "  -> bump sparrow-engine/sparrow-engine-cli/Cargo.toml [package].version to '$tag_version' before re-tagging."
+              fail=1
+            fi
+            if [ "$tag_version" != "$py_version" ]; then
+              echo "::error::tag ($tag_version) ≠ sparrow-engine-python pyproject.toml ($py_version)"
+              echo "  -> bump sparrow-engine/sparrow-engine-python/pyproject.toml [project].version to '$tag_version' before re-tagging."
+              fail=1
+            fi
+          fi
+          # cli ↔ py agreement is enforced on BOTH tag-push and workflow_dispatch
+          # (F-R2-4 round-2 fix): a workflow_dispatch release rehearsal must surface
+          # version drift before tag-push time, otherwise the manual dispatch path
+          # gives false-PASS while the eventual tag still fails.
+          if [ "$cli_version" != "$py_version" ]; then
+            echo "::error::sparrow-engine-cli Cargo.toml ($cli_version) ≠ sparrow-engine-python pyproject.toml ($py_version)"
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "FAIL: version consistency guard (Phase F B-03)."
+            echo "Refs: docs/review/phase4.5-cleanup-audit-fix-f/round_01/reviewer_review.md § B-03"
+            echo "      docs/review/phase4.5-cleanup-audit-fix-f/round_02/fixer_report.md § F-R2-4"
+            exit 1
+          fi
+          if [ "$mode" = "tag-push" ]; then
+            echo "PASS: all three version sources agree on '$tag_version'."
+          else
+            echo "PASS (workflow_dispatch): cli ↔ py agree on '$cli_version' (tag check skipped — no tag context)."
+          fi
+
+      - name: Compare ORT_VERSION across Dockerfile.cpu and Dockerfile.gpu
+        shell: bash
+        run: |
+          set -euo pipefail
+          # F-R2-6 (round 2): ARG ORT_VERSION is duplicated across the two
+          # Dockerfiles. A future ORT bump must touch both atomically or the
+          # CPU and GPU images drift into different ORT runtimes — which is
+          # the exact root cause B-06/B-07 fixed in round 1. Cheap grep guard
+          # in CI is simpler than refactoring to a shared build-arg source.
+          cpu_ort="$(awk '/^ARG[[:space:]]+ORT_VERSION=/{
+            sub(/^ARG[[:space:]]+ORT_VERSION=/, ""); print; exit
+          }' sparrow-engine/docker/Dockerfile.cpu)"
+          gpu_ort="$(awk '/^ARG[[:space:]]+ORT_VERSION=/{
+            sub(/^ARG[[:space:]]+ORT_VERSION=/, ""); print; exit
+          }' sparrow-engine/docker/Dockerfile.gpu)"
+          if [ -z "$cpu_ort" ] || [ -z "$gpu_ort" ]; then
+            echo "::error::could not extract ARG ORT_VERSION from one or both Dockerfiles"
+            echo "  Dockerfile.cpu: '${cpu_ort:-<missing>}'"
+            echo "  Dockerfile.gpu: '${gpu_ort:-<missing>}'"
+            exit 2
+          fi
+          echo "Dockerfile.cpu ARG ORT_VERSION: $cpu_ort"
+          echo "Dockerfile.gpu ARG ORT_VERSION: $gpu_ort"
+          if [ "$cpu_ort" != "$gpu_ort" ]; then
+            echo "::error::ARG ORT_VERSION drift: Dockerfile.cpu=$cpu_ort, Dockerfile.gpu=$gpu_ort"
+            echo "  -> bump both Dockerfiles atomically; ORT-side ABI must match across CPU and GPU images."
+            echo "  Refs: docs/review/phase4.5-cleanup-audit-fix-f/round_02/fixer_report.md § F-R2-6"
+            exit 1
+          fi
+          echo "PASS: Dockerfile.cpu and Dockerfile.gpu agree on ORT_VERSION=$cpu_ort."
+
   # -------- CPU build matrix --------
 
   build-cpu-linux:
     name: Build CPU wheel (Linux manylinux_2_28 x86_64)
     runs-on: ubuntu-latest
-    needs: check-installer-ps1-bom
+    needs: [check-installer-ps1-bom, check-version-consistency]
     steps:
       - uses: actions/checkout@v4
 
@@ -156,7 +314,7 @@ jobs:
   build-cpu-macos-arm64:
     name: Build CPU wheel (macOS arm64)
     runs-on: macos-14
-    needs: check-installer-ps1-bom
+    needs: [check-installer-ps1-bom, check-version-consistency]
     env:
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
@@ -199,7 +357,7 @@ jobs:
   build-cpu-windows:
     name: Build CPU wheel (Windows x86_64)
     runs-on: windows-latest
-    needs: check-installer-ps1-bom
+    needs: [check-installer-ps1-bom, check-version-consistency]
     steps:
       - uses: actions/checkout@v4
 
@@ -243,7 +401,7 @@ jobs:
   build-gpu-linux:
     name: Build GPU wheel (Linux x86_64, CUDA 12.6 + cuDNN, Rocky 8 / glibc 2.28)
     runs-on: ubuntu-latest
-    needs: check-installer-ps1-bom
+    needs: [check-installer-ps1-bom, check-version-consistency]
     container:
       # Rocky 8 base = RHEL 8 clone = glibc 2.28 (the manylinux_2_28 floor).
       # Phase F (2026-05-25): swapped from ubuntu24.04 (glibc 2.39) so the
@@ -338,7 +496,7 @@ jobs:
   build-gpu-windows:
     name: Build GPU wheel (Windows x86_64)
     runs-on: windows-latest
-    needs: check-installer-ps1-bom
+    needs: [check-installer-ps1-bom, check-version-consistency]
     # No CUDA Toolkit on the runner. cudarc's `fallback-dynamic-loading`
     # feature (vendor/cudarc/build.rs:70-78) activates the `dynamic-loading`
     # cfg from the feature flag alone, with no nvcc / driver probing.
@@ -607,7 +765,7 @@ jobs:
   build-cli-linux-cpu:
     name: Build CLI tarball (sparrow-engine-cpu, Linux x86_64)
     runs-on: ubuntu-latest
-    needs: check-installer-ps1-bom
+    needs: [check-installer-ps1-bom, check-version-consistency]
     container:
       # manylinux_2_28 = glibc 2.28 floor, matches build-cpu-linux's wheel target.
       image: quay.io/pypa/manylinux_2_28_x86_64
@@ -671,7 +829,7 @@ jobs:
   build-cli-linux-gpu:
     name: Build CLI tarball (sparrow-engine-gpu, Linux x86_64)
     runs-on: ubuntu-latest
-    needs: check-installer-ps1-bom
+    needs: [check-installer-ps1-bom, check-version-consistency]
     container:
       # Same Rocky 8 / glibc 2.28 image as build-gpu-linux.
       image: nvidia/cuda:12.6.3-cudnn-devel-rockylinux8
@@ -761,7 +919,7 @@ jobs:
   build-cli-macos-arm64:
     name: Build CLI tarball (sparrow-engine-cpu, macOS arm64)
     runs-on: macos-14
-    needs: check-installer-ps1-bom
+    needs: [check-installer-ps1-bom, check-version-consistency]
     env:
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
@@ -825,7 +983,7 @@ jobs:
   build-cli-windows:
     name: Build CLI tarball (sparrow-engine-cpu, Windows x86_64)
     runs-on: windows-latest
-    needs: check-installer-ps1-bom
+    needs: [check-installer-ps1-bom, check-version-consistency]
     steps:
       - uses: actions/checkout@v4
 

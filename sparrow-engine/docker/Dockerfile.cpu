@@ -23,8 +23,15 @@ COPY sparrow-engine-cli/ sparrow-engine-cli/
 COPY sparrow-engine-python/ sparrow-engine-python/
 COPY vendor/ vendor/
 
-# Download ORT shared library (dynamic linking avoids glibc 2.38+ requirement of static builds)
-ARG ORT_VERSION=1.24.2
+# Download ORT shared library (dynamic linking avoids glibc 2.38+ requirement of static builds).
+#
+# Phase F audit-fix round 1 (2026-05-28, B-06): bumped 1.24.2 -> 1.25.1.
+# Phase 3.8 Phase C commit 5c86dbf added `ort/load-dynamic` + `api-24` features to
+# `sparrow-engine-cpu/Cargo.toml`. `api-24` targets ORT runtime 1.25.x; the older
+# 1.24.2 tarball is API-incompatible and either silently spins or aborts at first
+# ORT call. Aligning the Docker ORT to the same `>=1.25.1,<1.26` pin the Python wheel
+# carries (sparrow-engine-python/pyproject.toml) keeps every consumer on one ORT major.minor.
+ARG ORT_VERSION=1.25.1
 RUN mkdir -p /build/ort-lib && \
     curl -sL https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz | \
     tar xz --strip-components=1 -C /build/ort-lib
@@ -45,6 +52,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /build/target/release/sparrow-engine-server /usr/local/bin/
 COPY --from=builder /build/ort-lib/lib/libonnxruntime.so* /usr/local/lib/
 RUN ldconfig
+# Phase F audit-fix round 1 (2026-05-28, B-06): `sparrow-engine-server` is built with
+# `ort/load-dynamic` (sparrow-engine-cpu/Cargo.toml:14). The Rust binding dlopens the
+# bare unversioned name `libonnxruntime.so` when `ORT_DYLIB_PATH` is unset. `ldconfig`
+# above only indexes the SONAME `libonnxruntime.so.1` -> `libonnxruntime.so.1.25.1`;
+# the unversioned name has no `/etc/ld.so.cache` entry and the regular file copied by
+# the wildcard COPY above is invisible to dlopen-by-name lookup. Adding an explicit
+# symlink anchored on the ldconfig-managed SONAME makes the bare-name dlopen succeed
+# without ENV LD_LIBRARY_PATH or ENV ORT_DYLIB_PATH workarounds, and survives future
+# `ARG ORT_VERSION` bumps unchanged.
+# Refs: Phase C Lane 3 finding F2 (LD_DEBUG=libs trace) + Phase F reviewer_review.md B-06.
+RUN ln -sf libonnxruntime.so.1 /usr/local/lib/libonnxruntime.so && ldconfig
 
 RUN groupadd -g 1000 sparrow-engine 2>/dev/null || true && useradd -u 1000 -g 1000 -s /sbin/nologin sparrow-engine 2>/dev/null || true
 USER 1000:1000
