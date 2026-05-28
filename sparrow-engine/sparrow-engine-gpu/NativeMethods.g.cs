@@ -295,6 +295,22 @@ namespace SparrowEngine.Native
         internal static extern byte* sparrow_engine_last_error();
 
         /// <summary>
+        ///  Returns a pointer to a static, null-terminated UTF-8 string with the
+        ///  sparrow-engine-gpu crate version (matches `[package].version` in
+        ///  `sparrow-engine-gpu/Cargo.toml`). Caller MUST NOT free.
+        ///
+        ///  Phase D B-12: useful for installer / Studio Local / brew `test do` smoke
+        ///  tests — a zero-arg, zero-allocation entry point that proves DLL load +
+        ///  symbol resolution without spinning up an engine. Mirrors the CPU FFI
+        ///  surface (32-symbol invariant enforced by G5 acceptance gate).
+        ///
+        ///  # Safety
+        ///  Thread-safe. Returned pointer is valid for the lifetime of the process.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* sparrow_engine_version();
+
+        /// <summary>
         ///  Compute SHA-256 hash of a file. Returns hex string or null on error.
         ///  Caller must free with `sparrow_engine_hash_result_free`.
         ///

@@ -1691,6 +1691,29 @@ pub unsafe extern "C" fn sparrow_engine_last_error() -> *const c_char {
 }
 
 // ===========================================================================
+// Version / metadata exports
+// ===========================================================================
+
+/// Returns a pointer to a static, null-terminated UTF-8 string with the
+/// sparrow-engine-gpu crate version (matches `[package].version` in
+/// `sparrow-engine-gpu/Cargo.toml`). Caller MUST NOT free.
+///
+/// Phase D B-12: useful for installer / Studio Local / brew `test do` smoke
+/// tests — a zero-arg, zero-allocation entry point that proves DLL load +
+/// symbol resolution without spinning up an engine. Mirrors the CPU FFI
+/// surface (32-symbol invariant enforced by G5 acceptance gate).
+///
+/// # Safety
+/// Thread-safe. Returned pointer is valid for the lifetime of the process.
+#[no_mangle]
+pub extern "C" fn sparrow_engine_version() -> *const c_char {
+    // concat! evaluates at compile time; appending "\0" lets us reuse the
+    // static byte slice as a C string without a runtime CString allocation.
+    static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+    VERSION.as_ptr() as *const c_char
+}
+
+// ===========================================================================
 // Phase 3: Utility exports
 // ===========================================================================
 
