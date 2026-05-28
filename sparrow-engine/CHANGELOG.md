@@ -41,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     mismatch caused the GPU server to boot and list models, then silently spin on the
     first CUDA EP / Session creation call). Same defensive
     `ln -sf libonnxruntime.so.1 /usr/local/lib/libonnxruntime.so && ldconfig` for parity
-    with B-06. Round 2 verified end-to-end via CPU + GPU image rebuilds + `/health` smoke
+    with B-06. Round 2 verified end-to-end via CPU + GPU image rebuilds + `/healthz` +
+    `/v1/health` smoke
     + GPU `POST /v1/detect` against MDv6 — see
     `docs/review/phase4.5-cleanup-audit-fix-f/round_02/docker_smoke_results.txt`.
   - **F-R2-6** (round 2): new `check-version-consistency` step asserts
