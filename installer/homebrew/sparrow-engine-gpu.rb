@@ -26,8 +26,8 @@ class SparrowEngineGpu < Formula
 
   def caveats
     <<~EOS
-      sparrow-engine-gpu auto-discovers cuDNN 9 + nvJPEG from common host
-      locations at startup via a small wrapper script that brew installs
+      sparrow-engine-gpu auto-discovers cuDNN 9 + nvJPEG + nvRTC from common
+      host locations at startup via a small wrapper script that brew installs
       alongside the binary. The wrapper checks (in order):
 
         1. SPARROW_ENGINE_CUDA_LIB_DIR (user override; honoured if set)
@@ -36,8 +36,10 @@ class SparrowEngineGpu < Formula
         4. /usr/lib/python3/dist-packages/tensorflow  (Lambda Stack / TF)
         5. /usr/local/cuda/lib64                      (NVIDIA CUDA toolkit)
         6. /usr/lib/x86_64-linux-gnu                  (Ubuntu apt nvidia-cudnn)
+        7. /opt/nvidia/cuda/lib64                     (HPC-style CUDA installs)
 
-      If libcudnn.so.9 is not in any of these, install it via ONE of:
+      If libcudnn.so.9 / libnvjpeg.so.12 / libnvrtc.so are not in any of these,
+      install them via ONE of:
 
       Option A — system CUDA (Ubuntu / Debian, recommended for servers):
         sudo apt install nvidia-cuda-toolkit nvidia-cudnn
@@ -46,7 +48,7 @@ class SparrowEngineGpu < Formula
         uv venv ~/.sparrow-engine/cuda-sidecars --python 3.11
         ~/.sparrow-engine/cuda-sidecars/bin/pip install nvidia-cudnn-cu12 \\
             nvidia-cublas-cu12 nvidia-curand-cu12 nvidia-cufft-cu12 \\
-            nvidia-nvjpeg-cu12 nvidia-cuda-runtime-cu12
+            nvidia-nvjpeg-cu12 nvidia-cuda-runtime-cu12 nvidia-cuda-nvrtc-cu12
 
       Verify the host is ready (NO env-var tweaks required):
         spe-gpu device       # expected: {"device":"cuda:0"}
@@ -56,7 +58,7 @@ class SparrowEngineGpu < Formula
 
       The tarball is ~256 MB — bundles libonnxruntime + ORT CUDA provider
       sidecars. NVIDIA-managed shared libraries (cuDNN / cuBLAS / nvJPEG /
-      CUDA runtime) are NOT bundled (NVIDIA license forbids redistribution).
+      nvRTC / CUDA runtime) are NOT bundled (NVIDIA license forbids redistribution).
     EOS
   end
 
@@ -86,8 +88,8 @@ class SparrowEngineGpu < Formula
       SE_LIBEXEC="#{libexec}"
 
       add_lib_dir() {
-        # $1 must contain libcudnn.so.9 or libnvjpeg.so.12 to be useful;
-        # caller already checked existence.
+        # $1 must contain libcudnn.so.9 / libnvjpeg.so.12 / libnvrtc.so to be
+        # useful; caller already checked existence.
         case ":$LD_LIBRARY_PATH:" in
           *":$1:"*) ;;
           *) LD_LIBRARY_PATH="$1${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
@@ -106,6 +108,7 @@ class SparrowEngineGpu < Formula
           /usr/lib/python3/dist-packages/jax_cuda12_plugin \\
           /usr/local/cuda/lib64 \\
           /usr/lib/x86_64-linux-gnu \\
+          /opt/nvidia/cuda/lib64 \\
           /usr/lib64; do
           if [ -e "$dir/libcudnn.so.9" ]; then
             add_lib_dir "$dir"
@@ -117,10 +120,31 @@ class SparrowEngineGpu < Formula
         # search because cuDNN and nvJPEG often live in different dirs).
         for dir in \\
           "$HOME/.sparrow-engine/cuda-sidecars"/lib/python*/site-packages/nvidia/nvjpeg/lib \\
+          /usr/lib/python3/dist-packages/torch/lib \\
           /usr/local/cuda/lib64 \\
           /usr/lib/x86_64-linux-gnu \\
+          /opt/nvidia/cuda/lib64 \\
           /usr/lib64; do
           if [ -e "$dir/libnvjpeg.so.12" ]; then
+            add_lib_dir "$dir"
+            break
+          fi
+        done
+
+        # Auto-discover libnvrtc.so / libnvrtc.so.12 from common locations.
+        # cudarc (sparrow-engine-gpu kernel-compile path) dlopens nvrtc at
+        # runtime; without it, the first GPU inference panics on fresh
+        # containers with no system CUDA. B-05 fix — same 7-location search
+        # as cuDNN (pip wheel ships in `nvidia/cuda_nvrtc/lib`).
+        for dir in \\
+          "$HOME/.sparrow-engine/cuda-sidecars"/lib/python*/site-packages/nvidia/cuda_nvrtc/lib \\
+          /usr/lib/python3/dist-packages/torch/lib \\
+          /usr/lib/python3/dist-packages/tensorflow \\
+          /usr/local/cuda/lib64 \\
+          /usr/lib/x86_64-linux-gnu \\
+          /opt/nvidia/cuda/lib64 \\
+          /usr/lib64; do
+          if [ -e "$dir/libnvrtc.so" ] || [ -e "$dir/libnvrtc.so.12" ]; then
             add_lib_dir "$dir"
             break
           fi
@@ -138,6 +162,13 @@ class SparrowEngineGpu < Formula
     # resolver, but not ORT init. ORT init requires an NVIDIA GPU which
     # the brew test sandbox cannot guarantee. Operators verify device
     # with `spe-gpu device` post-install.
-    assert_match version.to_s, shell_output("#{bin}/spe-gpu --version")
+    #
+    # Version-agnostic shape check (B-03 fix): clap emits the binary name
+    # followed by CARGO_PKG_VERSION + the " (GPU flavor)" suffix from
+    # `sparrow-engine-cli/src/main.rs:45`. Pinning to the formula's
+    # `version` string drifts whenever CARGO_PKG_VERSION bumps ahead of
+    # the brew tap.
+    assert_match(/\Aspe-gpu \d+\.\d+\.\d+ \(GPU flavor\)\Z/,
+                 shell_output("#{bin}/spe-gpu --version").strip)
   end
 end
