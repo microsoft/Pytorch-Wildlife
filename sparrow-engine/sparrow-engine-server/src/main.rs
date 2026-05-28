@@ -15,6 +15,7 @@ use tracing::{error, info, warn};
 /// the runtime, ORT, the model catalog, or a TCP listener (MT-4.1-26).
 fn main() {
     let cli = Cli::parse();
+    boot_trace("after cli parse");
 
     match cli.command {
         Some(Command::Healthcheck) => {
@@ -32,15 +33,32 @@ fn main() {
                     std::process::exit(1);
                 }
             };
+            boot_trace("entering tokio runtime");
             runtime.block_on(run_server());
         }
     }
 }
 
+/// Phase D B-09 instrumentation: emit a stage marker to stderr when
+/// `SPARROW_ENGINE_BOOT_TRACE=1` is set. Bypasses the tracing subscriber so the
+/// markers fire even if `init_tracing` itself deadlocks. Stderr is line-buffered
+/// for ttys; we manually flush to cover pipes/redirects. Behavior unchanged when
+/// the env var is absent — this is an opt-in diagnostic, NOT a runtime workaround.
+fn boot_trace(stage: &str) {
+    if std::env::var_os("SPARROW_ENGINE_BOOT_TRACE").is_some() {
+        eprintln!("[boot-trace] {}", stage);
+        let _ = std::io::Write::flush(&mut std::io::stderr());
+    }
+}
+
 async fn run_server() {
     let config = Config::from_env();
+    boot_trace("config loaded");
 
+    boot_trace("before init_tracing");
     init_tracing(&config);
+    boot_trace("after init_tracing");
+    info!("tracing subscriber initialized");
 
     // Build engine config.
     let device = parse_device(&config.device);
@@ -54,6 +72,7 @@ async fn run_server() {
 
     // P4-AF-12: log + clean exit on engine-init failure instead of Rust panic
     // exit 101 + stack trace, matching `parse_device`'s style.
+    boot_trace("before engine_new");
     let engine = match Engine::new(engine_config) {
         Ok(e) => e,
         Err(e) => {
@@ -102,6 +121,7 @@ async fn run_server() {
 
     // P4-AF-12: log + clean exit on bind failure (e.g. EADDRINUSE) instead of
     // Rust panic exit 101 + stack trace.
+    boot_trace("before bind");
     let listener = match TcpListener::bind(config.bind_addr).await {
         Ok(l) => l,
         Err(e) => {
