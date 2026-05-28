@@ -248,6 +248,14 @@ impl ClassifyResult {
     fn __len__(&self) -> usize {
         self.classifications.len()
     }
+
+    /// First classification (highest confidence) or None when empty.
+    /// Ergonomic accessor so callers can write `c.top1.label` instead of
+    /// `c.classifications[0].label`. Added per Phase D B-11.
+    #[getter]
+    fn top1(&self) -> Option<Classification> {
+        self.classifications.first().cloned()
+    }
 }
 
 /// A detection with an optional classification (from pipeline).
@@ -402,6 +410,14 @@ pub struct ModelInfo {
     pub id: String,
     #[pyo3(get)]
     pub model_type: String,
+    /// Manifest [model].subtype hint ("standard" | "overhead"). Phase D B-10:
+    /// surfaces the `[model].subtype = "overhead"` distinction (HerdNet, OWL-T)
+    /// that was folded into ModelType::OverheadDetector at the native layer.
+    /// Derived from `model_type` since native sparrow_engine::ModelInfo does
+    /// not carry subtype directly; widening the native struct is deferred to
+    /// Phase E/F (see Phase D reviewer cross-scope finding 1).
+    #[pyo3(get)]
+    pub subtype: String,
     #[pyo3(get)]
     pub default: bool,
     #[pyo3(get)]
@@ -418,8 +434,8 @@ pub struct ModelInfo {
 impl ModelInfo {
     fn __repr__(&self) -> String {
         format!(
-            "ModelInfo(id='{}', model_type='{}', default={})",
-            self.id, self.model_type, self.default
+            "ModelInfo(id='{}', model_type='{}', subtype='{}', default={})",
+            self.id, self.model_type, self.subtype, self.default
         )
     }
 }
@@ -482,9 +498,21 @@ fn convert_model_type(mt: ModelType) -> &'static str {
 }
 
 fn convert_model_info(m: &sparrow_engine::ModelInfo) -> ModelInfo {
+    // Phase D B-10: derive subtype string from model_type. Native
+    // sparrow_engine::ModelInfo does not carry the manifest subtype directly;
+    // only ModelType::OverheadDetector encodes `[model].subtype = "overhead"`
+    // (per `derive_model_type` in sparrow-engine-types). This mapping is
+    // lossless given the current ModelSubtype = {Standard, Overhead} enum.
+    // Widening the native struct is deferred (cross-scope finding 1).
+    let subtype = match m.model_type {
+        ModelType::OverheadDetector => "overhead",
+        _ => "standard",
+    }
+    .to_owned();
     ModelInfo {
         id: m.id.clone(),
         model_type: convert_model_type(m.model_type).to_owned(),
+        subtype,
         default: m.default,
         version: m.version.clone(),
         description: m.description.clone(),
