@@ -289,7 +289,7 @@ function Test-Sha256 {
     $expected = ($expectedLine -split '\s+')[0]
     $actual = (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLower()
     if ($expected.ToLower() -ne $actual) {
-        Die 6 "sha256 mismatch on $File: expected $expected, got $actual."
+        Die 6 "sha256 mismatch on ${File}: expected $expected, got $actual."
     }
 }
 
