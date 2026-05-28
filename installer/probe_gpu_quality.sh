@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
 # installer/probe_gpu_quality.sh — sourceable layer-2 quality probe
-#                                  (cuDNN ≥9.10 floor + driver-version sanity).
+#                                  (GPU runtime sidecar DLL surface +
+#                                  cuDNN ≥9.10 floor + driver-version sanity).
 #
 # Purpose
-#   Layer-2 of the Sparrow Engine install-time selector. Runs ONLY after layer-1
-#   (`probe.sh`) has returned `gpu`. The basic CUDA probe answers "is CUDA
-#   reachable?" — this layer answers two follow-up questions:
-#     1. Is cuDNN ≥9.10 reachable? (canonical project floor — cuDNN 9.8 has
+#   Layer-2 of the Sparrow Engine install-time selector. Runs ONLY after
+#   layer-1 (`probe.sh`) has returned `gpu`. The basic CUDA probe answers
+#   "is CUDA reachable?" — this layer answers three follow-up questions:
+#     1. Are all hard-required GPU runtime sidecar libraries reachable?
+#        ORT 1.25.1's `libonnxruntime_providers_cuda.so` DT_NEEDED list
+#        (verified via `readelf -d` on the published wheel, 2026-05-27)
+#        names six CUDA libs: `libcudart.so.12`, `libcublas.so.12`,
+#        `libcublasLt.so.12`, `libcurand.so.10`, `libcufft.so.11`,
+#        `libcudnn.so.9`. The sparrow-engine GPU image-decode path additionally
+#        loads `libnvjpeg.so.12` via dlopen — missing nvJPEG fails at first
+#        inference with `SparrowEngineError::NvjpegUnavailable`
+#        (sparrow-engine-gpu/src/models/{yolo,tiled,classifier}.rs).
+#     2. Is cuDNN ≥9.10 reachable? (canonical project floor — cuDNN 9.8 has
 #        the asymmetric-padding ConvFwd engine bug that breaks SpeciesNet on
 #        sm_89; sources cited in `probe_cudnn_check` below).
-#     2. Is the GPU compute-capability ≥sm_80? (FP16 production cells need
+#     3. Is the GPU compute-capability ≥sm_80? (FP16 production cells need
 #        Ampere Tensor Cores; T4 and earlier silently fall back to FP32 at
 #        2-3× the latency of advertised perf).
 #
@@ -21,8 +31,14 @@
 #           ok)          : ;;                                # silent install
 #           sm_warn)     warn "FP16 perf will be degraded" ;;
 #           cudnn_warn)  warn "SpeciesNet will fail until cuDNN ≥9.10" ;;
-#           cudnn_err)   die 11 "cuDNN <9.10 — block install" ;;
+#           cudnn_err)   die 11 "GPU runtime sidecar missing — block install" ;;
 #       esac
+#
+#   The `cudnn_err` verdict is the hard-fail bucket for ANY missing GPU
+#   runtime prerequisite (cuDNN, cuBLAS, cuFFT, nvJPEG, etc.); the verdict
+#   name is preserved for back-compat with `sparrow-engine-install.sh`'s
+#   case-handling. The verdict REASON string carries which specific library
+#   is the actual culprit.
 #
 #   Direct invocation:
 #       bash installer/probe_gpu_quality.sh    # stdout = quality verdict
@@ -40,6 +56,14 @@
 #   docs/design/phase4.1-install-selector/round_02/scripts-architect_proposal.md § 1.2.1
 #   docs/design/phase4.1-install-selector/round_01/scripts-architect_proposal.md § 1.2.1 (canonical pseudocode)
 #
+# DLL surface ground truth (2026-05-27, RP-20):
+#   ORT 1.25.1 CUDA provider DT_NEEDED CUDA libs (readelf -d
+#   libonnxruntime_providers_cuda.so):
+#     libcublasLt.so.12, libcublas.so.12, libcurand.so.10, libcufft.so.11,
+#     libcudart.so.12, libcudnn.so.9
+#   Engine-side nvJPEG (dlopen at first JpegDecoder::new):
+#     libnvjpeg.so.12
+#
 # cuDNN ≥9.10 floor citation (verified 2026-05-08):
 #   - sparrow-engine/scripts/ort-env.sh:167-168 — "cuDNN: we require 9.10+ for SpeciesNet
 #     on sm_89 (cuDNN 9.8 has a Conv engine bug with asymmetric padding —
@@ -51,9 +75,119 @@
 # This script must NEVER `exit` from a sourced context — caller may have
 # sourced it. Use `return` from inside the function.
 
+# ---------------------------------------------------------------------------
+# Helper: search for a CUDA runtime sidecar library by exact basename.
+#
+# Looks in the canonical Linux locations sparrow-engine-gpu's wrapper
+# script (installer/homebrew/sparrow-engine-gpu.rb caveats) advertises,
+# plus the user-set $LD_LIBRARY_PATH. Returns the first matching absolute
+# path on stdout, or empty string if not found.
+#
+# Search order (mirrors the brew GPU wrapper's auto-discovery so the
+# probe's "yes / no" verdict agrees with what `spe-gpu` will actually
+# resolve at runtime):
+#   1. Each entry of $LD_LIBRARY_PATH (colon-separated).
+#   2. ~/.sparrow-engine/cuda-sidecars/lib/python*/site-packages/nvidia/<pkg>/lib
+#      (Python sidecar venv pattern from user-manual.md §2.5 Option B).
+#   3. /usr/lib/python3/dist-packages/torch/lib (Lambda Stack / PyTorch-bundled).
+#   4. /usr/lib/python3/dist-packages/tensorflow (Lambda Stack / TF-bundled).
+#   5. /usr/local/cuda/lib64 (NVIDIA CUDA toolkit / system install).
+#   6. /usr/lib/x86_64-linux-gnu (Ubuntu apt nvidia-cudnn / system).
+#   7. /usr/lib64 + /usr/lib (RHEL / fallback).
+# ---------------------------------------------------------------------------
+_search_required_lib() {
+    _basename="$1"
+    # 1. LD_LIBRARY_PATH (colon-split). Quoting `$LD_LIBRARY_PATH:` and using
+    #    parameter expansion avoids `set -u` blowups when the var is unset.
+    _OLDIFS="$IFS"
+    IFS=':'
+    for _d in ${LD_LIBRARY_PATH:-}; do
+        IFS="$_OLDIFS"
+        if [ -n "$_d" ] && [ -e "$_d/$_basename" ]; then
+            printf '%s\n' "$_d/$_basename"
+            return 0
+        fi
+        IFS=':'
+    done
+    IFS="$_OLDIFS"
+    # 2-7. Deterministic dir list. Glob expansion handles the Python sidecar
+    #      venv variants. `find -maxdepth 4` bounds the cost.
+    for _glob in \
+        "$HOME/.sparrow-engine/cuda-sidecars"/lib/python*/site-packages/nvidia/*/lib \
+        /usr/lib/python3/dist-packages/torch/lib \
+        /usr/lib/python3/dist-packages/tensorflow \
+        /usr/local/cuda/lib64 \
+        /usr/lib/x86_64-linux-gnu \
+        /usr/lib64 \
+        /usr/lib; do
+        # Word-splitting on the glob is intentional — wildcard expansion
+        # produces multiple dirs.
+        for _d in $_glob; do
+            [ -d "$_d" ] || continue
+            if [ -e "$_d/$_basename" ]; then
+                printf '%s\n' "$_d/$_basename"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
 probe_gpu_quality() {
     SPARROW_ENGINE_GPU_QUALITY=""
     SPARROW_ENGINE_GPU_QUALITY_REASON=""
+
+    # 0. Hard-required GPU runtime sidecar libraries (RP-20). Each missing
+    #    library prevents `spe-gpu` from running. Collect ALL missing names
+    #    into a list so the user fixes them in one cycle rather than
+    #    one-per-rerun.
+    _required_libs="
+        libcudart.so.12
+        libcublas.so.12
+        libcublasLt.so.12
+        libcurand.so.10
+        libcufft.so.11
+        libnvjpeg.so.12
+    "
+    _missing_libs=""
+    for _lib in $_required_libs; do
+        if ! _search_required_lib "$_lib" >/dev/null; then
+            if [ -z "$_missing_libs" ]; then
+                _missing_libs="$_lib"
+            else
+                _missing_libs="$_missing_libs $_lib"
+            fi
+        fi
+    done
+
+    if [ -n "$_missing_libs" ]; then
+        # Build install-hint with the matching pip-sidecar package names.
+        # Mapping (basename → wheel) is determined from the canonical
+        # NVIDIA cu12 wheel naming convention.
+        _hint=""
+        for _miss in $_missing_libs; do
+            case "$_miss" in
+                libcudart.so.12)   _pkg="nvidia-cuda-runtime-cu12" ;;
+                libcublas.so.12)   _pkg="nvidia-cublas-cu12" ;;
+                libcublasLt.so.12) _pkg="nvidia-cublas-cu12" ;;
+                libcurand.so.10)   _pkg="nvidia-curand-cu12" ;;
+                libcufft.so.11)    _pkg="nvidia-cufft-cu12" ;;
+                libnvjpeg.so.12)   _pkg="nvidia-nvjpeg-cu12" ;;
+                *)                 _pkg="(unknown)" ;;
+            esac
+            _hint="${_hint}    - ${_miss}  (pip pkg: ${_pkg})
+"
+        done
+        SPARROW_ENGINE_GPU_QUALITY="cudnn_err"
+        SPARROW_ENGINE_GPU_QUALITY_REASON="GPU runtime sidecar(s) missing — \`spe-gpu\` will fail at first inference with a libdl 'cannot open shared object file' error.
+$_hint
+Install via ONE of (see docs/user-manual.md §2.5):
+  Option A — system CUDA: sudo apt install nvidia-cuda-toolkit nvidia-cudnn libnvjpeg
+  Option B — Python sidecar wheels (no root): uv pip install --target ~/.sparrow-engine/cuda-sidecars nvidia-cudnn-cu12 nvidia-cublas-cu12 nvidia-curand-cu12 nvidia-cufft-cu12 nvidia-nvjpeg-cu12 nvidia-cuda-runtime-cu12"
+        export SPARROW_ENGINE_GPU_QUALITY SPARROW_ENGINE_GPU_QUALITY_REASON
+        printf '%s\n' "fail"
+        return 0
+    fi
 
     # 1. cuDNN check — search the engine-canonical paths in priority order.
     #    Mirrors `sparrow-engine/scripts/ort-env.sh::pick_newest_cudnn_dir` (lines
