@@ -631,7 +631,7 @@ jobs:
         working-directory: sparrow-engine
         env:
           FLAVOR: cpu
-          PLATFORM: linux-x86_64
+          TARBALL_PLATFORM: linux-x86_64
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
@@ -720,7 +720,7 @@ jobs:
         working-directory: sparrow-engine
         env:
           FLAVOR: gpu
-          PLATFORM: linux-x86_64
+          TARBALL_PLATFORM: linux-x86_64
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
@@ -783,7 +783,7 @@ jobs:
         working-directory: sparrow-engine
         env:
           FLAVOR: cpu
-          PLATFORM: macos-aarch64
+          TARBALL_PLATFORM: macos-aarch64
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
@@ -858,7 +858,7 @@ jobs:
         shell: bash
         env:
           FLAVOR: cpu
-          PLATFORM: windows-x86_64
+          TARBALL_PLATFORM: windows-x86_64
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then

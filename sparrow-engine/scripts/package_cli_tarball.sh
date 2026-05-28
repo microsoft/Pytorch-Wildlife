@@ -3,13 +3,22 @@
 # (RP-4 Path B, 2026-05-26).
 #
 # Usage:
-#   FLAVOR=cpu|gpu PLATFORM=linux-x86_64|macos-aarch64|windows-x86_64 \
+#   FLAVOR=cpu|gpu TARBALL_PLATFORM=linux-x86_64|macos-aarch64|windows-x86_64 \
 #   VERSION=X.Y.Z [OUT_DIR=dist] [BIN_DIR=target/release] \
 #   ./scripts/package_cli_tarball.sh
 #
+# The env-var name is `TARBALL_PLATFORM` (not `PLATFORM`) because the
+# `ilammy/msvc-dev-cmd@v1` GHA action injects `Platform=x64` into the runner
+# environment. Windows env vars are case-insensitive, so a YAML step-level
+# `env: PLATFORM: windows-x86_64` is silently coerced by GHA to
+# `Platform=windows-x86_64` (lowercase-cased to match the pre-existing entry).
+# MSYS Git Bash is POSIX case-sensitive, so it then sees `$Platform` but NOT
+# `$PLATFORM`, and the original `${PLATFORM:?...}` validation fired. Renaming
+# to `TARBALL_PLATFORM` sidesteps the collision entirely (PW RP-21).
+#
 # Outputs:
-#   <OUT_DIR>/sparrow-engine-<FLAVOR>-<VERSION>-<PLATFORM>.tar.gz
-#   <OUT_DIR>/sparrow-engine-<FLAVOR>-<VERSION>-<PLATFORM>.tar.gz.sha256
+#   <OUT_DIR>/sparrow-engine-<FLAVOR>-<VERSION>-<TARBALL_PLATFORM>.tar.gz
+#   <OUT_DIR>/sparrow-engine-<FLAVOR>-<VERSION>-<TARBALL_PLATFORM>.tar.gz.sha256
 #
 # Archive name matches `installer/sparrow-engine-install.sh:531` so the
 # wrapper script downloads these assets unmodified from GH Releases.
@@ -21,7 +30,7 @@
 # (RP-4 step 1 / commit cdbdb39) AND the one `installer/sparrow-engine-install.sh`
 # pre-existing tarball flow expects:
 #
-#   sparrow-engine-<FLAVOR>-<VERSION>-<PLATFORM>/
+#   sparrow-engine-<FLAVOR>-<VERSION>-<TARBALL_PLATFORM>/
 #   ├── bin/spe[-gpu](.exe)
 #   ├── lib/libonnxruntime.{so.X.Y.Z,dylib,dll}
 #   │   (GPU adds libonnxruntime_providers_cuda.so + _providers_shared.so)
@@ -34,8 +43,15 @@ set -euo pipefail
 # Inputs + validation
 # ---------------------------------------------------------------------------
 
+# Back-compat: accept the legacy PLATFORM env var if TARBALL_PLATFORM is unset
+# (operators may have local scripts that still set PLATFORM=...). The Windows
+# GHA collision documented in the header only bites the YAML env: layer; a
+# direct `PLATFORM=windows-x86_64 ./scripts/package_cli_tarball.sh` shell
+# invocation works fine in any POSIX shell.
+: "${TARBALL_PLATFORM:=${PLATFORM:-}}"
+
 : "${FLAVOR:?FLAVOR=cpu|gpu required}"
-: "${PLATFORM:?PLATFORM=linux-x86_64|macos-arm64|windows-x86_64 required}"
+: "${TARBALL_PLATFORM:?TARBALL_PLATFORM=linux-x86_64|macos-aarch64|windows-x86_64 required}"
 : "${VERSION:?VERSION=X.Y.Z required}"
 OUT_DIR="${OUT_DIR:-dist}"
 BIN_DIR="${BIN_DIR:-target/release}"
@@ -44,12 +60,12 @@ case "$FLAVOR" in
   cpu|gpu) ;;
   *) echo "FLAVOR must be cpu or gpu (got: $FLAVOR)" >&2; exit 2 ;;
 esac
-case "$PLATFORM" in
+case "$TARBALL_PLATFORM" in
   linux-x86_64|macos-aarch64|windows-x86_64) ;;
-  *) echo "PLATFORM must be linux-x86_64 | macos-aarch64 | windows-x86_64 (got: $PLATFORM)" >&2; exit 2 ;;
+  *) echo "TARBALL_PLATFORM must be linux-x86_64 | macos-aarch64 | windows-x86_64 (got: $TARBALL_PLATFORM)" >&2; exit 2 ;;
 esac
-if [[ "$FLAVOR" = "gpu" && "$PLATFORM" != "linux-x86_64" ]]; then
-  echo "GPU flavor is linux-x86_64 only (got PLATFORM=$PLATFORM)" >&2
+if [[ "$FLAVOR" = "gpu" && "$TARBALL_PLATFORM" != "linux-x86_64" ]]; then
+  echo "GPU flavor is linux-x86_64 only (got TARBALL_PLATFORM=$TARBALL_PLATFORM)" >&2
   exit 2
 fi
 
@@ -58,7 +74,7 @@ case "$FLAVOR" in
   cpu) bin_basename="spe" ;;
   gpu) bin_basename="spe-gpu" ;;
 esac
-if [[ "$PLATFORM" = "windows-x86_64" ]]; then
+if [[ "$TARBALL_PLATFORM" = "windows-x86_64" ]]; then
   bin_filename="${bin_basename}.exe"
   archive_ext="zip"
 else
@@ -69,7 +85,7 @@ fi
 # Archive + bundle naming follows the convention `installer/sparrow-engine-install.sh`
 # already expects (line 531: `sparrow-engine-${cli_flavor}-${SPARROW_ENGINE_VERSION}-${OS}-${ARCH}.tar.gz`).
 # Keeping in sync means the installer can grab these GH Release assets unmodified.
-bundle_name="sparrow-engine-${FLAVOR}-${VERSION}-${PLATFORM}"
+bundle_name="sparrow-engine-${FLAVOR}-${VERSION}-${TARBALL_PLATFORM}"
 out_archive="${OUT_DIR}/${bundle_name}.${archive_ext}"
 
 # ---------------------------------------------------------------------------
@@ -107,7 +123,7 @@ if [[ ! -d "$ort_capi" ]]; then
 fi
 
 # Pick the highest-versioned libonnxruntime + (GPU) provider sidecars.
-case "$PLATFORM" in
+case "$TARBALL_PLATFORM" in
   linux-x86_64)
     ort_dylib="$(ls -1 "$ort_capi"/libonnxruntime.so.* 2>/dev/null \
                  | grep -v '\.symlink$' | sort -V | tail -1)"
@@ -159,7 +175,7 @@ fi
 echo "$VERSION" > "$bundle/VERSION"
 
 cat > "$bundle/README.md" <<EOF
-# Sparrow Engine CLI — \`${bin_basename}\` v${VERSION} (${PLATFORM})
+# Sparrow Engine CLI — \`${bin_basename}\` v${VERSION} (${TARBALL_PLATFORM})
 
 Self-contained tarball release per RP-4. The binary loads its bundled
 \`libonnxruntime\` from \`lib/\` automatically — no extra setup required.
