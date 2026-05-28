@@ -2445,7 +2445,7 @@ dependencies = [
 
 [[package]]
 name = "sparrow-engine-core"
-version = "0.1.0"
+version = "0.1.12"
 dependencies = [
  "ab_glyph",
  "hound",
@@ -2463,7 +2463,7 @@ dependencies = [
 
 [[package]]
 name = "sparrow-engine-cpu"
-version = "0.1.0"
+version = "0.1.12"
 dependencies = [
  "cbindgen",
  "csbindgen",
@@ -2483,7 +2483,7 @@ dependencies = [
 
 [[package]]
 name = "sparrow-engine-gpu"
-version = "0.1.0"
+version = "0.1.12"
 dependencies = [
  "cbindgen",
  "csbindgen",
@@ -2518,7 +2518,7 @@ dependencies = [
 
 [[package]]
 name = "sparrow-engine-server"
-version = "0.1.0"
+version = "0.1.12"
 dependencies = [
  "axum",
  "chrono",
@@ -2540,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "sparrow-engine-types"
-version = "0.1.0"
+version = "0.1.12"
 dependencies = [
  "serde",
  "serde_json",

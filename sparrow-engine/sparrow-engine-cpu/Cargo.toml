@@ -1,6 +1,6 @@
 [package]
 name = "sparrow-engine-cpu"
-version = "0.1.0"
+version = "0.1.12"
 edition = "2021"
 description = "Phase 3.8 — sparrow-engine CPU pipeline."
 
