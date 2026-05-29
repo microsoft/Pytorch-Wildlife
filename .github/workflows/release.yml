@@ -1163,6 +1163,107 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
+  # RP-5 — Build + push CPU/GPU Docker server images to GHCR on prod tag push.
+  # Hyphenated tags (RC / pre) skip (same shape as publish-pypi-*). Failure of
+  # either job blocks the GitHub Release publish below (so sparrow's poll on
+  # /releases/latest is race-free — see RP-5 final_design.md). Free
+  # ubuntu-latest runner suffices for both: cudarc fallback-dynamic-loading +
+  # nvjpeg-sys pre-generated bindings skip the build-time CUDA Toolkit
+  # requirement (RP-19 precedent for the Windows GPU wheel).
+  # ---------------------------------------------------------------------------
+
+  build-and-push-docker-cpu:
+    name: Build + push CPU Docker image to GHCR
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    needs: [publish-pypi-cpu]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: sparrow-engine
+          file: sparrow-engine/docker/Dockerfile.cpu
+          push: true
+          tags: |
+            ghcr.io/microsoft/sparrow-engine-server:${{ github.ref_name }}
+            ghcr.io/microsoft/sparrow-engine-server:sparrow-combined
+          labels: |
+            org.opencontainers.image.source=https://github.com/microsoft/Pytorch-Wildlife
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          # Buildcache lives in a SEPARATE image (not as a tag on the runtime
+          # image) so the runtime image's tag list stays clean — sparrow's
+          # auto-PR workflow filters tags by shape, and a `buildcache` tag
+          # would confuse downstream introspection. Cache stays private to PW.
+          cache-from: type=registry,ref=ghcr.io/microsoft/sparrow-engine-server-buildcache:cpu
+          cache-to: type=registry,ref=ghcr.io/microsoft/sparrow-engine-server-buildcache:cpu,mode=max
+
+  build-and-push-docker-gpu:
+    name: Build + push GPU Docker image to GHCR
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    needs: [publish-pypi-gpu]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Free 15GB on ubuntu-latest before the ~4GB cuDNN runtime base pull.
+      # Default runner has 14GB free disk; GPU image build needs ~6-8GB
+      # working space (2GB base + layers + buildkit cache mounts).
+      - name: Free runner disk space (cuDNN base is ~2GB)
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false  # keep nodejs/python — buildx needs them
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false  # we need docker
+
+      - id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: sparrow-engine
+          file: sparrow-engine/docker/Dockerfile.gpu
+          push: true
+          tags: |
+            ghcr.io/microsoft/sparrow-engine-server-gpu:${{ github.ref_name }}
+            ghcr.io/microsoft/sparrow-engine-server-gpu:sparrow-combined
+          labels: |
+            org.opencontainers.image.source=https://github.com/microsoft/Pytorch-Wildlife
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          cache-from: type=registry,ref=ghcr.io/microsoft/sparrow-engine-server-buildcache:gpu
+          cache-to: type=registry,ref=ghcr.io/microsoft/sparrow-engine-server-buildcache:gpu,mode=max
+
+  # ---------------------------------------------------------------------------
   # Attach CLI tarballs as GitHub Release assets on prod tag push.
   # Hyphenated tags (RC / pre) skip publish; build jobs still ran above.
   # ---------------------------------------------------------------------------
@@ -1184,12 +1285,16 @@ jobs:
       && needs['build-cli-linux-gpu'].result == 'success'
       && needs['build-cli-macos-arm64'].result == 'success'
       && needs['server-boot-smoke'].result == 'success'
+      && needs['build-and-push-docker-cpu'].result == 'success'
+      && needs['build-and-push-docker-gpu'].result == 'success'
     needs:
       - build-cli-linux-cpu
       - build-cli-linux-gpu
       - build-cli-macos-arm64
       - build-cli-windows
       - server-boot-smoke
+      - build-and-push-docker-cpu
+      - build-and-push-docker-gpu
     runs-on: ubuntu-latest
     permissions:
       # softprops/action-gh-release needs write access to create / append the
