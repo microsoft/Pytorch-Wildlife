@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **RP-5 — Cross-repo CI image-pin auto-PR**, landed v0.1.15 (2026-05-29).
+  Replaces the operator-manual `sync_sparrow_engine.sh` flow with CI:
+  - `release.yml` gains `build-and-push-docker-{cpu,gpu}` jobs that push
+    CPU + GPU images to `ghcr.io/microsoft/sparrow-engine-server[-gpu]:vX.Y.Z`
+    on prod tag-push (skip on hyphenated tags). GitHub-hosted `ubuntu-latest`
+    runner builds both flavors (RP-19 precedent: cudarc fallback-dynamic-loading
+    + nvjpeg-sys pre-generated bindings + ort load-dynamic skip the build-time
+    CUDA Toolkit requirement). Separate `sparrow-engine-server-buildcache:{cpu,gpu}`
+    registry caches keep the runtime image tag list clean. Auth via `GITHUB_TOKEN`
+    + `packages: write` — zero secrets to manage.
+  - `publish-cli-release-assets` now gates GH Release publish on docker push
+    success — sparrow's auto-PR (lives on `Clamps251/sparrow @ sparrow-engine-dev`)
+    polls `/releases/latest` and is therefore race-free w.r.t. image availability.
+  - Design + impl artifacts live in the companion repo at
+    `zhmiao/sparrow-engine-dev:docs/{design,implement}/rp-5-image-pin-auto-pr/`.
+
 ### Fixed
 
 - **Phase 4.5 audit-fix Phase F (CI + Docker + release plumbing) — Round 1**

@@ -26,7 +26,7 @@ build-backend = "maturin"
 
 [project]
 name = "sparrow-engine"
-version = "0.1.14"
+version = "0.1.15"
 description = "Camera-trap ML inference engine — Python API only (sparrow-engine CPU pipeline). The CLI binary (spe / spe-gpu) and HTTP server are NOT shipped via pip; install them via brew, the system installer (sparrow-engine-install.sh / .ps1), or the GitHub Release tarball. See https://github.com/microsoft/Pytorch-Wildlife/blob/sparrow-engine-dev/docs/user-manual.md"
 readme = "../../README.md"
 requires-python = ">=3.11"

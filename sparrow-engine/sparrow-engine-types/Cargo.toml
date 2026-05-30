@@ -1,6 +1,6 @@
 [package]
 name = "sparrow-engine-types"
-version = "0.1.14"
+version = "0.1.15"
 edition = "2021"
 description = "Phase 3.8 — sparrow-engine workspace leaf type crate. Zero ORT/CUDA/nvjpeg deps."
 
