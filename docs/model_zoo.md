@@ -1,23 +1,25 @@
 ---
-description: "PyTorch-Wildlife model zoo: MegaDetector V5/V6 detection models, species classifiers (Amazon, Serengeti, Deepfaune), and bioacoustic models for wildlife monitoring."
+title: "Wildlife Model Zoo: MegaDetector and Species Classifiers"
+description: "The PyTorch-Wildlife model zoo: MegaDetector V5 and V6 detectors, region-specific species classifiers, HerdNet, and bioacoustic models. Each loads in one line."
 tags:
-  - PyTorch-Wildlife model zoo
+  - wildlife model zoo
+  - PyTorch-Wildlife
   - MegaDetector versions
   - species classification models
-  - wildlife AI models
-  - camera trap models
+  - conservation deep learning framework
 ---
 
-# Model Zoo
+# Wildlife Model Zoo
 
-PyTorch-Wildlife provides a growing library of detection, classification, and bioacoustic models. All models load with a single line and download weights automatically.
+The PyTorch-Wildlife model zoo is the catalog of detection, classification, and bioacoustic models that ship with the framework. Every entry loads with a single constructor call and downloads its own weights on first use, so you can compare architectures or swap a model without touching the rest of your pipeline.
 
+If you are new to the package, install it first with the [installation guide](installation.md), then come back here to pick a model. The [API overview](api.md) shows how to feed images into any model below.
 
 ## Detection Models
 
 ### MegaDetector V6
 
-The latest generation of MegaDetector, trained on diverse global camera-trap datasets. Multiple architecture variants are available to trade off accuracy vs. speed vs. licensing.
+The current generation of [MegaDetector](https://microsoft.github.io/MegaDetector/), trained on diverse global camera-trap datasets. Several architecture variants let you trade accuracy against speed and licensing. The framework provides three wrapper classes so you can pick the license your project needs.
 
 | Version | Architecture | License | Load with |
 |---|---|---|---|
@@ -33,50 +35,49 @@ The latest generation of MegaDetector, trained on diverse global camera-trap dat
 ```python
 from PytorchWildlife.models import detection as pw_detection
 
-# Default (AGPL, YOLOv10)
-detector = pw_detection.MegaDetectorV6()
+# Default AGPL build (YOLOv10 Extra is the recommended starting point)
+detector = pw_detection.MegaDetectorV6(version="MDV6-yolov10-e")
 
-# MIT-licensed YOLO
+# MIT-licensed YOLOv9 weights
 detector = pw_detection.MegaDetectorV6MIT(version="MDV6-mit-yolov9-e")
 
-# Apache RT-DETR
+# Apache-2.0 RT-DETR weights
 detector = pw_detection.MegaDetectorV6Apache(version="MDV6-apa-rtdetr-e")
 ```
 
 ### MegaDetector V5
 
-The previous generation, widely deployed across conservation organizations. Uses YOLOv5.
+The previous generation, still widely deployed across conservation organizations. Built on YOLOv5.
 
 ```python
 detector = pw_detection.MegaDetectorV5()
 ```
 
-For V5 model weights and earlier versions, see the [archive branch](https://github.com/microsoft/Biodiversity/tree/archive) of the Biodiversity repository.
+For V5 weights and earlier releases, see the [archive branch](https://github.com/microsoft/Biodiversity/tree/archive) of the Biodiversity repository.
 
 ### Deepfaune Detector
 
-Trained for European ecosystems. The first third-party camera-trap detection model integrated into PyTorch-Wildlife.
+A detector tuned for European ecosystems, and the first third-party camera-trap model integrated into the framework.
 
 ```python
 detector = pw_detection.DeepfauneDetector()
 ```
 
-See the [Deepfaune website](https://www.deepfaune.cnrs.fr/en/) for more details.
+See the [Deepfaune project](https://www.deepfaune.cnrs.fr/en/) for background on the underlying model.
 
 ### HerdNet
 
-Point-based localization model for overhead and aerial imagery.
+A point-based localization model for overhead and aerial imagery, where animals appear as small dots rather than large bounding boxes.
 
 ```python
 detector = pw_detection.HerdNet()
 ```
 
-
 ## Classification Models
 
-All classifiers can be paired with any detection model to build a detection + classification pipeline.
+Classifiers turn a detected animal crop into a species label. Pair any classifier with any detector to build a two-stage detect-then-classify pipeline.
 
-| Model | Class | Geography | Species |
+| Model | Class | Geography | Coverage |
 |---|---|---|---|
 | AI4G Amazon Rainforest | `AI4GAmazonRainforest` | Amazon | ~36 species |
 | AI4G Snapshot Serengeti | `AI4GSnapshotSerengeti` | African savanna | ~48 species |
@@ -93,30 +94,41 @@ classifier = pw_classification.DeepfauneClassifier()
 classifier = pw_classification.DFNE()
 ```
 
+> [!TIP]
+> Need a classifier for a region or species set that is not listed here? The [MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) project covers fine-tuning a classifier on your own labeled data.
 
-## Detection + Classification Pipeline
+## Detection plus Classification Pipeline
+
+Run a detector to find animals, then send each crop to a classifier for a species label:
 
 ```python
 from PytorchWildlife.models import detection as pw_detection
 from PytorchWildlife.models import classification as pw_classification
 
-detection_model = pw_detection.MegaDetectorV6()
+detection_model = pw_detection.MegaDetectorV6(version="MDV6-yolov10-e")
 classification_model = pw_classification.AI4GAmazonRainforest()
 
-# Detect, then classify crops
 detection_result = detection_model.single_image_detection("image.jpg")
 classification_result = classification_model.single_image_classification("image.jpg")
 ```
 
-For a full pipeline demo, see the `demo/detection_classification_pipeline_demo.py` script.
-
+The `demo/detection_classification_pipeline_demo.py` script shows the full two-stage flow end to end. More runnable walkthroughs live on the [inference examples](inference-examples.md) page.
 
 ## Bioacoustic Models
+
+The framework also includes a ResNet-based classifier for audio, so sound-based monitoring shares the same package as vision.
 
 ```python
 from PytorchWildlife.models import bioacoustics as pw_bioacoustics
 
-model = pw_bioacoustics.BioacousticsResnetClassifier()
+model = pw_bioacoustics.ResNetClassifier(num_classes=2)
 ```
 
-For the full bioacoustic model zoo, see [microsoft/MegaDetector-Acoustic](https://github.com/microsoft/MegaDetector-Acoustic).
+For the dedicated bioacoustic model zoo and audio pipelines, the framework provides support for, but does not own, that modality. See [MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/).
+
+## Related Microsoft biodiversity AI projects
+
+- [microsoft/Biodiversity](https://microsoft.github.io/Biodiversity/): the umbrella hub for every AI for Good Lab biodiversity tool.
+- [MegaDetector](https://microsoft.github.io/MegaDetector/): the camera-trap detection model whose weights this zoo serves.
+- [MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/): the bioacoustic model family for audio monitoring.
+- [SPARROW](https://microsoft.github.io/SPARROW/): the solar-powered edge device that runs these models in the field.

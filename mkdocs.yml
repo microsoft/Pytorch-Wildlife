@@ -74,6 +74,8 @@ nav:
     - Overview: index.md
     - Installation: installation.md
     - Model Zoo: model_zoo.md
+    - API Overview: api.md
+    - Inference Examples: inference-examples.md
     - Tags: tags.md
   - Cite Us: cite.md
   - Developer Guide: build_mkdocs.md
