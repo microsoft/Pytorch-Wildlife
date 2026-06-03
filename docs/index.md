@@ -79,7 +79,7 @@ PyTorch-Wildlife is the framework layer. The modality-specific tools in the ecos
 
 - [microsoft/Biodiversity](https://microsoft.github.io/Biodiversity/): the umbrella hub documenting every AI for Good Lab biodiversity tool.
 - [MegaDetector](https://microsoft.github.io/MegaDetector/): the camera-trap animal detection model, invoked through this framework.
-- [MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/): bioacoustic models for audio-based wildlife monitoring.
+- MegaDetector-Acoustic (documentation coming soon): bioacoustic models for audio-based wildlife monitoring.
 - [SPARROW](https://microsoft.github.io/SPARROW/): the solar-powered edge device that runs these models in the field.
 
 > [!TIP]

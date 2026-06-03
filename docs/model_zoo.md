@@ -124,11 +124,11 @@ from PytorchWildlife.models import bioacoustics as pw_bioacoustics
 model = pw_bioacoustics.ResNetClassifier(num_classes=2)
 ```
 
-For the dedicated bioacoustic model zoo and audio pipelines, the framework provides support for, but does not own, that modality. See [MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/).
+For the dedicated bioacoustic model zoo and audio pipelines, the framework provides support for, but does not own, that modality. See MegaDetector-Acoustic (documentation coming soon).
 
 ## Related Microsoft biodiversity AI projects
 
 - [microsoft/Biodiversity](https://microsoft.github.io/Biodiversity/): the umbrella hub for every AI for Good Lab biodiversity tool.
 - [MegaDetector](https://microsoft.github.io/MegaDetector/): the camera-trap detection model whose weights this zoo serves.
-- [MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/): the bioacoustic model family for audio monitoring.
+- MegaDetector-Acoustic (documentation coming soon): the bioacoustic model family for audio monitoring.
 - [SPARROW](https://microsoft.github.io/SPARROW/): the solar-powered edge device that runs these models in the field.

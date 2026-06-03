@@ -116,5 +116,5 @@ The `demo/` directory also includes notebooks and scripts for the detect-then-cl
 
 - [microsoft/Biodiversity](https://microsoft.github.io/Biodiversity/): the umbrella hub for AI for Good Lab biodiversity tools.
 - [MegaDetector](https://microsoft.github.io/MegaDetector/): the camera-trap detection model behind these examples.
-- [MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/): audio-based monitoring models.
+- MegaDetector-Acoustic (documentation coming soon): audio-based monitoring models.
 - [SPARROW](https://microsoft.github.io/SPARROW/): the solar-powered edge device for running models in the field.

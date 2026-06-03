@@ -148,7 +148,7 @@ from PytorchWildlife.models import bioacoustics as pw_bioacoustics
 model = pw_bioacoustics.ResNetClassifier(num_classes=2)
 ```
 
-The framework provides the runtime here; the trained audio models and end-to-end audio pipelines are documented at [MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/).
+The framework provides the runtime here; the trained audio models and end-to-end audio pipelines are documented at MegaDetector-Acoustic (documentation coming soon).
 
 ## Where to go next
 
