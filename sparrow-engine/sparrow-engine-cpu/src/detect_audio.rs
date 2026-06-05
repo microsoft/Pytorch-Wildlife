@@ -414,13 +414,19 @@ fn detect_audio_loop_mel(
             let tensor = if remaining >= segment_samples {
                 preprocess_audio::mel_spectrogram(
                     &prep.audio_samples.data[seg_offset..seg_offset + segment_samples],
+                    prep.audio_samples.orig_sample_rate,
                     audio_config,
                     filterbank,
                 )?
             } else {
                 let mut padded = prep.audio_samples.data[seg_offset..].to_vec();
                 padded.resize(segment_samples, 0.0);
-                preprocess_audio::mel_spectrogram(&padded, audio_config, filterbank)?
+                preprocess_audio::mel_spectrogram(
+                    &padded,
+                    prep.audio_samples.orig_sample_rate,
+                    audio_config,
+                    filterbank,
+                )?
             };
             mel_tensors.push(tensor.into_dyn());
         }

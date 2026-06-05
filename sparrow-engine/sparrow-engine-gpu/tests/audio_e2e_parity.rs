@@ -189,6 +189,7 @@ fn cpu_mel_per_segment(
         let tensor = if remaining >= segment_samples {
             preprocess_audio::mel_spectrogram(
                 &samples.data[seg_offset..seg_offset + segment_samples],
+                samples.orig_sample_rate,
                 config,
                 &fb,
             )
@@ -196,7 +197,8 @@ fn cpu_mel_per_segment(
         } else {
             let mut padded = samples.data[seg_offset..].to_vec();
             padded.resize(segment_samples, 0.0);
-            preprocess_audio::mel_spectrogram(&padded, config, &fb).expect("mel_spectrogram")
+            preprocess_audio::mel_spectrogram(&padded, samples.orig_sample_rate, config, &fb)
+                .expect("mel_spectrogram")
         };
         let slice = tensor.as_slice().expect("Array4 contiguous").to_vec();
         out.push(slice);

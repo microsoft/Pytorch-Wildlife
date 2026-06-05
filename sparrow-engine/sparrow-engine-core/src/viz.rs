@@ -720,7 +720,7 @@ pub fn render_mel_spectrogram(
 
     let samples = load_audio(&AudioInput::FilePath(audio_path.to_path_buf()), config)?;
     let filterbank = MelFilterbank::new(config)?;
-    let mel_tensor = mel_spectrogram(&samples.data, config, &filterbank)?;
+    let mel_tensor = mel_spectrogram(&samples.data, samples.orig_sample_rate, config, &filterbank)?;
 
     // Tensor shape: [1, 1, n_mels, n_frames]. Flatten to a slice for indexing.
     let shape = mel_tensor.shape();

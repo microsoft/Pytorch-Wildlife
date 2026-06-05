@@ -36,6 +36,16 @@ pub enum PreprocessMethod {
         window: String,
         mel_scale: String,
         filter_norm: String,
+        /// Opt-in high-frequency mel-band fill for upsampled inputs.
+        ///
+        /// When `true` AND the engine resampled the input upward (orig_sr <
+        /// `sample_rate`), the engine replaces mel bins whose center
+        /// frequency lies above `orig_sr/2 - 2500 Hz` with the 10th-percentile
+        /// dB value of the valid (below-boundary) bins, then clamps the whole
+        /// spectrogram to `[-top_db, +20.0]`. Mirrors PytorchWildlife
+        /// `compute_mel_spectrograms_gpu(fill_highfreq=True, ...)` (RP-27,
+        /// 2026-06-01). Default `false` preserves md-audiobirds-v1 behavior.
+        fill_highfreq: bool,
     },
     /// Raw audio windowing for audio models whose mel front-end is in-graph
     /// (e.g., Perch 2). Decode + resample to `sample_rate`, then slice into
@@ -396,6 +406,13 @@ struct RawPreprocessing {
     /// Number of samples per inference window (= segment_duration_s × sample_rate).
     /// Required for `raw_audio`. For Perch 2: 160000 = 5 s × 32 kHz.
     window_samples: Option<u32>,
+    /// Opt-in high-frequency fill for mel_spectrogram preprocess (RP-27).
+    /// Defaults to `false` (md-audiobirds-v1 behavior). When `true` and the
+    /// engine resamples upward, mel bins above `orig_sr/2 - 2500 Hz` are
+    /// replaced with the 10th-percentile dB of valid bins. Ignored for
+    /// non-mel preprocess methods.
+    #[serde(default)]
+    fill_highfreq: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -552,6 +569,7 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
                     .preprocessing
                     .filter_norm
                     .ok_or_else(|| mel_err("filter_norm"))?,
+                fill_highfreq: raw.preprocessing.fill_highfreq.unwrap_or(false),
             }
         }
         other => {

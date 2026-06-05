@@ -169,6 +169,7 @@ mod tests {
                 window: "hann_symmetric".into(),
                 mel_scale: "slaney".into(),
                 filter_norm: "slaney".into(),
+                fill_highfreq: false,
             },
             input_size: None,
             layout: Some(Layout::Nchw),

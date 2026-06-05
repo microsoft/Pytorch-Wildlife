@@ -1115,6 +1115,7 @@ mod tests {
             window: "hann".into(),
             mel_scale: "slaney".into(),
             filter_norm: "slaney".into(),
+            fill_highfreq: false,
         };
 
         let ctx = match cuda_or_skip("load_rejects_audio_manifest") {

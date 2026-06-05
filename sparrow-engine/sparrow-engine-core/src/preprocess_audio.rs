@@ -34,6 +34,10 @@ pub struct AudioPreprocessConfig {
     pub fmin: f32,
     pub fmax: f32,
     pub top_db: f32,
+    /// Opt-in high-frequency mel-band fill for upsampled inputs (RP-27,
+    /// 2026-06-01). Default `false` preserves md-audiobirds-v1 behavior.
+    /// See [`mel_spectrogram`] for the algorithm details.
+    pub fill_highfreq: bool,
 }
 
 impl AudioPreprocessConfig {
@@ -111,6 +115,7 @@ impl AudioPreprocessConfig {
                 fmin,
                 fmax,
                 top_db,
+                fill_highfreq,
                 .. // window, mel_scale, filter_norm: validated at load time, only one implementation exists
             } => Some(Self {
                 sample_rate: *sample_rate,
@@ -120,6 +125,7 @@ impl AudioPreprocessConfig {
                 fmin: *fmin,
                 fmax: *fmax,
                 top_db: *top_db,
+                fill_highfreq: *fill_highfreq,
             }),
             _ => None,
         }
@@ -136,6 +142,7 @@ impl Default for AudioPreprocessConfig {
             fmin: 0.0,
             fmax: 24_000.0,
             top_db: 80.0,
+            fill_highfreq: false,
         }
     }
 }
@@ -145,6 +152,10 @@ pub struct AudioSamples {
     pub data: Vec<f32>,
     pub sample_rate: u32,
     pub duration_s: f32,
+    /// Original sample rate of the source file, before resampling to `sample_rate`.
+    /// Equal to `sample_rate` when no resample happened. Used by
+    /// [`mel_spectrogram`] to drive the optional `fill_highfreq` step.
+    pub orig_sample_rate: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +238,7 @@ pub fn load_audio_at_sample_rate(
         data: resampled,
         sample_rate: target_sample_rate,
         duration_s,
+        orig_sample_rate: sr,
     })
 }
 
@@ -379,12 +391,26 @@ impl MelFilterbank {
 /// Returns tensor `[1, 1, n_mels, time_steps]` (NCHW, single-channel).
 /// For 48000 samples with n_fft=2048, hop=512: time_steps=90.
 ///
+/// The `orig_sample_rate` argument is the **input file's** native sample rate
+/// (before any engine-side resampling to `config.sample_rate`). When
+/// `config.fill_highfreq == true` AND `orig_sample_rate < config.sample_rate`,
+/// the engine applies the upstream PytorchWildlife "fill_highfreq" treatment
+/// after power-to-dB: mel bins whose center frequency exceeds
+/// `orig_sample_rate / 2 - 2500 Hz` are replaced with the 10th-percentile dB
+/// value of the valid (below-boundary) bins, then the whole spectrogram is
+/// clamped to `[-top_db, +20.0]`. This matches
+/// `bioacoustics_spectrograms.compute_mel_spectrograms_gpu(fill_highfreq=True,
+/// fill_mean_below_sr=False)` exactly (RP-27, 2026-06-01). When the flag is
+/// off, or when no resample happened, the fill step is a no-op and behavior
+/// matches the pre-RP-27 implementation.
+///
 /// Emits tracing events for `audio.preprocess.mel_gemm` and
 /// `audio.preprocess.power_to_db`. The internal STFT call emits
 /// `audio.preprocess.window_frame` and `audio.preprocess.fft` from inside
 /// [`stft`].
 pub fn mel_spectrogram(
     samples: &[f32],
+    orig_sample_rate: u32,
     config: &AudioPreprocessConfig,
     filterbank: &MelFilterbank,
 ) -> Result<Array4<f32>> {
@@ -454,11 +480,112 @@ pub fn mel_spectrogram(
         n_values = mel.len(),
     );
 
+    // Step 3b (RP-27): optional fill_highfreq for upsampled inputs.
+    if config.fill_highfreq && orig_sample_rate < config.sample_rate {
+        let t_fill = Instant::now();
+        apply_fill_highfreq(&mut mel, n_mels, n_frames, orig_sample_rate, config);
+        tracing::info!(
+            stage = "audio.preprocess.fill_highfreq",
+            duration_ns = t_fill.elapsed().as_nanos() as u64,
+            orig_sr = orig_sample_rate,
+            target_sr = config.sample_rate,
+        );
+    }
+
     // Step 4: Tensor [1, 1, n_mels, n_frames]
     let tensor = Array4::from_shape_vec([1, 1, n_mels, n_frames], mel)
         .map_err(|e| SparrowEngineError::AudioPreprocess(e.to_string()))?;
 
     Ok(tensor)
+}
+
+/// Apply the PytorchWildlife `fill_highfreq` treatment to a dB-scale mel
+/// spectrogram in-place (RP-27, 2026-06-01).
+///
+/// For inputs whose native sample rate is below `config.sample_rate`, mel
+/// bins above `orig_sample_rate/2 - 2500 Hz` carry no useful signal — at
+/// training time these bins were replaced with a noise-floor estimate (the
+/// 10th-percentile dB value over all valid bins) so the model never learned
+/// to depend on them. At inference time, leaving them at the power-to-dB
+/// clamp floor (`max − top_db`) produces a different distribution and biases
+/// the model. This routine reproduces the training-time fill exactly.
+///
+/// `mel` is laid out as `[n_mels, n_frames]` (row-major). Caller guarantees
+/// `orig_sample_rate < config.sample_rate` and `mel.len() == n_mels * n_frames`.
+fn apply_fill_highfreq(
+    mel: &mut [f32],
+    n_mels: usize,
+    n_frames: usize,
+    orig_sample_rate: u32,
+    config: &AudioPreprocessConfig,
+) {
+    debug_assert!(orig_sample_rate < config.sample_rate);
+    debug_assert_eq!(mel.len(), n_mels * n_frames);
+
+    // Mel bin center frequencies, matching `librosa.mel_frequencies(n_mels,
+    // fmin=config.fmin, fmax=config.fmax)`. librosa uses endpoint-inclusive
+    // linspace over n_mels positions, NOT the n_mels+2 triangular-filter
+    // anchors used by [`mel_filterbank`]. This distinction is load-bearing
+    // for `fill_highfreq`: torchaudio's MelSpectrogram (used for the filterbank
+    // matmul) and librosa's mel_frequencies (used by PW Bioacoustics
+    // `fill_highfreq` to decide which bins are "noise") have different
+    // center-frequency conventions; we must match the latter exactly here.
+    let mel_min = slaney_hz_to_mel(config.fmin);
+    let mel_max = slaney_hz_to_mel(config.fmax);
+    let mel_centers_hz: Vec<f32> = (0..n_mels)
+        .map(|i| {
+            let mel = mel_min + (mel_max - mel_min) * i as f32 / (n_mels - 1).max(1) as f32;
+            slaney_mel_to_hz(mel)
+        })
+        .collect();
+
+    let nyq_orig = (orig_sample_rate as f32 / 2.0) - 2500.0;
+    let noise_mask: Vec<bool> = mel_centers_hz.iter().map(|&hz| hz > nyq_orig).collect();
+    let n_noise: usize = noise_mask.iter().filter(|&&b| b).count();
+    if n_noise == 0 {
+        return; // no bins above boundary — nothing to fill, no clamp.
+    }
+
+    // 10th-percentile dB of valid (below-boundary) bins.
+    // librosa uses k = ceil(0.10 * len(valid_vals)); torch.kthvalue is
+    // 1-indexed and returns the value at position k of the sorted ascending
+    // sequence. Mirror that semantics exactly.
+    let n_valid = n_mels - n_noise;
+    debug_assert!(n_valid > 0); // when n_noise = n_mels we'd've returned above
+    let mut valid_vals: Vec<f32> = Vec::with_capacity(n_valid * n_frames);
+    for (m, &is_noise) in noise_mask.iter().enumerate() {
+        if !is_noise {
+            valid_vals.extend_from_slice(&mel[m * n_frames..(m + 1) * n_frames]);
+        }
+    }
+    let k = (0.10_f32 * valid_vals.len() as f32).ceil() as usize;
+    let k = k.max(1).min(valid_vals.len());
+    // Partial sort: nth_element semantics. select_nth_unstable is O(n) and
+    // gives us the kth-smallest element in valid_vals[k-1] after the call.
+    valid_vals.select_nth_unstable_by(k - 1, |a, b| a.partial_cmp(b).unwrap());
+    let mu = valid_vals[k - 1];
+
+    // Replace noise bins with mu.
+    for (m, &is_noise) in noise_mask.iter().enumerate() {
+        if is_noise {
+            for v in &mut mel[m * n_frames..(m + 1) * n_frames] {
+                *v = mu;
+            }
+        }
+    }
+
+    // Final clamp to [-top_db, +20.0]. Matches PW upstream: after the fill,
+    // the spectrogram is clamped to the broader [-top_db, +20] range
+    // (regardless of the per-segment amax used in step 3's top_db clamp).
+    let lo = -config.top_db;
+    let hi = 20.0_f32;
+    for v in mel.iter_mut() {
+        if *v < lo {
+            *v = lo;
+        } else if *v > hi {
+            *v = hi;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1079,6 +1206,7 @@ mod tests {
             fmin: 0.0,
             fmax: 8_000.0,
             top_db: 80.0,
+            fill_highfreq: false,
         };
         let samples = vec![0.0f32; 128];
         let wrong_mels = MelFilterbank {
@@ -1086,14 +1214,14 @@ mod tests {
             n_mels: 3,
             n_freqs: 33,
         };
-        assert!(mel_spectrogram(&samples, &config, &wrong_mels).is_err());
+        assert!(mel_spectrogram(&samples, config.sample_rate, &config, &wrong_mels).is_err());
 
         let wrong_freqs = MelFilterbank {
             data: vec![0.0; 2 * 32],
             n_mels: 2,
             n_freqs: 32,
         };
-        assert!(mel_spectrogram(&samples, &config, &wrong_freqs).is_err());
+        assert!(mel_spectrogram(&samples, config.sample_rate, &config, &wrong_freqs).is_err());
     }
 
     #[test]
@@ -1129,7 +1257,7 @@ mod tests {
         let config = AudioPreprocessConfig::default();
         let fb = MelFilterbank::new(&config).expect("MelFilterbank::new");
         let samples = vec![0.0f32; 48000];
-        let tensor = mel_spectrogram(&samples, &config, &fb).unwrap();
+        let tensor = mel_spectrogram(&samples, config.sample_rate, &config, &fb).unwrap();
         assert_eq!(tensor.shape(), &[1, 1, 224, 90]);
     }
 
@@ -1138,7 +1266,7 @@ mod tests {
         let config = AudioPreprocessConfig::default();
         let fb = MelFilterbank::new(&config).expect("MelFilterbank::new");
         let samples = vec![0.0f32; 1024]; // Too short for n_fft=2048
-        let result = mel_spectrogram(&samples, &config, &fb);
+        let result = mel_spectrogram(&samples, config.sample_rate, &config, &fb);
         assert!(result.is_err());
     }
 
@@ -1305,6 +1433,7 @@ mod phase_a_r1_preprocess_audio {
             fmin: 0.0,
             fmax: 8000.0,
             top_db: 80.0,
+            fill_highfreq: false,
         };
         let fb1 = MelFilterbank::new(&cfg).expect("MelFilterbank::new");
         let fb2 = MelFilterbank::new(&cfg).expect("MelFilterbank::new");
@@ -1337,6 +1466,7 @@ mod phase_a_r1_preprocess_audio {
             fmin: 0.0,
             fmax: 8000.0,
             top_db: 80.0,
+            fill_highfreq: false,
         };
         let samples: Vec<f32> = (0..16384).map(|i| (i as f32 / 32.0).sin() * 0.5).collect();
         let loaded = load_audio(
@@ -1366,7 +1496,7 @@ mod phase_a_r1_preprocess_audio {
         let cfg = AudioPreprocessConfig::default();
         let fb = MelFilterbank::new(&cfg).expect("MelFilterbank::new");
         let samples = vec![0.0f32; 48000];
-        let tensor = mel_spectrogram(&samples, &cfg, &fb).unwrap();
+        let tensor = mel_spectrogram(&samples, cfg.sample_rate, &cfg, &fb).unwrap();
         let slice = tensor.as_slice().unwrap();
         // All entries must be finite (no NaN from log10 thanks to .max(epsilon)).
         for v in slice {
@@ -1403,7 +1533,7 @@ mod phase_a_r1_preprocess_audio {
         for sample in samples.iter_mut().skip(24000).take(100) {
             *sample = 0.5;
         }
-        let tensor = mel_spectrogram(&samples, &cfg, &fb).unwrap();
+        let tensor = mel_spectrogram(&samples, cfg.sample_rate, &cfg, &fb).unwrap();
         let slice = tensor.as_slice().unwrap();
         let max = slice.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let min = slice.iter().cloned().fold(f32::INFINITY, f32::min);

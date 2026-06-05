@@ -63,6 +63,7 @@ mod phase_a_r1_model_type_tests {
             window: "hann".to_string(),
             mel_scale: "slaney".to_string(),
             filter_norm: "slaney".to_string(),
+            fill_highfreq: false,
         }
     }
 

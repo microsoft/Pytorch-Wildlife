@@ -1388,6 +1388,7 @@ mod tests {
             window: "hann_symmetric".to_string(),
             mel_scale: "slaney".to_string(),
             filter_norm: "slaney".to_string(),
+            fill_highfreq: false,
         };
         assert_eq!(
             derive_model_type(
