@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.1.16
+
+<one-line summary — filled by release agent at SKILL.md Stage 10d>
+
+
 ### Added
 
 - **RP-5 — Cross-repo CI image-pin auto-PR**, landed v0.1.15 (2026-05-29).

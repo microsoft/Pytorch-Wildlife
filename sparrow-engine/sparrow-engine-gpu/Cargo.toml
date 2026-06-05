@@ -1,6 +1,6 @@
 [package]
 name = "sparrow-engine-gpu"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2021"
 description = "Phase 3.8 — sparrow-engine GPU pipeline: image (nvjpeg + CUDA preprocess + ORT CUDA-EP) and audio (cuFFT + cuBLAS mel + ORT CUDA-EP IoBinding)."
 
