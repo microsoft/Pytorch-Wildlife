@@ -29,14 +29,16 @@
 set -euo pipefail
 
 # ---- Constants ----
-ZENODO_RECORD="${ZENODO_RECORD:-20360316}"
+ZENODO_RECORD="${ZENODO_RECORD:-20563673}"
 ZENODO_DOI="10.5281/zenodo.${ZENODO_RECORD}"
 ZENODO_BASE="https://zenodo.org/records/${ZENODO_RECORD}/files"
 
-# All 16 models published in the v0.4.0 Zenodo bundle.
+# All 18 models published in the v0.5.0 Zenodo bundle.
 # (v0.1.0 had 14; v0.2.0 added perch-v2 — bird vocalization classifier;
 #  v0.3.0 added md-audiobirds-v1 — default audio detector, MIT;
-#  v0.4.0 — OWL + HerdNet manifest fix (subtype = "overhead"). No new models.)
+#  v0.4.0 — OWL + HerdNet manifest fix (subtype = "overhead"). No new models;
+#  v0.5.0 — added orca-detector-dclde2026-v1 + orca-ecotype-dclde2026-v1
+#           cascade for DCLDE 2026 (requires sparrow-engine >= v0.1.16).)
 ALL_MODELS=(
   "MDV6-yolov10-e"
   "MDV6-yolov10-c"
@@ -54,6 +56,8 @@ ALL_MODELS=(
   "Deepfaune-New-England"
   "perch-v2"
   "md-audiobirds-v1"
+  "orca-detector-dclde2026-v1"
+  "orca-ecotype-dclde2026-v1"
 )
 
 # ---- Defaults ----
