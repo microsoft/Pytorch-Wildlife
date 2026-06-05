@@ -45,7 +45,7 @@ param(
 
 # ----- Constants ---------------------------------------------------------
 
-$Script:SparrowEngineVersion       = if ($Version) { $Version } elseif ($env:SPARROW_ENGINE_VERSION) { $env:SPARROW_ENGINE_VERSION } else { '0.1.16' }
+$Script:SparrowEngineVersion       = if ($Version) { $Version } elseif ($env:SPARROW_ENGINE_VERSION) { $env:SPARROW_ENGINE_VERSION } else { '0.1.17' }
 $Script:InstallRoot        = Join-Path $env:LOCALAPPDATA 'Programs\sparrow-engine'         # %LocalAppData%\Programs\sparrow-engine
 $Script:UserSparrowEngineDir       = Join-Path $env:USERPROFILE '.sparrow-engine'                  # state file + RC sentinel home
 $Script:StateFile          = Join-Path $Script:UserSparrowEngineDir 'installed.json'

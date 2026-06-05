@@ -1,6 +1,6 @@
 [package]
 name = "sparrow-engine-cli"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2021"
 description = "CLI for sparrow-engine wildlife inference engine"
 
