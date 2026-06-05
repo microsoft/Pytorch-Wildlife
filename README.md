@@ -17,14 +17,14 @@ spe device                              # {"device":"cpu"}  or  {"device":"cuda:
 
 # One-time: download a model from the Zenodo bundle (brew doesn't ship models)
 mkdir -p ~/.sparrow-engine/models && cd ~/.sparrow-engine/models
-curl -fLO https://zenodo.org/records/20360316/files/MDV6-yolov10-e.zip
+curl -fLO https://zenodo.org/records/20563673/files/MDV6-yolov10-e.zip
 unzip -q MDV6-yolov10-e.zip && rm MDV6-yolov10-e.zip
 cd -
 
 spe detect /path/to/photos --model MDV6-yolov10-e --recursive --export-format megadet --export-output detections.json
 ```
 
-Both formulas can coexist (separate binaries `spe` + `spe-gpu`; shared model cache at `~/.sparrow-engine/models/`). The example above pulls MegaDetector v6 (general camera-trap detection); see the [Model zoo](#model-zoo) section below for the other 15 models in the Zenodo bundle (image classifiers, audio detectors, overhead-imagery detectors). See `docs/user-manual.md §2.4` for the other install paths.
+Both formulas can coexist (separate binaries `spe` + `spe-gpu`; shared model cache at `~/.sparrow-engine/models/`). The example above pulls MegaDetector v6 (general camera-trap detection); see the [Model zoo](#model-zoo) section below for the other 17 models in the Zenodo bundle (image classifiers, audio detectors, overhead-imagery detectors). See `docs/user-manual.md §2.4` for the other install paths.
 
 #### GPU host prerequisites
 
@@ -285,16 +285,19 @@ The catalog splits into four families (detectors, heatmap detectors, classifiers
 |---|---|---|---|---|
 | `MD_AudioBirds_V1` | 1 s @ 48 kHz, mel spectrogram (0.3 s stride) | 1 (bird vs no-bird) | 81 MB | MIT |
 | `perch-v2` | 5 s @ 32 kHz raw audio | 14795 | 391 MB | Apache 2.0 |
+| `orca-detector-dclde2026-v1` | 3 s @ 24 kHz, mel spectrogram (1.5 s stride) | 1 (Orca vs rest) | 43 MB | MIT |
+| `orca-ecotype-dclde2026-v1` | 3 s @ 24 kHz raw audio (in-graph mel) | 5 (SRKW / TKW / SAR / NRKW / OKW) | 48 MB | MIT |
 
-- `MD_AudioBirds_V1` is the sparrow-engine default audio detector — a lightweight binary bird-vs-no-bird model used in benchmarks and Phase 4.x manual tests. Sliding-window mel-spectrogram front-end (Slaney mel scale + Slaney filter norm). Ships in the v0.4.0 Zenodo bundle (DOI [10.5281/zenodo.20360316](https://doi.org/10.5281/zenodo.20360316)) as FP32; the FP16 conversion path is in `sparrow-engine/tools/convert_fp16.py` and is parity-verified against the FP32 reference (Phase 3.8 Step 2 post-STRETCH audit, 2026-05-05).
+- `MD_AudioBirds_V1` is the sparrow-engine default audio detector — a lightweight binary bird-vs-no-bird model used in benchmarks and Phase 4.x manual tests. Sliding-window mel-spectrogram front-end (Slaney mel scale + Slaney filter norm). Ships in the v0.5.0 Zenodo bundle (DOI [10.5281/zenodo.20563673](https://doi.org/10.5281/zenodo.20563673)) as FP32; the FP16 conversion path is in `sparrow-engine/tools/convert_fp16.py` and is parity-verified against the FP32 reference (Phase 3.8 Step 2 post-STRETCH audit, 2026-05-05).
 - `perch-v2` is Google Perch 2, a global bird-vocalisation classifier (Conformer encoder) with an in-graph mel front-end. Takes 160000-sample windows of raw audio; emits softmax over 14795 classes (birds + non-bird FSD50K labels).
+- `orca-detector-dclde2026-v1` + `orca-ecotype-dclde2026-v1` are a two-stage killer-whale cascade from the [DCLDE 2026 challenge](https://github.com/microsoft/orcas_dclde2026). Stage 1 screens 3-s windows for orcas (3-class NonBio/Bio/Orca classifier exposed as a binary Orca-vs-rest sigmoid at the engine boundary). Stage 2 classifies the Orca-positive windows into 5 Pacific Northwest ecotypes (Southern Resident / Transient / Southern Alaska Residents / Northern Resident / Offshore), with temperature scaling (T=5.4254) baked into the ONNX so the engine's softmax output is calibrated. Both stages **require sparrow-engine ≥ v0.1.16** because they use the RP-27 `fill_highfreq` engine opt-in to match the upstream training pipeline on under-sampled hydrophone audio (most field hydrophones cap at 16 kHz). Cascade usage and the Stage 2 abstention threshold (0.94 → `Unassigned_KW`) are documented in each model's `MODEL_CARD.md`.
 
 #### License summary
 
 - **Ultralytics AGPL-3.0** (7 models): MDv6 × 2, MDv5a, the 3 AI4G regional YOLOs, plus `deepfaune-yolo8s` (which also intersects CC-BY-NC-SA 4.0).
 - **CC-BY-NC-SA 4.0** (3 models): `deepfaune-yolo8s`, `Deepfaune-Europe`, `Deepfaune-New-England`.
 - **Apache 2.0** (2 models): `SpeciesNet-Crop`, `perch-v2`.
-- **MIT** (5 models): `AI4G-Amazon-V2`, `AI4G-Serengeti`, `OWL`, `HerdNet_General_Dataset_2022`, `MD_AudioBirds_V1`.
+- **MIT** (7 models): `AI4G-Amazon-V2`, `AI4G-Serengeti`, `OWL`, `HerdNet_General_Dataset_2022`, `MD_AudioBirds_V1`, `orca-detector-dclde2026-v1`, `orca-ecotype-dclde2026-v1`.
 
 **Commercial users of YOLO-based detectors** should obtain an [Ultralytics Enterprise License](https://www.ultralytics.com/license).
 

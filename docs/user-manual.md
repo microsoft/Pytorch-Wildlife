@@ -739,7 +739,7 @@ $ spe detect-audio recordings/*.wav \
 
 | Flag | What |
 |------|------|
-| `--model <id>` | Audio model (only `md-audiobirds-v1` is in the catalog today). |
+| `--model <id>` | Audio model. Catalog includes `md-audiobirds-v1` (default binary bird detector), `perch-v2` (14795-class bird species classifier), `orca-detector-dclde2026-v1` (DCLDE 2026 Stage 1 orca screener), `orca-ecotype-dclde2026-v1` (DCLDE 2026 Stage 2 ecotype classifier). |
 | `--threshold <f>` | Per-window sigmoid threshold (manifest default 0.9). |
 | `--raw-segments` | Emit pre-merge per-window rows. |
 | `--visualize --output-dir <dir>` | Render spectrogram + confidence heatmap PNGs. |
@@ -1386,6 +1386,8 @@ empty    = 0.48
 | `speciesnet-crop` | Classifier | 480×480 | FP32 |
 | `amazon-cameratrap-v2` | Detector | 1280×1280 | FP16 |
 | `md-audiobirds-v1` | Audio binary detector | 1.0s window, 0.3s stride | FP16 |
+| `orca-detector-dclde2026-v1` | Orca audio detector (Stage 1, DCLDE 2026) | 3.0s window @ 24 kHz, 1.5s stride, `fill_highfreq` | FP32 |
+| `orca-ecotype-dclde2026-v1` | Orca ecotype audio classifier (Stage 2, DCLDE 2026) | 3.0s window @ 24 kHz raw audio (in-graph mel + fill_highfreq) | FP32 |
 | `megadet-speciesnet` | **Pipeline alias** (MDv6 → SpeciesNet) | n/a | n/a |
 | `Species_Net_MDV5a` | Legacy YOLOv5 detector | 1280×1280 | FP32 |
 | `SpeciesNet-Crop` | (re-export pending: NHWC → NCHW) | 480×480 | FP32 |
