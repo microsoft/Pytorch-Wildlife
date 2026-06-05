@@ -84,6 +84,9 @@ pub struct RawAudioModel {
     /// (emits one segment per window regardless), but the value is held
     /// here for parity with the mel path + future API consistency.
     threshold: f32,
+    /// RP-27 Part 2 opt-in: when true, pass orig_sample_rate as a second
+    /// ONNX input alongside the audio tensor. Forwarded from the manifest.
+    pass_orig_sample_rate: bool,
 }
 
 // SAFETY: `Session` is wrapped in `Mutex` (Send + Sync via Mutex's bounds).
@@ -102,11 +105,12 @@ impl RawAudioModel {
         manifest_dir: &Path,
     ) -> Result<Self> {
         // 1. Extract sample_rate + window_samples from the RawAudio variant.
-        let (sample_rate, segment_samples) = match &manifest.preprocess_method {
+        let (sample_rate, segment_samples, pass_orig_sample_rate) = match &manifest.preprocess_method {
             PreprocessMethod::RawAudio {
                 sample_rate,
                 window_samples,
-            } => (*sample_rate, *window_samples as usize),
+                pass_orig_sample_rate,
+            } => (*sample_rate, *window_samples as usize, *pass_orig_sample_rate),
             other => {
                 return Err(SparrowEngineError::NotAnAudioModel {
                     id: manifest.id.clone(),
@@ -210,9 +214,25 @@ impl RawAudioModel {
             let probe_input = ndarray::Array2::<f32>::zeros((1, segment_samples));
             let probe_value = TensorRef::from_array_view(&probe_input)
                 .map_err(|e| SparrowEngineError::Ort(format!("probe TensorRef: {e}")))?;
-            let probe_outputs = probe_session
-                .run(ort::inputs![probe_value])
-                .map_err(|e| SparrowEngineError::Ort(format!("probe Session::run: {e}")))?;
+            // RP-27 Part 2: 2-input ONNX needs orig_sample_rate populated even
+            // at probe time. Use sample_rate (the no-op case for fill_highfreq).
+            let probe_sr_arr;
+            let probe_outputs = if pass_orig_sample_rate {
+                probe_sr_arr = ndarray::Array1::from_vec(vec![sample_rate as i64]);
+                let probe_sr_value = TensorRef::from_array_view(&probe_sr_arr)
+                    .map_err(|e| SparrowEngineError::Ort(format!("probe orig_sr TensorRef: {e}")))?;
+                let inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = vec![
+                    (std::borrow::Cow::Borrowed("audio"), probe_value.into()),
+                    (std::borrow::Cow::Borrowed("orig_sample_rate"), probe_sr_value.into()),
+                ];
+                probe_session
+                    .run(inputs)
+                    .map_err(|e| SparrowEngineError::Ort(format!("probe Session::run (2-input): {e}")))?
+            } else {
+                probe_session
+                    .run(ort::inputs![probe_value])
+                    .map_err(|e| SparrowEngineError::Ort(format!("probe Session::run: {e}")))?
+            };
             if probe_outputs.len() <= logits_output_idx {
                 return Err(SparrowEngineError::Ort(format!(
                     "raw-audio probe: model has {} outputs, expected logits at index {}",
@@ -281,6 +301,7 @@ impl RawAudioModel {
             segment_samples,
             stride_samples,
             threshold,
+            pass_orig_sample_rate,
         })
     }
 
@@ -395,9 +416,27 @@ impl RawAudioModel {
                 .session
                 .lock()
                 .map_err(|_| SparrowEngineError::Ort("raw audio session lock poisoned".into()))?;
-            let outputs = guard
-                .run(ort::inputs![input_value])
-                .map_err(|e| SparrowEngineError::Ort(format!("Session::run: {e}")))?;
+            // RP-27 Part 2: when manifest opts in, pass orig_sample_rate as a
+            // second ONNX input (same as CPU path).
+            let orig_sr_arr;
+            let outputs = if self.pass_orig_sample_rate {
+                orig_sr_arr = ndarray::Array1::from_vec(vec![
+                    audio_samples.orig_sample_rate as i64,
+                ]);
+                let orig_sr_value = TensorRef::from_array_view(&orig_sr_arr)
+                    .map_err(|e| SparrowEngineError::Ort(format!("orig_sr TensorRef: {e}")))?;
+                let inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = vec![
+                    (std::borrow::Cow::Borrowed("audio"), input_value.into()),
+                    (std::borrow::Cow::Borrowed("orig_sample_rate"), orig_sr_value.into()),
+                ];
+                guard
+                    .run(inputs)
+                    .map_err(|e| SparrowEngineError::Ort(format!("Session::run (2-input): {e}")))?
+            } else {
+                guard
+                    .run(ort::inputs![input_value])
+                    .map_err(|e| SparrowEngineError::Ort(format!("Session::run: {e}")))?
+            };
             if outputs.len() <= self.logits_output_idx {
                 return Err(SparrowEngineError::Ort(format!(
                     "raw-audio classifier returned {} outputs; expected at least {}",
