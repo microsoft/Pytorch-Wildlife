@@ -133,8 +133,12 @@ enum PreparedAudioKind {
         /// tensor named "label" at session-load time; for single-output
         /// models this is just `0`.
         logits_output_idx: usize,
-        /// Number of classes (= length of the softmax distribution).
+        /// Number of softmax classes the model emits.
         num_classes: usize,
+        /// Opt-in (RP-27 Part 2, 2026-06-05): when true, the engine passes a
+        /// second ONNX input `orig_sample_rate [1] int64` alongside the
+        /// audio tensor. Used by in-graph fill_highfreq.
+        pass_orig_sample_rate: bool,
     },
 }
 
@@ -216,6 +220,7 @@ fn prepare_audio_detection(
         }
         PreprocessMethod::RawAudio {
             window_samples,
+            pass_orig_sample_rate,
             ..
         } => {
             let segment_samples = *window_samples as usize;
@@ -251,14 +256,17 @@ fn prepare_audio_detection(
 
             // Resolve the logits output: prefer the tensor named "label" (Perch 2),
             // fall back to output 0 for single-head softmax classifiers.
+            // When pass_orig_sample_rate=true, probe with a dummy orig_sr=sample_rate
+            // (the no-op case for fill_highfreq) so the 2-input ONNX accepts the call.
             let (logits_output_idx, num_classes) =
-                resolve_classifier_output(handle, segment_samples)?;
+                resolve_classifier_output(handle, segment_samples, *pass_orig_sample_rate, sample_rate)?;
 
             Ok(PreparedAudioDetection {
                 audio_samples,
                 kind: PreparedAudioKind::Raw {
                     logits_output_idx,
                     num_classes,
+                    pass_orig_sample_rate: *pass_orig_sample_rate,
                 },
                 segment_samples,
                 stride_samples,
@@ -286,6 +294,8 @@ fn prepare_audio_detection(
 fn resolve_classifier_output(
     handle: &ModelHandle,
     window_samples: usize,
+    pass_orig_sample_rate: bool,
+    target_sample_rate: u32,
 ) -> Result<(usize, usize)> {
     let session = handle.pin_session()?;
     let mut guard = session
@@ -302,9 +312,23 @@ fn resolve_classifier_output(
     // Probe with one zero-filled window to learn the class count.
     let probe = ndarray::Array2::<f32>::zeros((1, window_samples));
     let input_value = TensorRef::from_array_view(&probe).map_err(crate::engine::ort_err)?;
-    let outputs = guard
-        .run(ort::inputs![input_value])
-        .map_err(crate::engine::ort_err)?;
+    // RP-27 Part 2: 2-input ONNX needs orig_sample_rate populated even at probe
+    // time. Use target_sample_rate (the no-op case for fill_highfreq).
+    let probe_sr_arr;
+    let outputs = if pass_orig_sample_rate {
+        probe_sr_arr = ndarray::Array1::from_vec(vec![target_sample_rate as i64]);
+        let orig_sr_value =
+            TensorRef::from_array_view(&probe_sr_arr).map_err(crate::engine::ort_err)?;
+        let inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = vec![
+            (std::borrow::Cow::Borrowed("audio"), input_value.into()),
+            (std::borrow::Cow::Borrowed("orig_sample_rate"), orig_sr_value.into()),
+        ];
+        guard.run(inputs).map_err(crate::engine::ort_err)?
+    } else {
+        guard
+            .run(ort::inputs![input_value])
+            .map_err(crate::engine::ort_err)?
+    };
     if outputs.len() <= logits_idx {
         return Err(SparrowEngineError::Ort(format!(
             "classifier session probe returned {} outputs; expected at least {}",
@@ -551,11 +575,12 @@ fn detect_audio_loop_raw(
     start: Instant,
     mut on_segment: Option<&mut dyn FnMut(&AudioSegment)>,
 ) -> Result<AudioDetectResult> {
-    let (logits_output_idx, num_classes) = match &prep.kind {
+    let (logits_output_idx, num_classes, pass_orig_sample_rate) = match &prep.kind {
         PreparedAudioKind::Raw {
             logits_output_idx,
             num_classes,
-        } => (*logits_output_idx, *num_classes),
+            pass_orig_sample_rate,
+        } => (*logits_output_idx, *num_classes, *pass_orig_sample_rate),
         _ => unreachable!("guarded by detect_audio_loop dispatch"),
     };
 
@@ -608,9 +633,26 @@ fn detect_audio_loop_raw(
         let mut guard = session
             .lock()
             .map_err(|_| SparrowEngineError::Ort("audio session lock poisoned".into()))?;
-        let outputs = guard
-            .run(ort::inputs![input_value])
-            .map_err(crate::engine::ort_err)?;
+        // RP-27 Part 2: when manifest opts in, pass orig_sample_rate as a
+        // second [1] int64 input alongside the audio tensor. The exported
+        // ONNX must declare two inputs in this order: ("audio", "orig_sample_rate").
+        let orig_sr_arr;
+        let outputs = if pass_orig_sample_rate {
+            orig_sr_arr = ndarray::Array1::from_vec(vec![
+                prep.audio_samples.orig_sample_rate as i64,
+            ]);
+            let orig_sr_value =
+                TensorRef::from_array_view(&orig_sr_arr).map_err(crate::engine::ort_err)?;
+            let inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = vec![
+                (std::borrow::Cow::Borrowed("audio"), input_value.into()),
+                (std::borrow::Cow::Borrowed("orig_sample_rate"), orig_sr_value.into()),
+            ];
+            guard.run(inputs).map_err(crate::engine::ort_err)?
+        } else {
+            guard
+                .run(ort::inputs![input_value])
+                .map_err(crate::engine::ort_err)?
+        };
         if outputs.len() <= logits_output_idx {
             return Err(SparrowEngineError::Ort(format!(
                 "audio classifier returned {} outputs; expected at least {}",

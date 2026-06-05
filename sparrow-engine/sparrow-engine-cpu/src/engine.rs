@@ -1240,6 +1240,7 @@ mod tests {
         PreprocessMethod::RawAudio {
             sample_rate: 32_000,
             window_samples: 160_000,
+            pass_orig_sample_rate: false,
         }
     }
 

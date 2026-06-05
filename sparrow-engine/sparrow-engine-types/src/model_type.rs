@@ -72,6 +72,7 @@ mod phase_a_r1_model_type_tests {
         PreprocessMethod::RawAudio {
             sample_rate: 32000,
             window_samples: 160000,
+            pass_orig_sample_rate: false,
         }
     }
 

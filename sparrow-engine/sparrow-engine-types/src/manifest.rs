@@ -53,6 +53,13 @@ pub enum PreprocessMethod {
     RawAudio {
         sample_rate: u32,
         window_samples: u32,
+        /// Opt-in: when true, engine passes a second ONNX input
+        /// `orig_sample_rate [1] int64` carrying the original (pre-resample)
+        /// sample rate. Used by in-graph fill_highfreq passes that need to
+        /// know whether the audio was upsampled and where the original
+        /// Nyquist sat. Default false preserves Perch 2 / single-input
+        /// RawAudio behavior (RP-27 Part 2, 2026-06-05).
+        pass_orig_sample_rate: bool,
     },
 }
 
@@ -406,6 +413,12 @@ struct RawPreprocessing {
     /// Number of samples per inference window (= segment_duration_s × sample_rate).
     /// Required for `raw_audio`. For Perch 2: 160000 = 5 s × 32 kHz.
     window_samples: Option<u32>,
+    /// RawAudio-only opt-in (RP-27 Part 2, 2026-06-05): when true, the
+    /// engine passes a second ONNX input `orig_sample_rate [1] int64`
+    /// alongside the audio tensor so the model can apply in-graph
+    /// fill_highfreq.
+    #[serde(default)]
+    pass_orig_sample_rate: Option<bool>,
     /// Opt-in high-frequency fill for mel_spectrogram preprocess (RP-27).
     /// Defaults to `false` (md-audiobirds-v1 behavior). When `true` and the
     /// engine resamples upward, mel bins above `orig_sr/2 - 2500 Hz` are
@@ -538,6 +551,10 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
                     .preprocessing
                     .window_samples
                     .ok_or_else(|| raw_err("window_samples"))?,
+                pass_orig_sample_rate: raw
+                    .preprocessing
+                    .pass_orig_sample_rate
+                    .unwrap_or(false),
             }
         }
         "mel_spectrogram" => {
@@ -668,6 +685,7 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
     if let PreprocessMethod::RawAudio {
         sample_rate,
         window_samples,
+        ..
     } = &preprocess_method
     {
         if *sample_rate == 0 {
@@ -825,6 +843,7 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
         PreprocessMethod::RawAudio {
             sample_rate,
             window_samples,
+            ..
         },
         InferenceStrategy::SlidingWindow {
             segment_duration_s, ..
@@ -2033,6 +2052,7 @@ format = "one_per_line"
             PreprocessMethod::RawAudio {
                 sample_rate: 32000,
                 window_samples: 160000,
+                ..
             }
         ));
         assert_eq!(
