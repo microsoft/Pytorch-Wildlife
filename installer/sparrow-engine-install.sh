@@ -97,7 +97,7 @@ Usage:
 Modes (auto-detected if omitted):
   --pip               Install Python wheel (sparrow-engine CPU / sparrow-engine-gpu GPU) via pip / uv pip
   --cli, --cli-only   Download + extract CLI tarball into \$HOME/.sparrow-engine
-  --docker            Pull docker image sparrow-engine-server:cpu or sparrow-engine-server:gpu
+  --docker            Pull docker image zhongqimiao/sparrow-engine-server:latest (CPU) or zhongqimiao/sparrow-engine-server-gpu:latest (GPU)
 
 Flavor:
   --flavor cpu|gpu|auto    auto = run probe (default).
@@ -681,7 +681,12 @@ install_docker_image() {
     if ! command -v docker >/dev/null 2>&1; then
         die 8 "docker not found on PATH (required for --docker mode)"
     fi
-    local image="sparrow-engine-server:${docker_flavor}"
+    local image
+    if [ "$docker_flavor" = "cpu" ]; then
+        image="zhongqimiao/sparrow-engine-server:latest"
+    else
+        image="zhongqimiao/sparrow-engine-server-gpu:latest"
+    fi
     if [ "$dry_run" -eq 1 ]; then
         say "[dry-run] would run: docker pull $image"
         return 0

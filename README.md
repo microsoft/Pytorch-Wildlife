@@ -131,12 +131,31 @@ Sparrow Engine ships as a self-contained HTTP server in two Docker flavors. Both
 
 | Image | Size | GPU |
 |---|---|---|
-| `sparrow-engine-server:sparrow-combined` | ~170 MB | CPU only |
-| `sparrow-engine-server-gpu:sparrow-combined` | ~3.7 GB | CUDA 12 + cuDNN bundled; requires NVIDIA Container Toolkit on the host |
+| `zhongqimiao/sparrow-engine-server:latest` | ~170 MB | CPU only |
+| `zhongqimiao/sparrow-engine-server-gpu:latest` | ~3.7 GB | CUDA 12 + cuDNN bundled; requires NVIDIA Container Toolkit on the host |
 
-Two ways to get the image. Neither pulls from a container registry — there is no public `docker pull sparrow-engine` because no central registry push is wired into CI (intentional today; see [user manual §2.8](docs/user-manual.md#28-docker-image-deployment) for rationale).
+Three install paths. **Option A** is the simplest; **B** + **C** remain for offline operators and the absolute-latest-source case.
 
-**Option A — download pre-built tarballs from Zenodo** (~3 min on a decent link, no build toolchain needed). Uses the sparrow companion repo's downloader script which knows the current Zenodo record + expected SHA-256 digests:
+**Option A — `docker pull` from Docker Hub** (RP-35, 2026-06-05; published on every prod tag via `release.yml`):
+
+```bash
+# CPU image (~61 MB compressed, ~170 MB extracted)
+docker pull zhongqimiao/sparrow-engine-server:latest
+docker pull zhongqimiao/sparrow-engine-server:v0.1.17        # version pin (recommended for prod)
+
+# GPU image (~2.2 GB compressed, ~3.7 GB extracted)
+docker pull zhongqimiao/sparrow-engine-server-gpu:latest
+docker pull zhongqimiao/sparrow-engine-server-gpu:v0.1.17
+```
+
+Public repos (anonymous pull, no Docker Hub login required):
+
+- https://hub.docker.com/r/zhongqimiao/sparrow-engine-server
+- https://hub.docker.com/r/zhongqimiao/sparrow-engine-server-gpu
+
+Heads-up: anonymous Docker Hub pulls are rate-limited (100 pulls / 6 hr / source IP). For CI behind shared NAT, `docker login` with a free Docker Hub account lifts the limit to 200/6 hr.
+
+**Option B — download pre-built tarballs from Zenodo** (offline / air-gapped). Uses the sparrow companion repo's downloader script which knows the current Zenodo record + expected SHA-256 digests:
 
 ```bash
 git clone https://github.com/Clamps251/sparrow.git
@@ -146,9 +165,9 @@ cd sparrow
 ./scripts/download_sparrow_engine_images.sh --gpu-only       # GPU only (~1.5 GB compressed)
 ```
 
-The script verifies SHA-256 + `docker load`s + retags as `sparrow-engine-server[-gpu]:sparrow-combined`. **Caveat**: the Zenodo record is refreshed manually per release, not on every commit, so the published tarballs may lag the latest source by one or more releases. The current record's pin commit is recorded in `sparrow/sparrow-engine/sparrow-engine.version` after the download; if you need the absolute latest fixes, use Option B.
+The script verifies SHA-256 + `docker load`s + retags as `sparrow-engine-server[-gpu]:sparrow-combined`. **Caveat**: the Zenodo record is refreshed manually per release, not on every commit, so the published tarballs may lag the latest source by one or more releases.
 
-**Option B — build from source** (~10 min the first time; cached layers on subsequent builds; always reflects the current source tree):
+**Option C — build from source** (~10 min the first time; cached layers on subsequent builds; always reflects the current source tree):
 
 ```bash
 git clone --branch sparrow-engine-dev https://github.com/microsoft/Pytorch-Wildlife.git
@@ -157,20 +176,20 @@ docker build -f docker/Dockerfile.cpu -t sparrow-engine-server:sparrow-combined 
 docker build -f docker/Dockerfile.gpu -t sparrow-engine-server-gpu:sparrow-combined .  # GPU
 ```
 
-**Run the server** (after either Option A or B). The container expects models mounted read-only at `/models`:
+**Run the server** (after any of the three options). The container expects models mounted read-only at `/models`:
 
 ```bash
-# CPU
+# CPU (Option A pull)
 docker run -d --rm --name sparrow-engine -p 8080:8080 \
   -v $HOME/.sparrow-engine/models:/models:ro \
   -e SPARROW_ENGINE_DEVICE=cpu \
-  sparrow-engine-server:sparrow-combined
+  zhongqimiao/sparrow-engine-server:latest
 
 # GPU (requires NVIDIA Container Toolkit on the host)
 docker run -d --rm --name sparrow-engine-gpu -p 8080:8080 --gpus all \
   -v $HOME/.sparrow-engine/models:/models:ro \
   -e SPARROW_ENGINE_DEVICE=cuda:0 \
-  sparrow-engine-server-gpu:sparrow-combined
+  zhongqimiao/sparrow-engine-server-gpu:latest
 
 # Verify
 curl -fsS http://localhost:8080/healthz

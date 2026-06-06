@@ -417,7 +417,7 @@ function Install-DockerFlavor {
     if (-not (Get-Command -Name docker -ErrorAction SilentlyContinue)) {
         Die 8 "'docker' not found on PATH; install Docker Desktop first."
     }
-    $tag = "sparrow-engine-server:$ResolvedFlavor"
+    $tag = if ($ResolvedFlavor -eq 'cpu') { 'zhongqimiao/sparrow-engine-server:latest' } else { 'zhongqimiao/sparrow-engine-server-gpu:latest' }
     if ($DryRun) { Write-Info "[dry-run] would: docker pull $tag"; return }
     & docker pull $tag
     if ($LASTEXITCODE -ne 0) { Die 1 "docker pull exited $LASTEXITCODE." }
