@@ -254,7 +254,7 @@ Under the stdin-pipe form the wrapper detects that `$0` is the shell name and sk
 | Clean-room from-source build | Developers; reproducibility | `cd sparrow-engine && ./scripts/build_all_flavors.sh` (workspace root) |
 | GitHub Releases binary | End users; production | `bash installer/sparrow-engine-install.sh --cli` |
 | pip install Python wheel | Notebook + script users (Python API only — no `spe` CLI binary; use the Homebrew, installer, or tarball rows above for the CLI) | `pip install sparrow-engine` (CPU) or `pip install sparrow-engine-gpu` |
-| Docker image | Server deployments | Build locally from `sparrow-engine/Dockerfile.{cpu,gpu}` OR download pre-built tarballs from Zenodo via `sparrow/scripts/download_sparrow_engine_images.sh` — see §2.8 for the full flow. No `docker pull` from a registry today. |
+| Docker image | Server deployments | `docker pull zhongqimiao/sparrow-engine-server:latest` (CPU, ~61 MB compressed) or `docker pull zhongqimiao/sparrow-engine-server-gpu:latest` (GPU, ~2.2 GB compressed, requires NVIDIA Container Toolkit) — published on Docker Hub on every prod tag. Versioned tags `:vX.Y.Z` also available. See §2.8 for the full flow. |
 
 **Cite**: `docs/install.md § Per-consumer install paths` (lines 163-220); `sparrow-engine/scripts/build_all_flavors.sh`; `installer/homebrew/{sparrow-engine,sparrow-engine-gpu}.rb` + `installer/homebrew/README.md` (Homebrew tap source-of-truth).
 
@@ -361,11 +361,28 @@ Sparrow Engine ships as a self-contained HTTP server in two Docker flavors. Oper
 
 Both flavors expose the same 15-route axum HTTP API on port 8080: `/v1/detect`, `/v1/detect/batch`, `/v1/classify`, `/v1/pipeline`, `/v1/detect_audio`, plus `/v1/catalog`, `/v1/models`, `/v1/manifest`, `/healthz`, `/v1/health`, `/openapi.json`, and the inference-log + drift endpoints from Phase 4. See §7 for the full request / response schemas.
 
-#### Why no `docker pull`?
+#### Option A — `docker pull` from Docker Hub (recommended)
 
-There is no `docker pull sparrow-engine:cpu` or equivalent — `release.yml` does not push images to a container registry (GHCR / Docker Hub / etc.) today. Rationale: the audience that needs Docker is operators deploying the sparrow webapp stack, and that audience already runs the sparrow companion repo which provides a Zenodo-backed download script. Registry publish is tracked at `sparrow-engine-dev:docs/ideas.md § Sparrow Studio Web Integration follow-ups → SW-1` and will land alongside the cross-repo CI auto-PR work.
+Simplest path. No build toolchain, no clones, no separate downloader. Published on every prod tag via `release.yml`.
 
-#### Option A — download pre-built tarballs from Zenodo
+```bash
+# CPU image (~61 MB compressed, ~170 MB extracted)
+docker pull zhongqimiao/sparrow-engine-server:latest         # moving tag
+docker pull zhongqimiao/sparrow-engine-server:v0.1.17        # version pin (recommended for prod)
+
+# GPU image (~2.2 GB compressed, ~3.7 GB extracted; requires NVIDIA Container Toolkit on host)
+docker pull zhongqimiao/sparrow-engine-server-gpu:latest
+docker pull zhongqimiao/sparrow-engine-server-gpu:v0.1.17
+```
+
+Public repos (anonymous pull, no Docker Hub login required):
+
+- https://hub.docker.com/r/zhongqimiao/sparrow-engine-server
+- https://hub.docker.com/r/zhongqimiao/sparrow-engine-server-gpu
+
+Heads-up: anonymous Docker Hub pulls are rate-limited (100 pulls / 6 hr / source IP). For CI behind shared NAT, run `docker login` with a free Docker Hub account to lift the limit to 200/6 hr.
+
+#### Option B — download pre-built tarballs from Zenodo (offline / air-gapped)
 
 Fastest path. ~3 min on a decent link. No build toolchain needed. Uses sparrow companion repo's downloader script which knows the current Zenodo record + expected SHA-256 digests + handles the `docker load` + canonical retag step.
 

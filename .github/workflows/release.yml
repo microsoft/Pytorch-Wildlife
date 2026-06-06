@@ -1163,23 +1163,32 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # RP-5 — Build + push CPU/GPU Docker server images to GHCR on prod tag push.
-  # Hyphenated tags (RC / pre) skip (same shape as publish-pypi-*). Failure of
-  # either job blocks the GitHub Release publish below (so sparrow's poll on
-  # /releases/latest is race-free — see RP-5 final_design.md). Free
-  # ubuntu-latest runner suffices for both: cudarc fallback-dynamic-loading +
-  # nvjpeg-sys pre-generated bindings skip the build-time CUDA Toolkit
-  # requirement (RP-19 precedent for the Windows GPU wheel).
+  # RP-5 / RP-35 — Build + push CPU/GPU Docker server images to Docker Hub on
+  # prod tag push. Hyphenated tags (RC / pre) skip (same shape as
+  # publish-pypi-*). Failure of either job blocks the GitHub Release publish
+  # below (so sparrow's poll on /releases/latest is race-free — see RP-5
+  # final_design.md). Free ubuntu-latest runner suffices for both: cudarc
+  # fallback-dynamic-loading + nvjpeg-sys pre-generated bindings skip the
+  # build-time CUDA Toolkit requirement (RP-19 precedent for the Windows GPU
+  # wheel).
+  #
+  # Migration history (RP-35, 2026-06-05): runtime images moved from GHCR
+  # (ghcr.io/microsoft/sparrow-engine-server[-gpu]) to Docker Hub
+  # (docker.io/zhongqimiao/sparrow-engine-server[-gpu]) so end-users can
+  # `docker pull` without the ghcr.io prefix. Buildcache STAYS on GHCR
+  # (private, GITHUB_TOKEN access only) — no public consumer reads it; moving
+  # it to Docker Hub would require two extra public repos for internal CI
+  # state that nobody needs to see.
   # ---------------------------------------------------------------------------
 
   build-and-push-docker-cpu:
-    name: Build + push CPU Docker image to GHCR
+    name: Build + push CPU Docker image to Docker Hub
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs: [publish-pypi-cpu]
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: write  # needed for GHCR buildcache read/write
     outputs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
@@ -1187,7 +1196,17 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      # Two registry logins: Docker Hub for the runtime image push,
+      # GHCR for the buildcache read+write (kept private).
+      - name: Login to Docker Hub (runtime image destination)
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GHCR (buildcache only)
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1200,27 +1219,30 @@ jobs:
           file: sparrow-engine/docker/Dockerfile.cpu
           push: true
           tags: |
-            ghcr.io/microsoft/sparrow-engine-server:${{ github.ref_name }}
-            ghcr.io/microsoft/sparrow-engine-server:sparrow-combined
+            docker.io/zhongqimiao/sparrow-engine-server:${{ github.ref_name }}
+            docker.io/zhongqimiao/sparrow-engine-server:latest
+            docker.io/zhongqimiao/sparrow-engine-server:sparrow-combined
           labels: |
             org.opencontainers.image.source=https://github.com/microsoft/Pytorch-Wildlife
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
-          # Buildcache lives in a SEPARATE image (not as a tag on the runtime
-          # image) so the runtime image's tag list stays clean — sparrow's
-          # auto-PR workflow filters tags by shape, and a `buildcache` tag
-          # would confuse downstream introspection. Cache stays private to PW.
+          # Buildcache lives in a SEPARATE image on GHCR (not as a tag on the
+          # runtime image) so the runtime image's tag list stays clean —
+          # sparrow's auto-PR workflow filters tags by shape, and a
+          # `buildcache` tag would confuse downstream introspection. Cache
+          # stays private to PW on GHCR even though runtime images moved to
+          # Docker Hub (RP-35).
           cache-from: type=registry,ref=ghcr.io/microsoft/sparrow-engine-server-buildcache:cpu
           cache-to: type=registry,ref=ghcr.io/microsoft/sparrow-engine-server-buildcache:cpu,mode=max
 
   build-and-push-docker-gpu:
-    name: Build + push GPU Docker image to GHCR
+    name: Build + push GPU Docker image to Docker Hub
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs: [publish-pypi-gpu]
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: write  # needed for GHCR buildcache read/write
     outputs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
@@ -1228,7 +1250,15 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Login to Docker Hub (runtime image destination)
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GHCR (buildcache only)
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1254,8 +1284,9 @@ jobs:
           file: sparrow-engine/docker/Dockerfile.gpu
           push: true
           tags: |
-            ghcr.io/microsoft/sparrow-engine-server-gpu:${{ github.ref_name }}
-            ghcr.io/microsoft/sparrow-engine-server-gpu:sparrow-combined
+            docker.io/zhongqimiao/sparrow-engine-server-gpu:${{ github.ref_name }}
+            docker.io/zhongqimiao/sparrow-engine-server-gpu:latest
+            docker.io/zhongqimiao/sparrow-engine-server-gpu:sparrow-combined
           labels: |
             org.opencontainers.image.source=https://github.com/microsoft/Pytorch-Wildlife
             org.opencontainers.image.revision=${{ github.sha }}
