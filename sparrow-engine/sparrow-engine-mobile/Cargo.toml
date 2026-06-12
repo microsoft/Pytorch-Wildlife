@@ -26,3 +26,7 @@ thiserror = { workspace = true }
 bindgen = { version = "0.71", default-features = false, features = ["runtime"] }
 cbindgen = { version = "0.27", optional = true }
 csbindgen = { version = "1", optional = true }
+
+[dev-dependencies]
+npyz = "0.8"
+serde_json = { workspace = true }

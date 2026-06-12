@@ -6,17 +6,65 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
 use std::ptr;
+use std::sync::Arc;
 
 /// LiteRT tensor element type accepted by [`LiteRtBackend::invoke_named`].
 pub type ElementType = sys::LiteRtElementType;
 
+/// Process-local LiteRT runtime.
+///
+/// Owns one `LiteRtEnvironment` and shares it with every compiled model loaded
+/// through [`LiteRtRuntime::load`]. The backend holds an `Arc` clone of the
+/// runtime inner state so the environment outlives all compiled models.
+#[derive(Clone)]
+pub struct LiteRtRuntime {
+    inner: Arc<LiteRtRuntimeInner>,
+}
+
+struct LiteRtRuntimeInner {
+    env: sys::LiteRtEnvironment,
+}
+
+impl LiteRtRuntime {
+    /// Create one LiteRT environment for all models in this process/cascade.
+    pub fn new() -> Result<Self> {
+        unsafe {
+            let mut env: sys::LiteRtEnvironment = ptr::null_mut();
+            check(
+                sys::LiteRtCreateEnvironment(0, ptr::null(), &mut env),
+                "LiteRtCreateEnvironment",
+            )?;
+            Ok(Self {
+                inner: Arc::new(LiteRtRuntimeInner { env }),
+            })
+        }
+    }
+
+    /// Load and compile a TFLite/LiteRT model file for CPU inference.
+    ///
+    /// `num_threads == 0` leaves LiteRT's default CPU thread count unchanged.
+    pub fn load(&self, path: &Path, num_threads: usize) -> Result<LiteRtBackend> {
+        LiteRtBackend::load_with_runtime(self.inner.clone(), path, num_threads)
+    }
+}
+
+impl Drop for LiteRtRuntimeInner {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.env.is_null() {
+                sys::LiteRtDestroyEnvironment(self.env);
+            }
+        }
+    }
+}
+
 /// One LiteRT-loaded model using the CPU backend.
 ///
-/// The wrapper owns the LiteRT environment, model options, compiled model, and
-/// model handle. It is intentionally minimal for P2.1: no sparrow-engine manifest
-/// loading or preprocessing is wired here yet.
+/// The wrapper owns model options, compiled model, and model handle. It borrows
+/// the shared LiteRT environment by holding an `Arc` to the runtime inner state;
+/// it never destroys the environment itself.
 pub struct LiteRtBackend {
-    env: sys::LiteRtEnvironment,
+    runtime: Arc<LiteRtRuntimeInner>,
     model: sys::LiteRtModel,
     opts: sys::LiteRtOptions,
     compiled: sys::LiteRtCompiledModel,
@@ -28,19 +76,14 @@ pub struct LiteRtBackend {
 }
 
 impl LiteRtBackend {
-    /// Load and compile a TFLite/LiteRT model file for CPU inference.
-    ///
-    /// `num_threads == 0` leaves LiteRT's default CPU thread count unchanged.
-    pub fn load(path: &Path, num_threads: usize) -> Result<Self> {
+    fn load_with_runtime(
+        runtime: Arc<LiteRtRuntimeInner>,
+        path: &Path,
+        num_threads: usize,
+    ) -> Result<Self> {
         let path_cstr = CString::new(path.to_str().context("model path must be utf-8")?)?;
 
         unsafe {
-            let mut env: sys::LiteRtEnvironment = ptr::null_mut();
-            check(
-                sys::LiteRtCreateEnvironment(0, ptr::null(), &mut env),
-                "LiteRtCreateEnvironment",
-            )?;
-
             let mut model: sys::LiteRtModel = ptr::null_mut();
             check(
                 sys::LiteRtCreateModelFromFile(path_cstr.as_ptr(), &mut model),
@@ -59,38 +102,12 @@ impl LiteRtBackend {
             )?;
 
             if num_threads > 0 {
-                tracing::debug!(num_threads, "setting LiteRT CPU inference thread count");
-                let mut cpu_opts: *mut sys::LrtCpuOptions = ptr::null_mut();
-                check(
-                    sys::LrtCreateCpuOptions(&mut cpu_opts),
-                    "LrtCreateCpuOptions",
-                )?;
-                check(
-                    sys::LrtSetCpuOptionsNumThread(cpu_opts, num_threads as c_int),
-                    "LrtSetCpuOptionsNumThread",
-                )?;
-                let mut id: *const c_char = ptr::null();
-                let mut payload: *mut c_void = ptr::null_mut();
-                let mut deleter: Option<unsafe extern "C" fn(*mut c_void)> = None;
-                check(
-                    sys::LrtGetOpaqueCpuOptionsData(cpu_opts, &mut id, &mut payload, &mut deleter),
-                    "LrtGetOpaqueCpuOptionsData",
-                )?;
-                let mut opaque: sys::LiteRtOpaqueOptions = ptr::null_mut();
-                check(
-                    sys::LiteRtCreateOpaqueOptions(id, payload, deleter, &mut opaque),
-                    "LiteRtCreateOpaqueOptions",
-                )?;
-                check(
-                    sys::LiteRtAddOpaqueOptions(opts, opaque),
-                    "LiteRtAddOpaqueOptions",
-                )?;
-                sys::LrtDestroyCpuOptions(cpu_opts);
+                attach_cpu_thread_options(opts, num_threads)?;
             }
 
             let mut compiled: sys::LiteRtCompiledModel = ptr::null_mut();
             check(
-                sys::LiteRtCreateCompiledModel(env, model, opts, &mut compiled),
+                sys::LiteRtCreateCompiledModel(runtime.env, model, opts, &mut compiled),
                 "LiteRtCreateCompiledModel",
             )?;
 
@@ -142,7 +159,7 @@ impl LiteRtBackend {
             )?;
 
             Ok(Self {
-                env,
+                runtime,
                 model,
                 opts,
                 compiled,
@@ -224,10 +241,20 @@ impl LiteRtBackend {
                     element_type: *etype,
                     layout: self.input_layouts[i],
                 };
+                let expected_bytes =
+                    layout_num_elements(&self.input_layouts[i])? * element_type_byte_len(*etype)?;
+                if bytes.len() != expected_bytes {
+                    bail!(
+                        "input {i} byte length mismatch: got {}, expected {} for {:?}",
+                        bytes.len(),
+                        expected_bytes,
+                        etype
+                    );
+                }
                 let mut buf: sys::LiteRtTensorBuffer = ptr::null_mut();
                 check(
                     sys::LiteRtCreateManagedTensorBufferFromRequirements(
-                        self.env,
+                        self.runtime.env,
                         &tensor_type,
                         req,
                         &mut buf,
@@ -270,7 +297,7 @@ impl LiteRtBackend {
                 let mut buf: sys::LiteRtTensorBuffer = ptr::null_mut();
                 check(
                     sys::LiteRtCreateManagedTensorBufferFromRequirements(
-                        self.env,
+                        self.runtime.env,
                         &tensor_type,
                         req,
                         &mut buf,
@@ -336,11 +363,91 @@ impl Drop for LiteRtBackend {
             if !self.model.is_null() {
                 sys::LiteRtDestroyModel(self.model);
             }
-            if !self.env.is_null() {
-                sys::LiteRtDestroyEnvironment(self.env);
-            }
         }
     }
+}
+
+fn attach_cpu_thread_options(opts: sys::LiteRtOptions, num_threads: usize) -> Result<()> {
+    tracing::debug!(num_threads, "setting LiteRT CPU inference thread count");
+    unsafe {
+        let symbols = CpuOptionsSymbols::load()?;
+        let mut cpu_opts: *mut sys::LrtCpuOptions = ptr::null_mut();
+        check((symbols.create)(&mut cpu_opts), "LrtCreateCpuOptions")?;
+        check(
+            (symbols.set_num_threads)(cpu_opts, num_threads as c_int),
+            "LrtSetCpuOptionsNumThread",
+        )?;
+        let mut id: *const c_char = ptr::null();
+        let mut payload: *mut c_void = ptr::null_mut();
+        let mut deleter: Option<unsafe extern "C" fn(*mut c_void)> = None;
+        check(
+            (symbols.get_opaque_data)(cpu_opts, &mut id, &mut payload, &mut deleter),
+            "LrtGetOpaqueCpuOptionsData",
+        )?;
+        let mut opaque: sys::LiteRtOpaqueOptions = ptr::null_mut();
+        check(
+            sys::LiteRtCreateOpaqueOptions(id, payload, deleter, &mut opaque),
+            "LiteRtCreateOpaqueOptions",
+        )?;
+        check(
+            sys::LiteRtAddOpaqueOptions(opts, opaque),
+            "LiteRtAddOpaqueOptions",
+        )?;
+        (symbols.destroy)(cpu_opts);
+        Ok(())
+    }
+}
+
+struct CpuOptionsSymbols {
+    create: unsafe extern "C" fn(*mut *mut sys::LrtCpuOptions) -> sys::LiteRtStatus,
+    destroy: unsafe extern "C" fn(*mut sys::LrtCpuOptions),
+    set_num_threads: unsafe extern "C" fn(*mut sys::LrtCpuOptions, c_int) -> sys::LiteRtStatus,
+    get_opaque_data: unsafe extern "C" fn(
+        *const sys::LrtCpuOptions,
+        *mut *const c_char,
+        *mut *mut c_void,
+        *mut Option<unsafe extern "C" fn(*mut c_void)>,
+    ) -> sys::LiteRtStatus,
+}
+
+impl CpuOptionsSymbols {
+    unsafe fn load() -> Result<Self> {
+        Ok(Self {
+            create: load_process_symbol(c"LrtCreateCpuOptions")?,
+            destroy: load_process_symbol(c"LrtDestroyCpuOptions")?,
+            set_num_threads: load_process_symbol(c"LrtSetCpuOptionsNumThread")?,
+            get_opaque_data: load_process_symbol(c"LrtGetOpaqueCpuOptionsData")?,
+        })
+    }
+}
+
+#[cfg(unix)]
+unsafe fn load_process_symbol<T>(name: &CStr) -> Result<T>
+where
+    T: Copy,
+{
+    unsafe extern "C" {
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    }
+    let ptr = unsafe { dlsym(ptr::null_mut(), name.as_ptr()) };
+    if ptr.is_null() {
+        bail!(
+            "LiteRT CPU thread symbol '{}' not found; use num_threads=0 with stock host LiteRT",
+            name.to_string_lossy()
+        );
+    }
+    Ok(unsafe { std::mem::transmute_copy(&ptr) })
+}
+
+#[cfg(not(unix))]
+unsafe fn load_process_symbol<T>(name: &CStr) -> Result<T>
+where
+    T: Copy,
+{
+    bail!(
+        "dynamic LiteRT CPU thread symbol lookup is not implemented on this platform for '{}'",
+        name.to_string_lossy()
+    );
 }
 
 fn check(status: sys::LiteRtStatus, context: &str) -> Result<()> {
@@ -365,4 +472,26 @@ fn layout_num_elements(layout: &sys::LiteRtLayout) -> Result<usize> {
         n *= d as usize;
     }
     Ok(n)
+}
+
+fn element_type_byte_len(element_type: sys::LiteRtElementType) -> Result<usize> {
+    let bytes = match element_type {
+        sys::LiteRtElementType::kLiteRtElementTypeBool
+        | sys::LiteRtElementType::kLiteRtElementTypeInt8
+        | sys::LiteRtElementType::kLiteRtElementTypeUInt8 => 1,
+        sys::LiteRtElementType::kLiteRtElementTypeInt16
+        | sys::LiteRtElementType::kLiteRtElementTypeUInt16
+        | sys::LiteRtElementType::kLiteRtElementTypeFloat16
+        | sys::LiteRtElementType::kLiteRtElementTypeBFloat16 => 2,
+        sys::LiteRtElementType::kLiteRtElementTypeInt32
+        | sys::LiteRtElementType::kLiteRtElementTypeUInt32
+        | sys::LiteRtElementType::kLiteRtElementTypeFloat32 => 4,
+        sys::LiteRtElementType::kLiteRtElementTypeInt64
+        | sys::LiteRtElementType::kLiteRtElementTypeUInt64
+        | sys::LiteRtElementType::kLiteRtElementTypeFloat64
+        | sys::LiteRtElementType::kLiteRtElementTypeComplex64 => 8,
+        sys::LiteRtElementType::kLiteRtElementTypeComplex128 => 16,
+        other => bail!("unsupported LiteRT input element type {other:?}"),
+    };
+    Ok(bytes)
 }

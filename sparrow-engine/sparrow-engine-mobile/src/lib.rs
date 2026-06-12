@@ -5,6 +5,7 @@
 //! LiteRT session wrapper only; the full sparrow-engine inference cascade is a
 //! later milestone.
 
+pub mod cascade;
 pub mod sys;
 pub mod tflite;
 
