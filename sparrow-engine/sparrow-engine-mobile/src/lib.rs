@@ -6,6 +6,8 @@
 //! later milestone.
 
 pub mod cascade;
+#[cfg(feature = "ffi")]
+pub mod ffi;
 pub mod sys;
 pub mod tflite;
 

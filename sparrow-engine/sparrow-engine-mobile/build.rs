@@ -123,14 +123,13 @@ fn main() {
             }
         }
 
+        // Linux note: rustc already passes a generated version script for cdylib
+        // builds. Passing a second script (`exports.map`) causes GNU ld in the
+        // aarch64 cross image to fail with "anonymous version tag cannot be
+        // combined with other version tags". The focused mobile API exports only
+        // `#[no_mangle] sparrow_engine_orca_*` symbols, verified by `nm -D`.
         let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        if target_os == "linux" {
-            let map_path = format!("{}/exports.map", crate_dir);
-            println!(
-                "cargo:rustc-cdylib-link-arg=-Wl,--version-script={}",
-                map_path
-            );
-        } else if target_os == "windows" {
+        if target_os == "windows" {
             let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
             if target_env == "msvc" {
                 let def_path = format!("{}/exports.def", crate_dir);

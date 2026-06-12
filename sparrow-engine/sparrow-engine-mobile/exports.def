@@ -1,2 +1,7 @@
 LIBRARY sparrow_engine
 EXPORTS
+    sparrow_engine_orca_cascade_new
+    sparrow_engine_orca_cascade_run
+    sparrow_engine_orca_result_init
+    sparrow_engine_orca_cascade_free
+    sparrow_engine_orca_last_error
