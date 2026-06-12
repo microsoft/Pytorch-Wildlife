@@ -1,0 +1,28 @@
+[package]
+name = "sparrow-engine-mobile"
+version = "0.1.17"
+edition = "2021"
+description = "RP-25 — sparrow-engine mobile pipeline using the LiteRT/TensorFlow Lite backend."
+links = "LiteRt"
+
+[lib]
+name = "sparrow_engine"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+ffi = ["dep:cbindgen", "dep:csbindgen"]
+
+[dependencies]
+sparrow-engine-types = { path = "../sparrow-engine-types" }
+sparrow-engine-core  = { path = "../sparrow-engine-core" }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+fast_image_resize = { version = "5", features = ["image"] }
+ndarray = "0.17"
+tracing = { version = "0.1", features = ["log"] }
+anyhow = "1"
+thiserror = { workspace = true }
+
+[build-dependencies]
+bindgen = { version = "0.71", default-features = false, features = ["runtime"] }
+cbindgen = { version = "0.27", optional = true }
+csbindgen = { version = "1", optional = true }

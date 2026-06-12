@@ -1,6 +1,6 @@
 [workspace]
 members = ["sparrow-engine-types", "sparrow-engine-core", "sparrow-engine-cpu", "sparrow-engine-gpu",
-           "sparrow-engine-server", "sparrow-engine-cli", "sparrow-engine-python"]
+           "sparrow-engine-mobile", "sparrow-engine-server", "sparrow-engine-cli", "sparrow-engine-python"]
 resolver = "2"
 
 [workspace.dependencies]
