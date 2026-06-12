@@ -37,10 +37,7 @@ fn main() {
     bindings
         .write_to_file(&bindings_path)
         .expect("failed to write LiteRT bindings");
-    println!(
-        "cargo:warning=wrote LiteRT bindings to {}",
-        bindings_path.display()
-    );
+    eprintln!("wrote LiteRT bindings to {}", bindings_path.display());
 
     let configured_lib_dir = env::var("LITERT_LIB_DIR")
         .map(PathBuf::from)
@@ -124,10 +121,10 @@ fn main() {
         }
 
         // Linux note: rustc already passes a generated version script for cdylib
-        // builds. Passing a second script (`exports.map`) causes GNU ld in the
-        // aarch64 cross image to fail with "anonymous version tag cannot be
-        // combined with other version tags". The focused mobile API exports only
-        // `#[no_mangle] sparrow_engine_orca_*` symbols, verified by `nm -D`.
+        // builds. Passing a second script causes GNU ld in the aarch64 cross
+        // image to fail with "anonymous version tag cannot be combined with
+        // other version tags". The focused mobile API exports only `#[no_mangle]
+        // sparrow_engine_orca_*` symbols, verified by `nm -D`.
         let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
         if target_os == "windows" {
             let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
@@ -141,7 +138,6 @@ fn main() {
         println!("cargo:rerun-if-changed=NativeMethods.g.cs");
     }
 
-    println!("cargo:rerun-if-changed=exports.map");
     println!("cargo:rerun-if-changed=exports.def");
     println!("cargo:rerun-if-changed=src/ffi.rs");
     println!("cargo:rerun-if-changed=cbindgen.toml");

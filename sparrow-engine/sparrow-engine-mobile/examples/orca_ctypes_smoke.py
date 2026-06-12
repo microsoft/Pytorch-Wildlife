@@ -1,16 +1,18 @@
 import ctypes
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 
 
 REPO = Path("/home/miao/repos/PW_refactor/Pytorch-Wildlife/sparrow-engine")
-LIB = REPO / "target/debug/libsparrow_engine.so"
-ARTIFACTS = Path("/home/miao/repos/PW_refactor/sparrow-engine-dev/bench-binaries/artifacts")
-FIXTURES = ARTIFACTS / "fixtures"
-DETECTOR = ARTIFACTS / "orca-detector-fp32.tflite"
-ECOTYPE = ARTIFACTS / "orca-ecotype-melinput-fp32.tflite"
+DEFAULT_ARTIFACTS = Path("/home/miao/repos/PW_refactor/sparrow-engine-dev/bench-binaries/artifacts")
+LIB = Path(os.environ.get("SPE_MOBILE_LIB", REPO / "target/debug/libsparrow_engine.so"))
+MODELS = Path(os.environ.get("SPE_MOBILE_MODELS", DEFAULT_ARTIFACTS))
+FIXTURES = Path(os.environ.get("SPE_MOBILE_FIXTURES", DEFAULT_ARTIFACTS / "fixtures"))
+DETECTOR = Path(os.environ.get("SPE_MOBILE_DETECTOR", MODELS / "orca-detector-fp32.tflite"))
+ECOTYPE = Path(os.environ.get("SPE_MOBILE_ECOTYPE", MODELS / "orca-ecotype-melinput-fp32.tflite"))
 
 
 class SparrowOrcaResult(ctypes.Structure):

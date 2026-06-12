@@ -65,7 +65,11 @@ impl OrcaCascade {
         })
     }
 
-    /// Run raw audio through core mel preprocessing and the two-stage cascade.
+    /// Run one raw-audio window through core mel preprocessing and the cascade.
+    ///
+    /// This per-segment API operates on a single 3 s window. Input is resampled
+    /// to 24 kHz, then truncated to or zero-padded to 72,000 samples. The caller
+    /// is responsible for sliding-window segmentation before calling this method.
     pub fn run_segment(&mut self, samples: &[f32], sample_rate: u32) -> Result<OrcaCascadeResult> {
         let mel = orca_mel_spectrogram(samples, sample_rate, &self.audio_config, &self.filterbank)?;
         self.run_mel(&mel)

@@ -2664,14 +2664,11 @@ dependencies = [
  "bindgen",
  "cbindgen",
  "csbindgen",
- "fast_image_resize",
- "image",
  "ndarray",
  "npyz",
  "serde_json",
  "sparrow-engine-core",
  "sparrow-engine-types",
- "thiserror",
  "tracing",
 ]
 

@@ -15,12 +15,9 @@ ffi = ["dep:cbindgen", "dep:csbindgen"]
 [dependencies]
 sparrow-engine-types = { path = "../sparrow-engine-types" }
 sparrow-engine-core  = { path = "../sparrow-engine-core" }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-fast_image_resize = { version = "5", features = ["image"] }
 ndarray = "0.17"
 tracing = { version = "0.1", features = ["log"] }
 anyhow = "1"
-thiserror = { workspace = true }
 
 [build-dependencies]
 bindgen = { version = "0.71", default-features = false, features = ["runtime"] }

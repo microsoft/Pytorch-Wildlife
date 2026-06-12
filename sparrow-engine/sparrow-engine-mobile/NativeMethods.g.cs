@@ -37,6 +37,9 @@ namespace SparrowEngine.Native
         ///  `sparrow_engine_orca_last_error` for details.
         ///  A handle is single-owner and not thread-safe: do not call `run` concurrently
         ///  on the same handle, and free each handle exactly once.
+        ///  This per-segment API operates on a single 3 s window. Input is resampled to
+        ///  24 kHz, then truncated to or zero-padded to 72,000 samples. The caller is
+        ///  responsible for sliding-window segmentation before calling this function.
         ///
         ///  # Safety
         ///  - `handle` must be a valid pointer returned by `sparrow_engine_orca_cascade_new`.

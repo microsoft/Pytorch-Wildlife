@@ -7,18 +7,21 @@ use sparrow_engine::cascade::{
 use sparrow_engine::preprocess_audio::MelFilterbank;
 use sparrow_engine::sys;
 use sparrow_engine::tflite::LiteRtRuntime;
+use std::env;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-const FIXTURES_DIR: &str =
+const DEFAULT_FIXTURES_DIR: &str =
     "/home/miao/repos/PW_refactor/sparrow-engine-dev/bench-binaries/artifacts/fixtures";
-const DETECTOR_MODEL: &str =
-    "/home/miao/repos/PW_refactor/sparrow-engine-dev/bench-binaries/artifacts/orca-detector-fp32.tflite";
-const ECOTYPE_MODEL: &str = "/home/miao/repos/PW_refactor/sparrow-engine-dev/bench-binaries/artifacts/orca-ecotype-melinput-fp32.tflite";
+const DEFAULT_MODELS_DIR: &str =
+    "/home/miao/repos/PW_refactor/sparrow-engine-dev/bench-binaries/artifacts";
+const DETECTOR_MODEL_NAME: &str = "orca-detector-fp32.tflite";
+const ECOTYPE_MODEL_NAME: &str = "orca-ecotype-melinput-fp32.tflite";
 
 fn main() -> Result<()> {
-    let fixtures = fixture_dirs(Path::new(FIXTURES_DIR))?;
+    let paths = ExamplePaths::from_env();
+    let fixtures = fixture_dirs(&paths.fixtures)?;
     let config = orca_audio_config();
     let filterbank = MelFilterbank::new(&config)?;
 
@@ -30,15 +33,15 @@ fn main() -> Result<()> {
     let mut detector_ref_count = 0usize;
 
     let runtime = LiteRtRuntime::new()?;
-    let mut detector = runtime.load(Path::new(DETECTOR_MODEL), 0)?;
-    let mut ecotype = runtime.load(Path::new(ECOTYPE_MODEL), 0)?;
+    let mut detector = runtime.load(&paths.detector, 0)?;
+    let mut ecotype = runtime.load(&paths.ecotype, 0)?;
 
     let mut litert_max_diff = 0.0f32;
     let mut litert_mean_sum = 0.0f64;
     let mut litert_count = 0usize;
     let mut litert_argmax_matches = 0usize;
 
-    let mut cascade = OrcaCascade::load(Path::new(DETECTOR_MODEL), Path::new(ECOTYPE_MODEL), 0)?;
+    let mut cascade = OrcaCascade::load(&paths.detector, &paths.ecotype, 0)?;
     let mut ungated_core_ecotype_argmax_matches = 0usize;
     let mut gated_cascade_argmax_matches = 0usize;
     let mut gated_cascade_count = 0usize;
@@ -160,6 +163,34 @@ fn main() -> Result<()> {
         fixtures.len()
     );
     Ok(())
+}
+
+struct ExamplePaths {
+    fixtures: PathBuf,
+    detector: PathBuf,
+    ecotype: PathBuf,
+}
+
+impl ExamplePaths {
+    fn from_env() -> Self {
+        let fixtures = PathBuf::from(
+            env::var("SPE_MOBILE_FIXTURES").unwrap_or_else(|_| DEFAULT_FIXTURES_DIR.into()),
+        );
+        let models_dir = PathBuf::from(
+            env::var("SPE_MOBILE_MODELS").unwrap_or_else(|_| DEFAULT_MODELS_DIR.into()),
+        );
+        let detector = env::var("SPE_MOBILE_DETECTOR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| models_dir.join(DETECTOR_MODEL_NAME));
+        let ecotype = env::var("SPE_MOBILE_ECOTYPE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| models_dir.join(ECOTYPE_MODEL_NAME));
+        Self {
+            fixtures,
+            detector,
+            ecotype,
+        }
+    }
 }
 
 struct ExpectedLogits {

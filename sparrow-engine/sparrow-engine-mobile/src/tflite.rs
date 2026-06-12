@@ -6,7 +6,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
 use std::ptr;
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// LiteRT tensor element type accepted by [`LiteRtBackend::invoke_named`].
 pub type ElementType = sys::LiteRtElementType;
@@ -14,11 +14,11 @@ pub type ElementType = sys::LiteRtElementType;
 /// Process-local LiteRT runtime.
 ///
 /// Owns one `LiteRtEnvironment` and shares it with every compiled model loaded
-/// through [`LiteRtRuntime::load`]. The backend holds an `Arc` clone of the
+/// through [`LiteRtRuntime::load`]. The backend holds an `Rc` clone of the
 /// runtime inner state so the environment outlives all compiled models.
 #[derive(Clone)]
 pub struct LiteRtRuntime {
-    inner: Arc<LiteRtRuntimeInner>,
+    inner: Rc<LiteRtRuntimeInner>,
 }
 
 struct LiteRtRuntimeInner {
@@ -35,7 +35,7 @@ impl LiteRtRuntime {
                 "LiteRtCreateEnvironment",
             )?;
             Ok(Self {
-                inner: Arc::new(LiteRtRuntimeInner { env }),
+                inner: Rc::new(LiteRtRuntimeInner { env }),
             })
         }
     }
@@ -61,10 +61,10 @@ impl Drop for LiteRtRuntimeInner {
 /// One LiteRT-loaded model using the CPU backend.
 ///
 /// The wrapper owns model options, compiled model, and model handle. It borrows
-/// the shared LiteRT environment by holding an `Arc` to the runtime inner state;
+/// the shared LiteRT environment by holding an `Rc` to the runtime inner state;
 /// it never destroys the environment itself.
 pub struct LiteRtBackend {
-    runtime: Arc<LiteRtRuntimeInner>,
+    runtime: Rc<LiteRtRuntimeInner>,
     model: sys::LiteRtModel,
     opts: sys::LiteRtOptions,
     compiled: sys::LiteRtCompiledModel,
@@ -77,7 +77,7 @@ pub struct LiteRtBackend {
 
 impl LiteRtBackend {
     fn load_with_runtime(
-        runtime: Arc<LiteRtRuntimeInner>,
+        runtime: Rc<LiteRtRuntimeInner>,
         path: &Path,
         num_threads: usize,
     ) -> Result<Self> {
@@ -225,7 +225,7 @@ impl LiteRtBackend {
         }
 
         unsafe {
-            let mut in_bufs: Vec<sys::LiteRtTensorBuffer> = Vec::with_capacity(self.num_inputs);
+            let mut in_bufs: Vec<OwnedTensorBuffer> = Vec::with_capacity(self.num_inputs);
             for (i, (bytes, etype)) in inputs.iter().enumerate() {
                 let mut req: sys::LiteRtTensorBufferRequirements = ptr::null_mut();
                 check(
@@ -261,24 +261,23 @@ impl LiteRtBackend {
                     ),
                     "LiteRtCreateManagedTensorBufferFromRequirements(input)",
                 )?;
+                let buf = OwnedTensorBuffer::new(buf);
                 let mut host_ptr: *mut c_void = ptr::null_mut();
                 check(
                     sys::LiteRtLockTensorBuffer(
-                        buf,
+                        buf.as_raw(),
                         &mut host_ptr,
                         sys::LiteRtTensorBufferLockMode::kLiteRtTensorBufferLockModeWrite,
                     ),
                     "LiteRtLockTensorBuffer(input write)",
                 )?;
+                let lock = LockedTensorBuffer::new(buf.as_raw());
                 ptr::copy_nonoverlapping(bytes.as_ptr(), host_ptr as *mut u8, bytes.len());
-                check(
-                    sys::LiteRtUnlockTensorBuffer(buf),
-                    "LiteRtUnlockTensorBuffer(input)",
-                )?;
+                lock.unlock("LiteRtUnlockTensorBuffer(input)")?;
                 in_bufs.push(buf);
             }
 
-            let mut out_bufs: Vec<sys::LiteRtTensorBuffer> = Vec::with_capacity(self.num_outputs);
+            let mut out_bufs: Vec<OwnedTensorBuffer> = Vec::with_capacity(self.num_outputs);
             for i in 0..self.num_outputs {
                 let mut req: sys::LiteRtTensorBufferRequirements = ptr::null_mut();
                 check(
@@ -304,17 +303,21 @@ impl LiteRtBackend {
                     ),
                     "LiteRtCreateManagedTensorBufferFromRequirements(output)",
                 )?;
-                out_bufs.push(buf);
+                out_bufs.push(OwnedTensorBuffer::new(buf));
             }
 
+            let mut in_raws: Vec<sys::LiteRtTensorBuffer> =
+                in_bufs.iter().map(OwnedTensorBuffer::as_raw).collect();
+            let mut out_raws: Vec<sys::LiteRtTensorBuffer> =
+                out_bufs.iter().map(OwnedTensorBuffer::as_raw).collect();
             check(
                 sys::LiteRtRunCompiledModel(
                     self.compiled,
                     0,
-                    in_bufs.len(),
-                    in_bufs.as_mut_ptr(),
-                    out_bufs.len(),
-                    out_bufs.as_mut_ptr(),
+                    in_raws.len(),
+                    in_raws.as_mut_ptr(),
+                    out_raws.len(),
+                    out_raws.as_mut_ptr(),
                 ),
                 "LiteRtRunCompiledModel",
             )?;
@@ -325,25 +328,16 @@ impl LiteRtBackend {
                 let mut host_ptr: *mut c_void = ptr::null_mut();
                 check(
                     sys::LiteRtLockTensorBuffer(
-                        *buf,
+                        buf.as_raw(),
                         &mut host_ptr,
                         sys::LiteRtTensorBufferLockMode::kLiteRtTensorBufferLockModeRead,
                     ),
                     "LiteRtLockTensorBuffer(output)",
                 )?;
+                let lock = LockedTensorBuffer::new(buf.as_raw());
                 let slice = std::slice::from_raw_parts(host_ptr as *const f32, n_elems);
                 outs.push(slice.to_vec());
-                check(
-                    sys::LiteRtUnlockTensorBuffer(*buf),
-                    "LiteRtUnlockTensorBuffer(output)",
-                )?;
-            }
-
-            for buf in in_bufs {
-                sys::LiteRtDestroyTensorBuffer(buf);
-            }
-            for buf in out_bufs {
-                sys::LiteRtDestroyTensorBuffer(buf);
+                lock.unlock("LiteRtUnlockTensorBuffer(output)")?;
             }
 
             Ok(outs)
@@ -367,21 +361,104 @@ impl Drop for LiteRtBackend {
     }
 }
 
+struct OwnedTensorBuffer(sys::LiteRtTensorBuffer);
+
+impl OwnedTensorBuffer {
+    fn new(buffer: sys::LiteRtTensorBuffer) -> Self {
+        Self(buffer)
+    }
+
+    fn as_raw(&self) -> sys::LiteRtTensorBuffer {
+        self.0
+    }
+}
+
+impl Drop for OwnedTensorBuffer {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.0.is_null() {
+                sys::LiteRtDestroyTensorBuffer(self.0);
+            }
+        }
+    }
+}
+
+struct LockedTensorBuffer {
+    buffer: sys::LiteRtTensorBuffer,
+    locked: bool,
+}
+
+impl LockedTensorBuffer {
+    fn new(buffer: sys::LiteRtTensorBuffer) -> Self {
+        Self {
+            buffer,
+            locked: true,
+        }
+    }
+
+    fn unlock(mut self, context: &str) -> Result<()> {
+        let result = unsafe { check(sys::LiteRtUnlockTensorBuffer(self.buffer), context) };
+        if result.is_ok() {
+            self.locked = false;
+        }
+        result
+    }
+}
+
+impl Drop for LockedTensorBuffer {
+    fn drop(&mut self) {
+        unsafe {
+            if self.locked && !self.buffer.is_null() {
+                let _ = sys::LiteRtUnlockTensorBuffer(self.buffer);
+            }
+        }
+    }
+}
+
+struct CpuOptionsGuard {
+    ptr: *mut sys::LrtCpuOptions,
+    destroy: unsafe extern "C" fn(*mut sys::LrtCpuOptions),
+}
+
+impl CpuOptionsGuard {
+    fn new(
+        ptr: *mut sys::LrtCpuOptions,
+        destroy: unsafe extern "C" fn(*mut sys::LrtCpuOptions),
+    ) -> Self {
+        Self { ptr, destroy }
+    }
+
+    fn as_raw(&self) -> *mut sys::LrtCpuOptions {
+        self.ptr
+    }
+}
+
+impl Drop for CpuOptionsGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.ptr.is_null() {
+                (self.destroy)(self.ptr);
+            }
+        }
+    }
+}
+
 fn attach_cpu_thread_options(opts: sys::LiteRtOptions, num_threads: usize) -> Result<()> {
     tracing::debug!(num_threads, "setting LiteRT CPU inference thread count");
     unsafe {
         let symbols = CpuOptionsSymbols::load()?;
         let mut cpu_opts: *mut sys::LrtCpuOptions = ptr::null_mut();
         check((symbols.create)(&mut cpu_opts), "LrtCreateCpuOptions")?;
+        let cpu_opts = CpuOptionsGuard::new(cpu_opts, symbols.destroy);
         check(
-            (symbols.set_num_threads)(cpu_opts, num_threads as c_int),
+            (symbols.set_num_threads)(cpu_opts.as_raw(), num_threads as c_int),
             "LrtSetCpuOptionsNumThread",
         )?;
         let mut id: *const c_char = ptr::null();
         let mut payload: *mut c_void = ptr::null_mut();
         let mut deleter: Option<unsafe extern "C" fn(*mut c_void)> = None;
         check(
-            (symbols.get_opaque_data)(cpu_opts, &mut id, &mut payload, &mut deleter),
+            (symbols.get_opaque_data)(cpu_opts.as_raw(), &mut id, &mut payload, &mut deleter),
             "LrtGetOpaqueCpuOptionsData",
         )?;
         let mut opaque: sys::LiteRtOpaqueOptions = ptr::null_mut();
@@ -389,11 +466,13 @@ fn attach_cpu_thread_options(opts: sys::LiteRtOptions, num_threads: usize) -> Re
             sys::LiteRtCreateOpaqueOptions(id, payload, deleter, &mut opaque),
             "LiteRtCreateOpaqueOptions",
         )?;
-        check(
+        if let Err(e) = check(
             sys::LiteRtAddOpaqueOptions(opts, opaque),
             "LiteRtAddOpaqueOptions",
-        )?;
-        (symbols.destroy)(cpu_opts);
+        ) {
+            sys::LiteRtDestroyOpaqueOptions(opaque);
+            return Err(e);
+        }
         Ok(())
     }
 }
