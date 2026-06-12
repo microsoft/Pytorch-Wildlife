@@ -89,9 +89,18 @@ impl LiteRtBackend {
                 sys::LiteRtCreateModelFromFile(path_cstr.as_ptr(), &mut model),
                 "LiteRtCreateModelFromFile",
             )?;
+            // Guard the raw handles so any `?` below frees them on early return; the
+            // guard is mem::forget-disarmed once they are moved into `Self` (whose Drop
+            // then frees each exactly once — no double-free).
+            let mut guard = LoadGuard {
+                model,
+                opts: ptr::null_mut(),
+                compiled: ptr::null_mut(),
+            };
 
             let mut opts: sys::LiteRtOptions = ptr::null_mut();
             check(sys::LiteRtCreateOptions(&mut opts), "LiteRtCreateOptions")?;
+            guard.opts = opts;
             check(
                 sys::LiteRtSetOptionsHardwareAccelerators(
                     opts,
@@ -110,6 +119,7 @@ impl LiteRtBackend {
                 sys::LiteRtCreateCompiledModel(runtime.env, model, opts, &mut compiled),
                 "LiteRtCreateCompiledModel",
             )?;
+            guard.compiled = compiled;
 
             let mut sig: sys::LiteRtSignature = ptr::null_mut();
             check(
@@ -158,6 +168,9 @@ impl LiteRtBackend {
                 "LiteRtGetCompiledModelOutputTensorLayouts",
             )?;
 
+            // Success: `Self` now owns the handles and frees them on Drop. Disarm the
+            // guard so they are not freed twice.
+            std::mem::forget(guard);
             Ok(Self {
                 runtime,
                 model,
@@ -170,16 +183,6 @@ impl LiteRtBackend {
                 input_names,
             })
         }
-    }
-
-    /// Model signature input names, in LiteRT slot order.
-    pub fn input_names(&self) -> &[String] {
-        &self.input_names
-    }
-
-    /// Number of model outputs.
-    pub fn num_outputs(&self) -> usize {
-        self.num_outputs
     }
 
     /// Run inference, routing each input by a substring of its signature name.
@@ -346,6 +349,33 @@ impl LiteRtBackend {
 }
 
 impl Drop for LiteRtBackend {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.compiled.is_null() {
+                sys::LiteRtDestroyCompiledModel(self.compiled);
+            }
+            if !self.opts.is_null() {
+                sys::LiteRtDestroyOptions(self.opts);
+            }
+            if !self.model.is_null() {
+                sys::LiteRtDestroyModel(self.model);
+            }
+        }
+    }
+}
+
+/// RAII guard for the raw LiteRT handles during `LiteRtBackend::load_with_runtime`.
+/// `LiteRtBackend::drop` only runs once a `Self` is constructed; any `?` early-return
+/// before that point would otherwise leak `model`/`opts`/`compiled`. This guard frees
+/// whichever handles have been created so far, and is `mem::forget`-disarmed on the
+/// success path so the constructed backend remains the sole owner (no double-free).
+struct LoadGuard {
+    model: sys::LiteRtModel,
+    opts: sys::LiteRtOptions,
+    compiled: sys::LiteRtCompiledModel,
+}
+
+impl Drop for LoadGuard {
     fn drop(&mut self) {
         unsafe {
             if !self.compiled.is_null() {
