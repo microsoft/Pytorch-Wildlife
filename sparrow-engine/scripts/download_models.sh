@@ -29,11 +29,12 @@
 set -euo pipefail
 
 # ---- Constants ----
-ZENODO_RECORD="${ZENODO_RECORD:-20563673}"
+ZENODO_RECORD="${ZENODO_RECORD:-20674275}"
 ZENODO_DOI="10.5281/zenodo.${ZENODO_RECORD}"
 ZENODO_BASE="https://zenodo.org/records/${ZENODO_RECORD}/files"
 
-# All 18 models published in the v0.5.0 Zenodo bundle.
+# All 20 model entries published in the v0.6.0 Zenodo bundle (adds the two fp16 orca-cascade
+# .tflite re-exports for spe-mobile on top of the v0.5.0 set).
 # (v0.1.0 had 14; v0.2.0 added perch-v2 — bird vocalization classifier;
 #  v0.3.0 added md-audiobirds-v1 — default audio detector, MIT;
 #  v0.4.0 — OWL + HerdNet manifest fix (subtype = "overhead"). No new models;

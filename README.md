@@ -17,7 +17,7 @@ spe device                              # {"device":"cpu"}  or  {"device":"cuda:
 
 # One-time: download a model from the Zenodo bundle (brew doesn't ship models)
 mkdir -p ~/.sparrow-engine/models && cd ~/.sparrow-engine/models
-curl -fLO https://zenodo.org/records/20563673/files/MDV6-yolov10-e.zip
+curl -fLO https://zenodo.org/records/20674275/files/MDV6-yolov10-e.zip
 unzip -q MDV6-yolov10-e.zip && rm MDV6-yolov10-e.zip
 cd -
 
