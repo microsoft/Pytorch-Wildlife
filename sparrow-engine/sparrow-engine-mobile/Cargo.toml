@@ -17,7 +17,7 @@ path = "src/bin/spe_mobile.rs"
 required-features = ["cli"]
 
 [features]
-ffi = ["dep:cbindgen", "dep:csbindgen"]
+ffi = ["dep:cbindgen", "dep:csbindgen", "dep:serde", "dep:serde_json"]
 cli = ["dep:clap", "dep:serde_json"]
 
 [dependencies]
@@ -27,6 +27,7 @@ ndarray = "0.17"
 tracing = { version = "0.1", features = ["log"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 
 [build-dependencies]

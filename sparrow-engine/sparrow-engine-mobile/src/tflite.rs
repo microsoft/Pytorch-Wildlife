@@ -206,6 +206,37 @@ impl LiteRtBackend {
         self.invoke(&routed)
     }
 
+    /// Run inference on a single-input model, feeding `bytes` to input 0.
+    ///
+    /// Generic-engine path: most sparrow-engine models (image detectors,
+    /// classifiers, mel-input audio models) take exactly one input tensor, so the
+    /// name-substring routing of [`invoke_named`](Self::invoke_named) is
+    /// unnecessary. Errors if the model does not have exactly one input.
+    pub fn invoke_single(
+        &mut self,
+        bytes: Vec<u8>,
+        etype: ElementType,
+    ) -> Result<Vec<Vec<f32>>> {
+        if self.num_inputs != 1 {
+            bail!(
+                "invoke_single requires a single-input model, but this model has {} inputs ({:?})",
+                self.num_inputs,
+                self.input_names
+            );
+        }
+        self.invoke(&[(bytes, etype)])
+    }
+
+    /// Number of input tensors in the model's first signature.
+    pub fn num_inputs(&self) -> usize {
+        self.num_inputs
+    }
+
+    /// Number of output tensors in the model's first signature.
+    pub fn num_outputs(&self) -> usize {
+        self.num_outputs
+    }
+
     fn find_input(&self, needle: &str) -> Result<usize> {
         for (i, name) in self.input_names.iter().enumerate() {
             if name.contains(needle) {

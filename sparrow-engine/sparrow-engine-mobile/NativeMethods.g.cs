@@ -19,86 +19,353 @@ namespace SparrowEngine.Native
 
 
         /// <summary>
-        ///  Create a focused orca cascade handle from detector and ecotype TFLite paths.
-        ///
-        ///  Returns null on error. Call `sparrow_engine_orca_last_error` for details.
+        ///  Create an engine from a JSON config string: `{"model_dir": "...",
+        ///  "intra_threads": 4}`. `intra_threads` is the LiteRT CPU thread count
+        ///  (defaults to 4 — the Pi Zero 2W validated setting); `0` = LiteRT default.
+        ///  Returns null on error; call `sparrow_engine_last_error` for details.
         ///
         ///  # Safety
-        ///  `detector_path` and `ecotype_path` must be valid, non-null, null-terminated
-        ///  UTF-8 strings.
+        ///  `config_json` must be a valid, non-null, null-terminated UTF-8 string.
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "sparrow_engine_orca_cascade_new", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void* sparrow_engine_orca_cascade_new(byte* detector_path, byte* ecotype_path, nuint num_threads);
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_engine_new", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void* sparrow_engine_engine_new(byte* config_json);
 
         /// <summary>
-        ///  Run one raw-audio segment through the orca cascade.
-        ///
-        ///  Returns 0 on success and nonzero on error. On error, call
-        ///  `sparrow_engine_orca_last_error` for details.
-        ///  A handle is single-owner and not thread-safe: do not call `run` concurrently
-        ///  on the same handle, and free each handle exactly once.
-        ///  This per-segment API operates on a single 3 s window. Input is resampled to
-        ///  24 kHz, then truncated to or zero-padded to 72,000 samples. The caller is
-        ///  responsible for sliding-window segmentation before calling this function.
+        ///  Free an engine. Null-safe. Each non-null engine must be freed exactly once.
         ///
         ///  # Safety
-        ///  - `handle` must be a valid pointer returned by `sparrow_engine_orca_cascade_new`.
-        ///  - `samples` must point to `n_samples` finite `f32` samples.
-        ///  - `out` must be a valid writable pointer.
+        ///  `engine` must be a pointer returned by `sparrow_engine_engine_new`, or null.
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "sparrow_engine_orca_cascade_run", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int sparrow_engine_orca_cascade_run(void* handle, float* samples, nuint n_samples, uint sample_rate, SparrowOrcaResult* @out);
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_engine_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void sparrow_engine_engine_free(void* engine);
 
         /// <summary>
-        ///  Initialize an orca result struct to its empty/default value.
-        ///
-        ///  Returns 0 on success and nonzero on error. This helper lets ctypes callers
-        ///  reset a stack-allocated result before reuse without knowing Rust defaults.
+        ///  Return the last error message for this thread, or null if none. The pointer
+        ///  is valid until the next FFI call on the same thread; do not free it.
         ///
         ///  # Safety
-        ///  `out` must be a valid writable pointer.
+        ///  Thread-safe with respect to other threads' last-error state.
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "sparrow_engine_orca_result_init", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int sparrow_engine_orca_result_init(SparrowOrcaResult* @out);
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_last_error", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* sparrow_engine_last_error();
 
         /// <summary>
-        ///  Free an orca cascade handle. Null-safe.
+        ///  Free a string returned by the engine (e.g. `sparrow_engine_list_models`).
+        ///  Null-safe.
         ///
         ///  # Safety
-        ///  `handle` must be a pointer returned by `sparrow_engine_orca_cascade_new`, or null.
-        ///  Each non-null handle must be freed exactly once.
+        ///  `ptr` must be a string returned by an engine FFI function, or null, and freed
+        ///  exactly once.
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "sparrow_engine_orca_cascade_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void sparrow_engine_orca_cascade_free(void* handle);
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_free_string", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void sparrow_engine_free_string(byte* ptr);
 
         /// <summary>
-        ///  Return the last orca FFI error message for this thread, or null if no error.
-        ///  The returned pointer is valid until the next orca FFI call on the same thread.
+        ///  Return the engine version (static; do not free).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* sparrow_engine_version();
+
+        /// <summary>
+        ///  Load a model by catalog id. Returns null on error.
         ///
         ///  # Safety
-        ///  Thread-safe. Returned pointer must not be freed by the caller.
+        ///  `engine` must be a valid engine pointer; `model_id` a valid C string.
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "sparrow_engine_orca_last_error", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte* sparrow_engine_orca_last_error();
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_load_model_by_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void* sparrow_engine_load_model_by_id(void* engine, byte* model_id);
+
+        /// <summary>
+        ///  Unload the model this handle refers to and free the handle. Null-safe.
+        ///
+        ///  # Safety
+        ///  `model` must be a pointer returned by `sparrow_engine_load_model_by_id`, or
+        ///  null, and freed exactly once.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_unload_model", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void sparrow_engine_unload_model(void* model);
+
+        /// <summary>
+        ///  Return a JSON array of available models in the model directory. Caller frees
+        ///  with `sparrow_engine_free_string`. Returns null on error.
+        ///
+        ///  # Safety
+        ///  `engine` must be a valid engine pointer.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_list_models", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* sparrow_engine_list_models(void* engine);
+
+        /// <summary>
+        ///  Image detection — not yet available on the mobile flavor (RP-42). Always
+        ///  returns null with a clear last-error; the symbol exists so consumers can bind
+        ///  the full ABI now.
+        ///
+        ///  # Safety
+        ///  `model` must be a valid model pointer.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_detect", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern SparrowEngineDetections* sparrow_engine_detect(void* _model, byte* _image, nuint _len, SparrowEngineDetectOpts* _opts);
+
+        /// <summary>
+        ///  Image classification — not yet available on the mobile flavor (RP-42).
+        ///
+        ///  # Safety
+        ///  `model` must be a valid model pointer.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_classify", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern SparrowEngineClassifyResult* sparrow_engine_classify(void* _model, byte* _image, nuint _len, SparrowEngineClassifyOpts* _opts);
+
+        /// <summary>
+        ///  Free a detections result. Null-safe.
+        ///
+        ///  # Safety
+        ///  `ptr` must be a pointer returned by `sparrow_engine_detect`, or null.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_detections_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void sparrow_engine_detections_free(SparrowEngineDetections* ptr);
+
+        /// <summary>
+        ///  Free a classify result. Null-safe.
+        ///
+        ///  # Safety
+        ///  `ptr` must be a pointer returned by `sparrow_engine_classify`, or null.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_classify_result_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void sparrow_engine_classify_result_free(SparrowEngineClassifyResult* ptr);
+
+        /// <summary>
+        ///  Run single-model audio detection over a WAV file. Returns null on error.
+        ///
+        ///  # Safety
+        ///  `model` must be a valid model pointer; `audio_path` a valid C string; `opts`
+        ///  a valid pointer or null.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_detect_audio", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern SparrowEngineAudioResult* sparrow_engine_detect_audio(void* model, byte* audio_path, SparrowEngineAudioDetectOpts* opts);
+
+        /// <summary>
+        ///  Free an audio result. Null-safe.
+        ///
+        ///  # Safety
+        ///  `ptr` must be a pointer returned by `sparrow_engine_detect_audio`, or null.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_audio_result_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void sparrow_engine_audio_result_free(SparrowEngineAudioResult* ptr);
+
+        /// <summary>
+        ///  Load an audio-cascade pipeline by catalog id. Returns 0 on success, -1 on
+        ///  error (call `sparrow_engine_last_error`).
+        ///
+        ///  # Safety
+        ///  `engine` must be a valid engine pointer; `pipeline_id` a valid C string.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_load_pipeline_by_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int sparrow_engine_load_pipeline_by_id(void* engine, byte* pipeline_id);
+
+        /// <summary>
+        ///  Run a loaded audio-cascade pipeline over raw mono `f32` samples. Returns null
+        ///  on error.
+        ///
+        ///  # Safety
+        ///  `engine` must be valid; `pipeline_id` a valid C string; `samples` must point
+        ///  to `n_samples` finite `f32`; `opts` a valid pointer or null.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_run_pipeline", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern SparrowEngineCascadeResult* sparrow_engine_run_pipeline(void* engine, byte* pipeline_id, float* samples, nuint n_samples, uint sample_rate, SparrowEngineCascadeOpts* opts);
+
+        /// <summary>
+        ///  Unload a pipeline by id (its stage models stay loaded). Returns 0 / -1.
+        ///
+        ///  # Safety
+        ///  `engine` must be valid; `pipeline_id` a valid C string.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_unload_pipeline", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int sparrow_engine_unload_pipeline(void* engine, byte* pipeline_id);
+
+        /// <summary>
+        ///  Free a cascade result. Null-safe.
+        ///
+        ///  # Safety
+        ///  `ptr` must be a pointer returned by `sparrow_engine_run_pipeline`, or null.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "sparrow_engine_pipeline_result_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void sparrow_engine_pipeline_result_free(SparrowEngineCascadeResult* ptr);
 
 
     }
 
+    /// <summary>
+    ///  Detection bounding box, normalized `[0, 1]`.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    internal unsafe partial struct SparrowOrcaResult
+    internal unsafe partial struct SparrowEngineBBox
     {
+        public float x_min;
+        public float y_min;
+        public float x_max;
+        public float y_max;
+    }
+
+    /// <summary>
+    ///  One image detection.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineDetection
+    {
+        public SparrowEngineBBox bbox;
+        public byte* label;
+        public uint label_id;
+        public float confidence;
+    }
+
+    /// <summary>
+    ///  Image detection output (image inference is deferred to RP-42; see
+    ///  `sparrow_engine_detect`).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineDetections
+    {
+        public SparrowEngineDetection* data;
+        public nuint len;
+        public uint image_width;
+        public uint image_height;
+    }
+
+    /// <summary>
+    ///  One image classification.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineClassification
+    {
+        public byte* label;
+        public uint label_id;
+        public float confidence;
+    }
+
+    /// <summary>
+    ///  Image classification output (deferred to RP-42; see `sparrow_engine_classify`).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineClassifyResult
+    {
+        public SparrowEngineClassification* data;
+        public nuint len;
+        public uint image_width;
+        public uint image_height;
+        public float processing_time_ms;
+    }
+
+    /// <summary>
+    ///  Image detection options.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineDetectOpts
+    {
+        public float confidence_threshold;
+        public uint max_detections;
+    }
+
+    /// <summary>
+    ///  Image classification options.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineClassifyOpts
+    {
+        public uint top_k;
+    }
+
+    /// <summary>
+    ///  One detected audio segment (single-model `sparrow_engine_detect_audio`).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineAudioSegment
+    {
+        public float start_time_s;
+        public float end_time_s;
+        public float confidence;
+    }
+
+    /// <summary>
+    ///  Single-model audio detection output.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineAudioResult
+    {
+        public SparrowEngineAudioSegment* data;
+        public nuint len;
+        public float duration_s;
+        public uint sample_rate;
+        public float processing_time_ms;
+    }
+
+    /// <summary>
+    ///  Single-model audio detection options. A `NaN` field means "use the manifest
+    ///  default" (C has no `Option`).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineAudioDetectOpts
+    {
+        public float confidence_threshold;
+        public float segment_duration_s;
+        public float segment_stride_s;
+    }
+
+    /// <summary>
+    ///  One audio-cascade window result.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineCascadeSegment
+    {
+        public float start_s;
+        public float end_s;
         public float detector_logit;
         public float detector_probability;
-        public byte is_orca;
-        public byte ecotype_ran;
         /// <summary>
-        ///  Ecotype class index, or -1 when the detector gate skipped ecotype.
+        ///  1 if stage 1 fired (`detector_probability &gt;= threshold`), else 0.
         /// </summary>
-        public int ecotype_argmax;
+        public byte is_detected;
         /// <summary>
-        ///  Five ecotype probabilities. All zeros when ecotype did not run.
+        ///  1 if stage 2 (classifier) ran, else 0.
         /// </summary>
-        public fixed float ecotype_probabilities[5];
+        public byte stage2_ran;
+        /// <summary>
+        ///  Stage-2 argmax class index, or -1 when stage 2 did not run.
+        /// </summary>
+        public int stage2_argmax;
+        /// <summary>
+        ///  Stage-2 top probability, or 0 when stage 2 did not run.
+        /// </summary>
+        public float stage2_confidence;
+    }
+
+    /// <summary>
+    ///  Audio-cascade output. `stage2_probabilities` is a flat row-major buffer of
+    ///  `len * num_stage2_classes` values (segment `i`, class `c` lives at
+    ///  `stage2_probabilities[i * num_stage2_classes + c]`); rows where stage 2 did
+    ///  not run are all-zero.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineCascadeResult
+    {
+        public byte* pipeline_id;
+        public SparrowEngineCascadeSegment* data;
+        public nuint len;
+        public nuint num_stage2_classes;
+        public float* stage2_probabilities;
+        public float duration_s;
+        public uint sample_rate;
+        public float processing_time_ms;
+    }
+
+    /// <summary>
+    ///  Audio-cascade options. A `NaN` field means "use the pipeline default".
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct SparrowEngineCascadeOpts
+    {
+        public float window_sec;
+        public float overlap_sec;
+        public float detector_threshold;
     }
 
 
