@@ -449,10 +449,7 @@ pub unsafe extern "C" fn sparrow_engine_classify(
 }
 
 fn image_unsupported_msg() -> String {
-    "image inference (detect/classify) is not yet available in the mobile (LiteRT) flavor: no \
-     mobile (.tflite) image model is onboarded. It will be enabled by RP-42 (ONNX→TFLite \
-     conversion + onboarding)."
-        .to_string()
+    crate::engine::IMAGE_UNSUPPORTED_MSG.to_string()
 }
 
 /// Free a detections result. Null-safe.
@@ -707,6 +704,12 @@ fn cascade_result_to_c(
     let segs_boxed = segs.into_boxed_slice();
     let data = segs_boxed.as_ptr();
     std::mem::forget(segs_boxed);
+
+    // Alloc/free length invariant: the probs buffer is exactly len * num_classes
+    // (each segment contributes num_classes values, zero-filled when stage 2 was
+    // skipped). pipeline_result_free reconstructs it with the same product, so a
+    // future change to the row-fill loop that breaks this would be UB.
+    debug_assert_eq!(probs.len(), len * num_classes);
 
     let (probs_ptr, _probs_len) = if probs.is_empty() {
         (ptr::null(), 0)

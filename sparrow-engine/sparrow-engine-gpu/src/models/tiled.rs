@@ -693,6 +693,13 @@ impl TiledModel {
     /// Convenience: parse a manifest file then load.
     pub fn load_from_path(ctx: &Arc<CudaContext>, manifest_path: &Path) -> Result<Self> {
         let manifest = manifest::load_manifest(manifest_path)?;
+        // Flavor-strict: reject non-ONNX (the shared loader now accepts tflite for
+        // the mobile flavor). Mirrors gpu/cpu Engine::load_model + AudioModel::load.
+        if manifest.format != "onnx" {
+            return Err(SparrowEngineError::UnsupportedFormat {
+                format: manifest.format.clone(),
+            });
+        }
         let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
         Self::load(ctx, &manifest, manifest_dir)
     }

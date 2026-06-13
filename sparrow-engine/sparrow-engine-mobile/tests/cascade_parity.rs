@@ -43,7 +43,11 @@ fn generic_cascade_matches_orca_reference() {
     let detector_path = model_dir.join(DETECTOR_REL);
     let ecotype_path = model_dir.join(ECOTYPE_REL);
 
-    if !pipeline_toml.exists() || !detector_path.exists() || !fixtures_root.exists() {
+    if !pipeline_toml.exists()
+        || !detector_path.exists()
+        || !ecotype_path.exists()
+        || !fixtures_root.exists()
+    {
         eprintln!(
             "SKIP generic_cascade_matches_orca_reference: missing models/fixtures \
              (model_dir={}, fixtures={}). Set SPE_MOBILE_MODEL_DIR / SPE_MOBILE_FIXTURES.",

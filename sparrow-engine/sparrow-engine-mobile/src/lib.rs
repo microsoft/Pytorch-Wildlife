@@ -1,13 +1,13 @@
-//! sparrow-engine-mobile — mobile LiteRT/TensorFlow Lite backend scaffold.
+//! sparrow-engine-mobile — manifest-driven mobile inference flavor (LiteRT/TFLite).
 //!
-//! This crate is the Raspberry Pi/mobile flavor peer of `sparrow-engine-cpu` and
-//! `sparrow-engine-gpu`. P2.1 wires the crate, LiteRT C bindings, and a reusable
-//! LiteRT session wrapper only; the full sparrow-engine inference cascade is a
-//! later milestone.
+//! The Raspberry Pi/mobile peer of `sparrow-engine-cpu` and `sparrow-engine-gpu`:
+//! the generic, manifest-driven [`engine::Engine`] on a LiteRT CPU backend, plus
+//! single-model audio detection and a config-described audio cascade ([`pipeline`])
+//! that replaces the previously hardcoded orca C exports (RP-25-FU-1).
 //!
-//! This focused crate uses `anyhow` internally for the P2 orca path. Errors
-//! stringify at the FFI boundary, matching the CPU flavor's string last-error
-//! surface. Typed `SparrowEngineError` migration is tracked in RP-25-FU-1.
+//! Errors use `anyhow` internally and stringify at the FFI boundary, matching the
+//! cpu/gpu flavor's string last-error surface. A typed `SparrowEngineError`
+//! surface for this flavor remains future work.
 
 pub mod cascade;
 pub mod engine;

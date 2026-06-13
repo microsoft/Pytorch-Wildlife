@@ -8,7 +8,8 @@ use std::path::Path;
 use std::ptr;
 use std::rc::Rc;
 
-/// LiteRT tensor element type accepted by [`LiteRtBackend::invoke_named`].
+/// LiteRT tensor element type accepted by [`LiteRtBackend::invoke_single`] /
+/// [`LiteRtBackend::invoke_named`].
 pub type ElementType = sys::LiteRtElementType;
 
 /// Process-local LiteRT runtime.
@@ -225,16 +226,6 @@ impl LiteRtBackend {
             );
         }
         self.invoke(&[(bytes, etype)])
-    }
-
-    /// Number of input tensors in the model's first signature.
-    pub fn num_inputs(&self) -> usize {
-        self.num_inputs
-    }
-
-    /// Number of output tensors in the model's first signature.
-    pub fn num_outputs(&self) -> usize {
-        self.num_outputs
     }
 
     fn find_input(&self, needle: &str) -> Result<usize> {

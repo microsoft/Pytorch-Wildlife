@@ -21,7 +21,7 @@
 //!
 //! ## Image inference (deferred — RP-42)
 //!
-//! [`Engine::detect`] / [`Engine::classify`] are exposed for ABI stability but
+//! [`MobileModel::detect`] / [`MobileModel::classify`] are exposed for ABI stability but
 //! return a clear error: no mobile (`.tflite`) image model is onboarded yet. The
 //! image preprocessing + decode path lands with the first converted image model
 //! in RP-42 (the ONNX→TFLite conversion + onboarding task).
@@ -413,13 +413,15 @@ impl MobileModel {
     }
 }
 
+/// The B2 deferral message shared by `detect` / `classify` (Rust + FFI surfaces).
+pub(crate) const IMAGE_UNSUPPORTED_MSG: &str =
+    "image inference (detect/classify) is not yet available in the mobile (LiteRT) flavor: no \
+     mobile (.tflite) image model is onboarded. It will be enabled by RP-42 (the ONNX→TFLite \
+     conversion + onboarding task).";
+
 /// The B2 deferral error shared by `detect` / `classify`.
 pub(crate) fn image_not_supported() -> anyhow::Error {
-    anyhow!(
-        "image inference (detect/classify) is not yet available in the mobile (LiteRT) flavor: \
-         no mobile (.tflite) image model is onboarded. It will be enabled with the first \
-         converted image model (RP-42, the ONNX→TFLite conversion + onboarding task)."
-    )
+    anyhow!(IMAGE_UNSUPPORTED_MSG)
 }
 
 /// Resolve sliding-window (duration, stride) from manifest, overridable by opts.

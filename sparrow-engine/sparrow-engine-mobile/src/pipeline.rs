@@ -116,6 +116,24 @@ pub(crate) fn load_pipeline_by_id(inner: &EngineInner, id: &str) -> Result<()> {
             )
         })?;
 
+    // The shared loader guarantees exactly one detector but does not count
+    // classifiers (cpu/gpu pipelines allow zero-or-many). A mobile audio cascade
+    // is strictly detector → one classifier; reject extra classifier steps here
+    // (mobile-local) so a multi-classifier manifest doesn't silently run only the
+    // first one. PipelineRole is {Detector, Classifier}, so one-classifier +
+    // one-detector also pins the step count at two.
+    let classifier_steps = manifest
+        .steps
+        .iter()
+        .filter(|s| s.role == PipelineRole::Classifier)
+        .count();
+    if classifier_steps != 1 {
+        bail!(
+            "pipeline '{id}' has {classifier_steps} classifier steps; the mobile audio cascade \
+             requires exactly one stage-2 classifier"
+        );
+    }
+
     let detector = inner.load_model(detector_id)?;
     let classifier = inner.load_model(classifier_id)?;
 
@@ -223,15 +241,27 @@ pub(crate) fn run_pipeline(
     let overlap_sec = opts
         .overlap_sec
         .unwrap_or(pipeline.segment_duration_s - pipeline.segment_stride_s);
-    if window_sec <= 0.0 {
-        bail!("window_sec must be > 0");
+    if !window_sec.is_finite() || window_sec <= 0.0 {
+        bail!("window_sec must be finite and > 0 (got {window_sec})");
     }
-    if overlap_sec >= window_sec {
-        bail!("overlap_sec ({overlap_sec}) must be < window_sec ({window_sec})");
+    if !overlap_sec.is_finite() || overlap_sec < 0.0 || overlap_sec >= window_sec {
+        bail!("overlap_sec ({overlap_sec}) must be finite and in [0, window_sec={window_sec})");
+    }
+    if let Some(t) = opts.detector_threshold {
+        if !t.is_finite() || !(0.0..=1.0).contains(&t) {
+            bail!("detector_threshold ({t}) must be finite and in [0, 1]");
+        }
     }
     let detector_threshold = opts.detector_threshold.unwrap_or(pipeline.detector_threshold);
 
-    let segment_samples = (window_sec * target_sr as f32).round() as usize;
+    // Bound the sample count before the float→usize cast: an out-of-range
+    // `window_sec` would otherwise saturate to usize::MAX and panic the later
+    // `Vec::resize`. (window_sec is already finite + positive here.)
+    let segment_samples_f = (window_sec * target_sr as f32).round();
+    if !(0.0..=usize::MAX as f32).contains(&segment_samples_f) {
+        bail!("window_sec ({window_sec}) resolves to too many samples");
+    }
+    let segment_samples = segment_samples_f as usize;
     let stride_samples = (((window_sec - overlap_sec) * target_sr as f32).round() as usize).max(1);
     if segment_samples == 0 {
         bail!("window_sec resolves to zero samples");
@@ -287,8 +317,21 @@ pub(crate) fn run_pipeline(
                 .into_iter()
                 .next()
                 .context("classifier returned no logits")?;
+            if logits.is_empty() {
+                bail!("classifier '{}' returned empty logits", pipeline.classifier.id);
+            }
             if num_stage2_classes == 0 {
                 num_stage2_classes = logits.len();
+            } else if logits.len() != num_stage2_classes {
+                // Fail fast (matching the proven OrcaCascade) rather than silently
+                // zero-filling an inconsistent per-window class count.
+                bail!(
+                    "classifier '{}' returned {} logits, expected {} (inconsistent per-window \
+                     class count)",
+                    pipeline.classifier.id,
+                    logits.len(),
+                    num_stage2_classes
+                );
             }
             let probs = softmax(&logits);
             seg.stage2_ran = true;

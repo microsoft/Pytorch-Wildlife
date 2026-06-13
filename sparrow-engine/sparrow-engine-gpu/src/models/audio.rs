@@ -335,6 +335,15 @@ impl AudioModel {
     /// - Compiles the 4 NVRTC kernels.
     pub fn load(ctx: &Arc<CudaContext>, manifest_path: &Path) -> Result<Self> {
         let manifest = manifest::load_manifest(manifest_path)?;
+        // Flavor-strict: the gpu flavor runs ONNX via ORT. The shared loader now
+        // also accepts `tflite` (mobile flavor); reject it here with a clear error
+        // rather than failing later with an opaque ORT parse error. Mirrors
+        // gpu/cpu Engine::load_model.
+        if manifest.format != "onnx" {
+            return Err(SparrowEngineError::UnsupportedFormat {
+                format: manifest.format.clone(),
+            });
+        }
         let manifest_dir = manifest_path
             .parent()
             .ok_or_else(|| {
