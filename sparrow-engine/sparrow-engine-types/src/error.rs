@@ -21,7 +21,7 @@ pub enum SparrowEngineError {
     #[error("Invalid manifest: {0}")]
     InvalidManifest(String),
 
-    #[error("Unsupported model format '{format}'. Only 'onnx' is supported in this version.")]
+    #[error("Unsupported model format '{format}' for this engine flavor.")]
     UnsupportedFormat { format: String },
 
     #[error("Model '{id}' output shape {shape} does not match expected postprocessing method '{method}'.")]

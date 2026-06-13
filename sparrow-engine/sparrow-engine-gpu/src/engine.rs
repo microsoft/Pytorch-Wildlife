@@ -338,6 +338,15 @@ impl Engine {
     pub fn load_model(&self, path: impl AsRef<Path>) -> Result<ModelHandle> {
         let manifest_path = path.as_ref();
         let manifest_owned = manifest::load_manifest(manifest_path)?;
+
+        // Flavor-strict: the gpu flavor runs ONNX models via ORT. The shared loader
+        // now also accepts `tflite` manifests (for the mobile LiteRT flavor); reject
+        // a non-ONNX format here with a clear error. Mirrors sparrow-engine-cpu.
+        if manifest_owned.format != "onnx" {
+            return Err(SparrowEngineError::UnsupportedFormat {
+                format: manifest_owned.format.clone(),
+            });
+        }
         let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
         let model_id = manifest_owned.id.clone();
 

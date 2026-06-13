@@ -2667,6 +2667,7 @@ dependencies = [
  "csbindgen",
  "ndarray",
  "npyz",
+ "serde",
  "serde_json",
  "sparrow-engine-core",
  "sparrow-engine-types",

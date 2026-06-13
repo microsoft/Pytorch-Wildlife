@@ -253,6 +253,17 @@ impl Engine {
         // validation, tiled field validation, label path traversal check).
         let manifest = manifest::load_manifest(manifest_path)?;
 
+        // Flavor-strict: the cpu/gpu flavors run ONNX models via ORT. The shared
+        // loader now also accepts `tflite` manifests (for the mobile LiteRT
+        // flavor); reject a non-ONNX format here with a clear error rather than
+        // letting ORT fail to parse a `.tflite` file. Mirrors the Device::Auto
+        // flavor-strict coercion contract.
+        if manifest.format != "onnx" {
+            return Err(SparrowEngineError::UnsupportedFormat {
+                format: manifest.format.clone(),
+            });
+        }
+
         let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
 
         // Resolve ONNX file path (relative to manifest directory). When the
@@ -1403,8 +1414,8 @@ mod tests {
         );
         assert_eq!(
             derive_model_type(&mel, &PostprocessMethod::Softmax, std_sub),
-            ModelType::Classifier,
-            "MelSpectrogram + Softmax is rejected by manifest validation and should not advertise AudioClassifier"
+            ModelType::AudioClassifier,
+            "RP-39: MelSpectrogram + Softmax (mel-input ecotype re-export) is an AudioClassifier"
         );
         // Overhead does NOT promote audio detectors.
         assert_eq!(
