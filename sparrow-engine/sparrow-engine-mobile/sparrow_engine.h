@@ -28,85 +28,331 @@
 #define ORCA_THRESHOLD 0.5
 
 /**
- * Opaque orca cascade handle. Consumers must not inspect or dereference.
+ * Opaque engine handle. Consumers must not inspect or dereference.
  */
-typedef void SparrowOrcaCascade;
+typedef void SparrowEngine;
 
-typedef struct SparrowOrcaResult {
+/**
+ * Opaque model handle returned by `sparrow_engine_load_model_by_id`.
+ */
+typedef void SparrowEngineModel;
+
+/**
+ * Detection bounding box, normalized `[0, 1]`.
+ */
+typedef struct SparrowEngineBBox {
+  float x_min;
+  float y_min;
+  float x_max;
+  float y_max;
+} SparrowEngineBBox;
+
+/**
+ * One image detection.
+ */
+typedef struct SparrowEngineDetection {
+  struct SparrowEngineBBox bbox;
+  const char *label;
+  uint32_t label_id;
+  float confidence;
+} SparrowEngineDetection;
+
+/**
+ * Image detection output (image inference is deferred to RP-42; see
+ * `sparrow_engine_detect`).
+ */
+typedef struct SparrowEngineDetections {
+  const struct SparrowEngineDetection *data;
+  uintptr_t len;
+  uint32_t image_width;
+  uint32_t image_height;
+} SparrowEngineDetections;
+
+/**
+ * Image detection options.
+ */
+typedef struct SparrowEngineDetectOpts {
+  float confidence_threshold;
+  uint32_t max_detections;
+} SparrowEngineDetectOpts;
+
+/**
+ * One image classification.
+ */
+typedef struct SparrowEngineClassification {
+  const char *label;
+  uint32_t label_id;
+  float confidence;
+} SparrowEngineClassification;
+
+/**
+ * Image classification output (deferred to RP-42; see `sparrow_engine_classify`).
+ */
+typedef struct SparrowEngineClassifyResult {
+  const struct SparrowEngineClassification *data;
+  uintptr_t len;
+  uint32_t image_width;
+  uint32_t image_height;
+  float processing_time_ms;
+} SparrowEngineClassifyResult;
+
+/**
+ * Image classification options.
+ */
+typedef struct SparrowEngineClassifyOpts {
+  uint32_t top_k;
+} SparrowEngineClassifyOpts;
+
+/**
+ * One detected audio segment (single-model `sparrow_engine_detect_audio`).
+ */
+typedef struct SparrowEngineAudioSegment {
+  float start_time_s;
+  float end_time_s;
+  float confidence;
+} SparrowEngineAudioSegment;
+
+/**
+ * Single-model audio detection output.
+ */
+typedef struct SparrowEngineAudioResult {
+  const struct SparrowEngineAudioSegment *data;
+  uintptr_t len;
+  float duration_s;
+  uint32_t sample_rate;
+  float processing_time_ms;
+} SparrowEngineAudioResult;
+
+/**
+ * Single-model audio detection options. A `NaN` field means "use the manifest
+ * default" (C has no `Option`).
+ */
+typedef struct SparrowEngineAudioDetectOpts {
+  float confidence_threshold;
+  float segment_duration_s;
+  float segment_stride_s;
+} SparrowEngineAudioDetectOpts;
+
+/**
+ * One audio-cascade window result.
+ */
+typedef struct SparrowEngineCascadeSegment {
+  float start_s;
+  float end_s;
   float detector_logit;
   float detector_probability;
-  uint8_t is_orca;
-  uint8_t ecotype_ran;
   /**
-   * Ecotype class index, or -1 when the detector gate skipped ecotype.
+   * 1 if stage 1 fired (`detector_probability >= threshold`), else 0.
    */
-  int32_t ecotype_argmax;
+  uint8_t is_detected;
   /**
-   * Five ecotype probabilities. All zeros when ecotype did not run.
+   * 1 if stage 2 (classifier) ran, else 0.
    */
-  float ecotype_probabilities[5];
-} SparrowOrcaResult;
+  uint8_t stage2_ran;
+  /**
+   * Stage-2 argmax class index, or -1 when stage 2 did not run.
+   */
+  int32_t stage2_argmax;
+  /**
+   * Stage-2 top probability, or 0 when stage 2 did not run.
+   */
+  float stage2_confidence;
+} SparrowEngineCascadeSegment;
 
 /**
- * Create a focused orca cascade handle from detector and ecotype TFLite paths.
- *
- * Returns null on error. Call `sparrow_engine_orca_last_error` for details.
- *
- * # Safety
- * `detector_path` and `ecotype_path` must be valid, non-null, null-terminated
- * UTF-8 strings.
+ * Audio-cascade output. `stage2_probabilities` is a flat row-major buffer of
+ * `len * num_stage2_classes` values (segment `i`, class `c` lives at
+ * `stage2_probabilities[i * num_stage2_classes + c]`); rows where stage 2 did
+ * not run are all-zero.
  */
-SparrowOrcaCascade *sparrow_engine_orca_cascade_new(const char *detector_path,
-                                                    const char *ecotype_path,
-                                                    uintptr_t num_threads);
+typedef struct SparrowEngineCascadeResult {
+  const char *pipeline_id;
+  const struct SparrowEngineCascadeSegment *data;
+  uintptr_t len;
+  uintptr_t num_stage2_classes;
+  const float *stage2_probabilities;
+  float duration_s;
+  uint32_t sample_rate;
+  float processing_time_ms;
+} SparrowEngineCascadeResult;
 
 /**
- * Run one raw-audio segment through the orca cascade.
- *
- * Returns 0 on success and nonzero on error. On error, call
- * `sparrow_engine_orca_last_error` for details.
- * A handle is single-owner and not thread-safe: do not call `run` concurrently
- * on the same handle, and free each handle exactly once.
- * This per-segment API operates on a single 3 s window. Input is resampled to
- * 24 kHz, then truncated to or zero-padded to 72,000 samples. The caller is
- * responsible for sliding-window segmentation before calling this function.
- *
- * # Safety
- * - `handle` must be a valid pointer returned by `sparrow_engine_orca_cascade_new`.
- * - `samples` must point to `n_samples` finite `f32` samples.
- * - `out` must be a valid writable pointer.
+ * Audio-cascade options. A `NaN` field means "use the pipeline default".
  */
-int32_t sparrow_engine_orca_cascade_run(SparrowOrcaCascade *handle,
-                                        const float *samples,
-                                        uintptr_t n_samples,
-                                        uint32_t sample_rate,
-                                        struct SparrowOrcaResult *out);
+typedef struct SparrowEngineCascadeOpts {
+  float window_sec;
+  float overlap_sec;
+  float detector_threshold;
+} SparrowEngineCascadeOpts;
 
 /**
- * Initialize an orca result struct to its empty/default value.
- *
- * Returns 0 on success and nonzero on error. This helper lets ctypes callers
- * reset a stack-allocated result before reuse without knowing Rust defaults.
+ * Create an engine from a JSON config string: `{"model_dir": "...",
+ * "intra_threads": 4}`. `intra_threads` is the LiteRT CPU thread count
+ * (defaults to 4 — the Pi Zero 2W validated setting); `0` = LiteRT default.
+ * Returns null on error; call `sparrow_engine_last_error` for details.
  *
  * # Safety
- * `out` must be a valid writable pointer.
+ * `config_json` must be a valid, non-null, null-terminated UTF-8 string.
  */
-int32_t sparrow_engine_orca_result_init(struct SparrowOrcaResult *out);
+SparrowEngine *sparrow_engine_engine_new(const char *config_json);
 
 /**
- * Free an orca cascade handle. Null-safe.
+ * Free an engine. Null-safe. Each non-null engine must be freed exactly once.
  *
  * # Safety
- * `handle` must be a pointer returned by `sparrow_engine_orca_cascade_new`, or null.
- * Each non-null handle must be freed exactly once.
+ * `engine` must be a pointer returned by `sparrow_engine_engine_new`, or null.
+ * Like every engine call, this must run on the thread that created the engine
+ * (single-threaded contract — see the crate-level threading note); freeing from
+ * another thread while the owner thread is mid-call is undefined behaviour.
  */
-void sparrow_engine_orca_cascade_free(SparrowOrcaCascade *handle);
+void sparrow_engine_engine_free(SparrowEngine *engine);
 
 /**
- * Return the last orca FFI error message for this thread, or null if no error.
- * The returned pointer is valid until the next orca FFI call on the same thread.
+ * Return the last error message for this thread, or null if none. The pointer
+ * is valid until the next FFI call on the same thread; do not free it.
  *
  * # Safety
- * Thread-safe. Returned pointer must not be freed by the caller.
+ * Thread-safe with respect to other threads' last-error state.
  */
-const char *sparrow_engine_orca_last_error(void);
+const char *sparrow_engine_last_error(void);
+
+/**
+ * Free a string returned by the engine (e.g. `sparrow_engine_list_models`).
+ * Null-safe.
+ *
+ * # Safety
+ * `ptr` must be a string returned by an engine FFI function, or null, and freed
+ * exactly once.
+ */
+void sparrow_engine_free_string(char *ptr);
+
+/**
+ * Return the engine version (static; do not free).
+ */
+const char *sparrow_engine_version(void);
+
+/**
+ * Load a model by catalog id. Returns null on error.
+ *
+ * # Safety
+ * `engine` must be a valid engine pointer; `model_id` a valid C string.
+ */
+SparrowEngineModel *sparrow_engine_load_model_by_id(SparrowEngine *engine, const char *model_id);
+
+/**
+ * Unload the model this handle refers to and free the handle. Null-safe.
+ *
+ * # Safety
+ * `model` must be a pointer returned by `sparrow_engine_load_model_by_id`, or
+ * null, and freed exactly once. Must run on the engine's owner thread
+ * (single-threaded contract — see the crate-level threading note).
+ */
+void sparrow_engine_unload_model(SparrowEngineModel *model);
+
+/**
+ * Return a JSON array of available models in the model directory. Caller frees
+ * with `sparrow_engine_free_string`. Returns null on error.
+ *
+ * # Safety
+ * `engine` must be a valid engine pointer.
+ */
+char *sparrow_engine_list_models(const SparrowEngine *engine);
+
+/**
+ * Image detection — not yet available on the mobile flavor (RP-42). Always
+ * returns null with a clear last-error; the symbol exists so consumers can bind
+ * the full ABI now.
+ *
+ * # Safety
+ * `model` must be a valid model pointer.
+ */
+struct SparrowEngineDetections *sparrow_engine_detect(const SparrowEngineModel *_model,
+                                                      const uint8_t *_image,
+                                                      uintptr_t _len,
+                                                      const struct SparrowEngineDetectOpts *_opts);
+
+/**
+ * Image classification — not yet available on the mobile flavor (RP-42).
+ *
+ * # Safety
+ * `model` must be a valid model pointer.
+ */
+struct SparrowEngineClassifyResult *sparrow_engine_classify(const SparrowEngineModel *_model,
+                                                            const uint8_t *_image,
+                                                            uintptr_t _len,
+                                                            const struct SparrowEngineClassifyOpts *_opts);
+
+/**
+ * Free a detections result. Null-safe.
+ *
+ * # Safety
+ * `ptr` must be a pointer returned by `sparrow_engine_detect`, or null.
+ */
+void sparrow_engine_detections_free(struct SparrowEngineDetections *ptr);
+
+/**
+ * Free a classify result. Null-safe.
+ *
+ * # Safety
+ * `ptr` must be a pointer returned by `sparrow_engine_classify`, or null.
+ */
+void sparrow_engine_classify_result_free(struct SparrowEngineClassifyResult *ptr);
+
+/**
+ * Run single-model audio detection over a WAV file. Returns null on error.
+ *
+ * # Safety
+ * `model` must be a valid model pointer; `audio_path` a valid C string; `opts`
+ * a valid pointer or null.
+ */
+struct SparrowEngineAudioResult *sparrow_engine_detect_audio(const SparrowEngineModel *model,
+                                                             const char *audio_path,
+                                                             const struct SparrowEngineAudioDetectOpts *opts);
+
+/**
+ * Free an audio result. Null-safe.
+ *
+ * # Safety
+ * `ptr` must be a pointer returned by `sparrow_engine_detect_audio`, or null.
+ */
+void sparrow_engine_audio_result_free(struct SparrowEngineAudioResult *ptr);
+
+/**
+ * Load an audio-cascade pipeline by catalog id. Returns 0 on success, -1 on
+ * error (call `sparrow_engine_last_error`).
+ *
+ * # Safety
+ * `engine` must be a valid engine pointer; `pipeline_id` a valid C string.
+ */
+int32_t sparrow_engine_load_pipeline_by_id(SparrowEngine *engine, const char *pipeline_id);
+
+/**
+ * Run a loaded audio-cascade pipeline over raw mono `f32` samples. Returns null
+ * on error.
+ *
+ * # Safety
+ * `engine` must be valid; `pipeline_id` a valid C string; `samples` must point
+ * to `n_samples` finite `f32`; `opts` a valid pointer or null.
+ */
+struct SparrowEngineCascadeResult *sparrow_engine_run_pipeline(const SparrowEngine *engine,
+                                                               const char *pipeline_id,
+                                                               const float *samples,
+                                                               uintptr_t n_samples,
+                                                               uint32_t sample_rate,
+                                                               const struct SparrowEngineCascadeOpts *opts);
+
+/**
+ * Unload a pipeline by id (its stage models stay loaded). Returns 0 / -1.
+ *
+ * # Safety
+ * `engine` must be valid; `pipeline_id` a valid C string.
+ */
+int32_t sparrow_engine_unload_pipeline(SparrowEngine *engine, const char *pipeline_id);
+
+/**
+ * Free a cascade result. Null-safe.
+ *
+ * # Safety
+ * `ptr` must be a pointer returned by `sparrow_engine_run_pipeline`, or null.
+ */
+void sparrow_engine_pipeline_result_free(struct SparrowEngineCascadeResult *ptr);

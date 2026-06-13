@@ -162,6 +162,28 @@ fn prepare_audio_detection(
         }
     };
 
+    // RP-39 partial-enablement guard. The shared manifest loader now accepts
+    // mel-input audio classifiers (mel_spectrogram + softmax) so the mobile
+    // LiteRT flavor can run them as stage 2 of an audio cascade. The cpu/gpu ORT
+    // `detect_audio` path only supports mel+sigmoid detectors and raw-audio
+    // multi-class classifiers; running a mel-input multi-class model through the
+    // binary mel loop would be wrong (sigmoid over N logits / shape mismatch).
+    // Full mel-input multi-class handling on ORT is RP-39's remaining scope —
+    // until then, reject it here with a clear, actionable error.
+    if matches!(
+        manifest.preprocess_method,
+        PreprocessMethod::MelSpectrogram { .. }
+    ) && matches!(manifest.postprocess_method, PostprocessMethod::Softmax)
+    {
+        return Err(SparrowEngineError::InvalidManifest(format!(
+            "model '{}' is a mel-input audio classifier (mel_spectrogram + softmax); \
+             detect_audio on this flavor supports only mel+sigmoid detectors and \
+             raw-audio classifiers. Run a mel-input multi-class classifier as stage 2 \
+             of an audio cascade on the mobile (LiteRT) flavor.",
+            manifest.id
+        )));
+    }
+
     // 2. Fail fast: check handle validity before expensive audio loading.
     handle.check_valid()?;
 

@@ -29,7 +29,14 @@ pub fn derive_model_type(
         (PreprocessMethod::MelSpectrogram { .. }, PostprocessMethod::Sigmoid { .. }) => {
             ModelType::AudioDetector
         }
-        (PreprocessMethod::RawAudio { .. }, PostprocessMethod::Softmax) => {
+        // Mel-input multi-class audio classifier (e.g. the orca ecotype mel-input
+        // re-export) and raw-audio classifier (e.g. Perch 2) both resolve to
+        // AudioClassifier. The mel+softmax combo is the RP-39 relaxation that lets
+        // a cascade share one mel front-end between an audio detector and an audio
+        // classifier; it must be matched BEFORE the generic `(_, Softmax)` fallback
+        // so a mel-input audio classifier is not mistyped as an image `Classifier`.
+        (PreprocessMethod::MelSpectrogram { .. }, PostprocessMethod::Softmax)
+        | (PreprocessMethod::RawAudio { .. }, PostprocessMethod::Softmax) => {
             ModelType::AudioClassifier
         }
         (_, PostprocessMethod::Softmax) => ModelType::Classifier,
@@ -108,14 +115,17 @@ mod phase_a_r1_model_type_tests {
     }
 
     #[test]
-    fn classifier_when_mel_plus_softmax_either_subtype() {
+    fn audio_classifier_when_mel_plus_softmax_either_subtype() {
+        // RP-39: a mel-input multi-class audio classifier (the orca ecotype
+        // mel-input re-export) resolves to AudioClassifier, NOT image Classifier.
+        // The Overhead hint is ignored for audio models.
         assert_eq!(
             derive_model_type(&mel(), &PostprocessMethod::Softmax, ModelSubtype::Standard),
-            ModelType::Classifier
+            ModelType::AudioClassifier
         );
         assert_eq!(
             derive_model_type(&mel(), &PostprocessMethod::Softmax, ModelSubtype::Overhead),
-            ModelType::Classifier
+            ModelType::AudioClassifier
         );
     }
 

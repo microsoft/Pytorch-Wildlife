@@ -1,16 +1,19 @@
-//! `spe-mobile` — command-line front end for the sparrow-engine-mobile orca cascade.
+//! `spe-mobile` — command-line front end for the sparrow-engine mobile flavor.
 //!
-//! Peer to `spe` / `spe-gpu`, scoped to what the mobile flavor currently exposes:
-//! the two-stage orca cascade (detector -> ecotype) on the LiteRT backend. Lets an
-//! operator run inference on the Pi without the water-sparrow Python app.
+//! Peer to `spe` / `spe-gpu`. Drives the generic manifest-driven engine
+//! ([`sparrow_engine::engine::Engine`]) over a model catalog directory: it loads
+//! a config-described audio cascade (e.g. the orca detector → ecotype cascade)
+//! and runs it over WAV files. RP-25-FU-1 replaced the previous hardcoded
+//! two-model path with this generic engine + pipeline.
 //!
-//! Built only with `--features cli` (keeps the default cdylib lean for FFI consumers):
+//! Built only with `--features cli` (keeps the default cdylib lean for FFI
+//! consumers):
 //!   cargo build -p sparrow-engine-mobile --features cli --bin spe-mobile --release
 //!
-//! Example:
+//! Example (model catalog with orca-cascade/pipeline.toml + the two model dirs):
 //!   spe-mobile detect-audio \
-//!     --detector orca-detector-fp16.tflite \
-//!     --ecotype  orca-ecotype-melinput-fp16.tflite \
+//!     --model-dir /path/to/model_catalog \
+//!     --pipeline orca-cascade \
 //!     --threads 4 --labels SRKW,TKW,SAR,NRKW,OKW recording.wav
 
 use std::path::PathBuf;
@@ -18,12 +21,10 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use sparrow_engine::cascade::{OrcaCascade, OrcaCascadeResult, ORCA_SAMPLE_RATE};
-use sparrow_engine::preprocess_audio::load_audio_at_sample_rate;
-use sparrow_engine::AudioInput;
+use sparrow_engine::engine::Engine;
+use sparrow_engine::pipeline::{CascadeOpts, CascadeSegment};
+use sparrow_engine::{AudioInput, Device, EngineConfig};
 
-/// Skip degenerate tail windows shorter than this many samples (matches water-sparrow).
-const MIN_WINDOW_SAMPLES: usize = 16;
 /// Default ecotype abstention threshold (calibrated; below this -> Unassigned).
 const DEFAULT_ABSTENTION: f32 = 0.940_095_8;
 
@@ -31,7 +32,7 @@ const DEFAULT_ABSTENTION: f32 = 0.940_095_8;
 #[command(
     name = "spe-mobile",
     version,
-    about = "sparrow-engine mobile orca cascade CLI (LiteRT backend)"
+    about = "sparrow-engine mobile CLI (LiteRT backend)"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -40,7 +41,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run the orca two-stage cascade over one or more WAV files.
+    /// Run a config-described audio cascade over one or more WAV files.
     DetectAudio(DetectAudioArgs),
 }
 
@@ -52,21 +53,21 @@ enum Format {
 
 #[derive(Parser)]
 struct DetectAudioArgs {
-    /// Orca detector .tflite (stage 1).
+    /// Model catalog directory ({model_dir}/{id}/manifest.toml + pipeline.toml).
     #[arg(long)]
-    detector: PathBuf,
-    /// Orca ecotype .tflite (stage 2, mel-input).
-    #[arg(long)]
-    ecotype: PathBuf,
+    model_dir: PathBuf,
+    /// Pipeline id to load + run (a {model_dir}/{id}/pipeline.toml).
+    #[arg(long, default_value = "orca-cascade")]
+    pipeline: String,
     /// LiteRT CPU inference threads (0 = LiteRT default).
     #[arg(long, default_value_t = 4)]
     threads: usize,
-    /// Sliding-window length in seconds.
-    #[arg(long, default_value_t = 3.0)]
-    window_sec: f32,
-    /// Sliding-window overlap in seconds (must be < window-sec).
-    #[arg(long, default_value_t = 1.5)]
-    overlap_sec: f32,
+    /// Sliding-window length in seconds (default: pipeline manifest value).
+    #[arg(long)]
+    window_sec: Option<f32>,
+    /// Sliding-window overlap in seconds (default: pipeline manifest value).
+    #[arg(long)]
+    overlap_sec: Option<f32>,
     /// Ecotype abstention threshold; max prob below this reports "Unassigned".
     #[arg(long, default_value_t = DEFAULT_ABSTENTION)]
     abstention: f32,
@@ -81,13 +82,7 @@ struct DetectAudioArgs {
     inputs: Vec<PathBuf>,
 }
 
-struct WindowResult {
-    start_s: f32,
-    end_s: f32,
-    res: OrcaCascadeResult,
-}
-
-/// File-level aggregate of the per-window results.
+/// File-level aggregate of the per-window cascade results.
 struct FileAggregate {
     detected: bool,
     label: String,
@@ -101,13 +96,6 @@ fn label_for(idx: usize, labels: &Option<Vec<String>>) -> String {
         Some(l) if idx < l.len() => l[idx].clone(),
         _ => format!("class_{idx}"),
     }
-}
-
-fn ecotype_max_prob(res: &OrcaCascadeResult) -> f32 {
-    res.ecotype_probabilities
-        .as_ref()
-        .map(|p| p.iter().cloned().fold(f32::MIN, f32::max))
-        .unwrap_or(res.detector_probability)
 }
 
 fn main() -> ExitCode {
@@ -124,64 +112,39 @@ fn main() -> ExitCode {
 }
 
 fn run_detect_audio(args: DetectAudioArgs) -> anyhow::Result<()> {
-    if args.window_sec <= 0.0 {
-        anyhow::bail!("--window-sec must be > 0");
-    }
-    if args.overlap_sec >= args.window_sec {
-        anyhow::bail!(
-            "--overlap-sec ({}) must be < --window-sec ({})",
-            args.overlap_sec,
-            args.window_sec
-        );
-    }
-
-    let win = (args.window_sec * ORCA_SAMPLE_RATE as f32).round() as usize;
-    let step =
-        (((args.window_sec - args.overlap_sec) * ORCA_SAMPLE_RATE as f32).round() as usize).max(1);
-
-    let mut cascade =
-        OrcaCascade::load(&args.detector, &args.ecotype, args.threads).map_err(|e| {
-            anyhow::anyhow!(
-                "load cascade (detector={}, ecotype={}): {e:#}",
-                args.detector.display(),
-                args.ecotype.display()
-            )
-        })?;
-
-    let mut reports = Vec::new();
-    for input in &args.inputs {
-        let audio =
-            load_audio_at_sample_rate(&AudioInput::FilePath(input.clone()), ORCA_SAMPLE_RATE)
-                .map_err(|e| anyhow::anyhow!("decode {}: {e:#}", input.display()))?;
-        let samples = audio.data;
-        let mut windows = Vec::new();
-        if samples.len() >= MIN_WINDOW_SAMPLES {
-            let mut start = 0usize;
-            loop {
-                let end = (start + win).min(samples.len());
-                if end - start >= MIN_WINDOW_SAMPLES {
-                    let res = cascade
-                        .run_segment(&samples[start..end], ORCA_SAMPLE_RATE)
-                        .map_err(|e| {
-                            anyhow::anyhow!(
-                                "cascade {} @ {:.1}s: {e:#}",
-                                input.display(),
-                                start as f32 / ORCA_SAMPLE_RATE as f32
-                            )
-                        })?;
-                    windows.push(WindowResult {
-                        start_s: start as f32 / ORCA_SAMPLE_RATE as f32,
-                        end_s: end as f32 / ORCA_SAMPLE_RATE as f32,
-                        res,
-                    });
-                }
-                if end >= samples.len() {
-                    break;
-                }
-                start += step;
-            }
+    if let Some(w) = args.window_sec {
+        if w <= 0.0 {
+            anyhow::bail!("--window-sec must be > 0");
         }
-        reports.push((input.clone(), windows));
+    }
+    if let (Some(w), Some(o)) = (args.window_sec, args.overlap_sec) {
+        if o >= w {
+            anyhow::bail!("--overlap-sec ({o}) must be < --window-sec ({w})");
+        }
+    }
+
+    let engine = Engine::new(EngineConfig {
+        device: Device::Cpu,
+        inter_threads: 0,
+        intra_threads: args.threads as u32,
+        model_dir: args.model_dir.clone(),
+    })?;
+    engine
+        .load_pipeline_by_id(&args.pipeline)
+        .map_err(|e| anyhow::anyhow!("load pipeline '{}': {e:#}", args.pipeline))?;
+
+    let opts = CascadeOpts {
+        window_sec: args.window_sec,
+        overlap_sec: args.overlap_sec,
+        detector_threshold: None,
+    };
+
+    let mut reports: Vec<(PathBuf, Vec<CascadeSegment>)> = Vec::new();
+    for input in &args.inputs {
+        let result = engine
+            .run_pipeline(&args.pipeline, &AudioInput::FilePath(input.clone()), &opts)
+            .map_err(|e| anyhow::anyhow!("run {} : {e:#}", input.display()))?;
+        reports.push((input.clone(), result.segments));
     }
 
     match args.format {
@@ -193,14 +156,14 @@ fn run_detect_audio(args: DetectAudioArgs) -> anyhow::Result<()> {
 
 /// Detected = any orca window; best = highest-confidence orca window (abstention applied).
 fn aggregate(
-    windows: &[WindowResult],
+    windows: &[CascadeSegment],
     labels: &Option<Vec<String>>,
     abstention: f32,
 ) -> FileAggregate {
     let best = windows
         .iter()
-        .filter(|w| w.res.is_orca)
-        .map(|w| (w, ecotype_max_prob(&w.res)))
+        .filter(|w| w.is_detected)
+        .map(|w| (w, w.stage2_confidence))
         .reduce(|a, b| if b.1 > a.1 { b } else { a });
 
     match best {
@@ -215,7 +178,7 @@ fn aggregate(
             let label = if conf < abstention {
                 "Unassigned".to_string()
             } else {
-                label_for(w.res.ecotype_argmax.unwrap_or(0), labels)
+                label_for(w.stage2_argmax.unwrap_or(0), labels)
             };
             FileAggregate {
                 detected: true,
@@ -229,7 +192,7 @@ fn aggregate(
 }
 
 fn print_text(
-    reports: &[(PathBuf, Vec<WindowResult>)],
+    reports: &[(PathBuf, Vec<CascadeSegment>)],
     labels: &Option<Vec<String>>,
     abstention: f32,
 ) {
@@ -241,15 +204,19 @@ fn print_text(
             "win_s", "det_prob", "orca", "ecotype", "max_prob"
         );
         for w in windows {
-            let (eco, mp) = match (&w.res.ecotype_probabilities, w.res.ecotype_argmax) {
-                (Some(_), Some(i)) => (label_for(i, labels), ecotype_max_prob(&w.res)),
-                _ => ("-".to_string(), 0.0),
+            let (eco, mp) = if w.stage2_ran {
+                (
+                    label_for(w.stage2_argmax.unwrap_or(0), labels),
+                    w.stage2_confidence,
+                )
+            } else {
+                ("-".to_string(), 0.0)
             };
             println!(
                 "  {:>7.1}  {:>9.4}  {:>5}  {:>10}  {:>8.4}",
                 w.start_s,
-                w.res.detector_probability,
-                if w.res.is_orca { "yes" } else { "no" },
+                w.detector_probability,
+                if w.is_detected { "yes" } else { "no" },
                 eco,
                 mp
             );
@@ -266,7 +233,7 @@ fn print_text(
 }
 
 fn print_json(
-    reports: &[(PathBuf, Vec<WindowResult>)],
+    reports: &[(PathBuf, Vec<CascadeSegment>)],
     labels: &Option<Vec<String>>,
     abstention: f32,
 ) -> anyhow::Result<()> {
@@ -279,10 +246,12 @@ fn print_json(
                 serde_json::json!({
                     "start_s": w.start_s,
                     "end_s": w.end_s,
-                    "detector_probability": w.res.detector_probability,
-                    "is_orca": w.res.is_orca,
-                    "ecotype_argmax": w.res.ecotype_argmax,
-                    "ecotype_probabilities": w.res.ecotype_probabilities,
+                    "detector_probability": w.detector_probability,
+                    "is_detected": w.is_detected,
+                    "stage2_ran": w.stage2_ran,
+                    "stage2_argmax": w.stage2_argmax,
+                    "stage2_confidence": w.stage2_confidence,
+                    "stage2_probabilities": w.stage2_probabilities,
                 })
             })
             .collect();

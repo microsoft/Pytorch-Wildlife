@@ -510,8 +510,12 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
 
     let raw: RawModelToml = toml::from_str(&content)?;
 
-    // -- Validate format --
-    if raw.model.format != "onnx" {
+    // -- Validate format. Both ONNX (cpu/gpu ORT flavors) and TFLite (mobile
+    // LiteRT flavor) are accepted at this shared layer; each flavor's engine
+    // rejects formats its own backend cannot load (flavor-strict — mirrors the
+    // Device::Auto coercion contract). This keeps one manifest schema across all
+    // flavors while preventing, e.g., an ORT engine from trying to load a .tflite.
+    if raw.model.format != "onnx" && raw.model.format != "tflite" {
         return Err(SparrowEngineError::UnsupportedFormat {
             format: raw.model.format,
         });
@@ -870,7 +874,14 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
             )))
         }
     };
-    if precision == Precision::Fp16 && raw.model.file_fp16.is_none() {
+    // ONNX fp16 uses a separate fp16-converted file (`file_fp16`), with `file`
+    // holding the fp32 original (Phase 3.8). TFLite artifacts bake precision into
+    // the single `file` (there is no fp32/fp16 file pair), so the mobile LiteRT
+    // flavor loads `file` directly and does not require `file_fp16`.
+    if raw.model.format == "onnx"
+        && precision == Precision::Fp16
+        && raw.model.file_fp16.is_none()
+    {
         return Err(SparrowEngineError::InvalidManifest(
             "precision = 'fp16' requires [model] file_fp16 to be set".to_string(),
         ));
@@ -936,6 +947,7 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
     if is_audio {
         match (&preprocess_method, &postprocess_method) {
             (PreprocessMethod::MelSpectrogram { .. }, PostprocessMethod::Sigmoid { .. })
+            | (PreprocessMethod::MelSpectrogram { .. }, PostprocessMethod::Softmax)
             | (PreprocessMethod::RawAudio { .. }, PostprocessMethod::Softmax) => {}
             _ => {
                 return Err(SparrowEngineError::InvalidManifest(format!(
@@ -1364,8 +1376,8 @@ format = "one_per_line"
         let toml = r#"
 [model]
 id = "test"
-format = "tflite"
-file = "model.tflite"
+format = "coreml"
+file = "model.mlmodel"
 
 [preprocessing]
 method = "resize"
@@ -1386,6 +1398,134 @@ format = "one_per_line"
         let dir = write_temp_file("manifest.toml", toml);
         let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
         assert!(matches!(err, SparrowEngineError::UnsupportedFormat { .. }));
+    }
+
+    #[test]
+    fn test_tflite_fp16_audio_cascade_manifests_load() {
+        // End-to-end of the three tflite relaxations (format + fp16-without-
+        // file_fp16 + mel+softmax), mirroring the real orca cascade manifests
+        // (sparrow-engine-models-v0.6.0). Stage 1 detector = mel + sigmoid;
+        // stage 2 ecotype = mel + softmax. Both are fp16 with a single `file`.
+        let detector = r#"
+[model]
+id = "orca-detector-fp16-tflite"
+format = "tflite"
+file = "orca-detector-fp16.tflite"
+
+[preprocessing]
+method = "mel_spectrogram"
+sample_rate = 24000
+n_fft = 1024
+hop_length = 128
+n_mels = 256
+fmin = 200
+fmax = 12000
+top_db = 80
+window = "hann_symmetric"
+mel_scale = "slaney"
+filter_norm = "slaney"
+fill_highfreq = true
+
+[inference]
+strategy = "sliding_window"
+segment_duration_s = 3.0
+segment_stride_s = 1.5
+precision = "fp16"
+
+[postprocessing]
+method = "sigmoid"
+confidence_threshold = 0.5
+"#;
+        let ecotype = r#"
+[model]
+id = "orca-ecotype-melinput-fp16-tflite"
+format = "tflite"
+file = "orca-ecotype-melinput-fp16.tflite"
+
+[preprocessing]
+method = "mel_spectrogram"
+sample_rate = 24000
+n_fft = 1024
+hop_length = 128
+n_mels = 256
+fmin = 200
+fmax = 12000
+top_db = 80
+window = "hann_symmetric"
+mel_scale = "slaney"
+filter_norm = "slaney"
+fill_highfreq = true
+
+[inference]
+strategy = "sliding_window"
+segment_duration_s = 3.0
+segment_stride_s = 3.0
+precision = "fp16"
+
+[postprocessing]
+method = "softmax"
+"#;
+        let d_dir = write_temp_file("manifest.toml", detector);
+        let det = load_manifest(&d_dir.path().join("manifest.toml"))
+            .expect("orca detector tflite manifest should load");
+        assert_eq!(det.format, "tflite");
+        assert_eq!(det.precision, Precision::Fp16);
+        assert!(det.model_file_fp16.is_none());
+        assert_eq!(
+            crate::model_type::derive_model_type(
+                &det.preprocess_method,
+                &det.postprocess_method,
+                det.subtype,
+            ),
+            crate::types::ModelType::AudioDetector,
+        );
+
+        let e_dir = write_temp_file("manifest.toml", ecotype);
+        let eco = load_manifest(&e_dir.path().join("manifest.toml"))
+            .expect("orca ecotype mel-input tflite manifest should load");
+        assert_eq!(eco.format, "tflite");
+        assert_eq!(eco.precision, Precision::Fp16);
+        assert_eq!(
+            crate::model_type::derive_model_type(
+                &eco.preprocess_method,
+                &eco.postprocess_method,
+                eco.subtype,
+            ),
+            crate::types::ModelType::AudioClassifier,
+        );
+    }
+
+    #[test]
+    fn test_tflite_format_accepted() {
+        // The mobile (LiteRT) flavor onboards `.tflite` models. The shared loader
+        // accepts the format; flavor-specific backends reject what they can't load.
+        let toml = r#"
+[model]
+id = "test-tflite"
+format = "tflite"
+file = "model.tflite"
+
+[preprocessing]
+method = "resize"
+input_size = [224, 224]
+layout = "nchw"
+normalization = "none"
+
+[inference]
+strategy = "single"
+
+[postprocessing]
+method = "softmax"
+
+[labels]
+file = "labels.txt"
+format = "one_per_line"
+"#;
+        let dir = write_temp_file("manifest.toml", toml);
+        let manifest = load_manifest(&dir.path().join("manifest.toml"))
+            .expect("tflite format must be accepted by the shared loader");
+        assert_eq!(manifest.format, "tflite");
+        assert_eq!(manifest.model_file, "model.tflite");
     }
 
     #[test]
@@ -2119,12 +2259,32 @@ format = "one_per_line"
     }
 
     #[test]
+    fn test_audio_accepts_mel_softmax_classifier() {
+        // RP-39: a mel-input multi-class audio classifier (the orca ecotype
+        // mel-input re-export) must load. Previously rejected as an "unsupported
+        // audio" combination. softmax needs no confidence_threshold.
+        let toml = make_audio_toml(&[("postmethod", r#""softmax""#), ("post_extra", "")]);
+        let dir = write_temp_file("manifest.toml", &toml);
+        let manifest = load_manifest(&dir.path().join("manifest.toml"))
+            .expect("mel + softmax audio classifier should load (RP-39)");
+        assert!(matches!(
+            manifest.preprocess_method,
+            PreprocessMethod::MelSpectrogram { .. }
+        ));
+        assert_eq!(manifest.postprocess_method, PostprocessMethod::Softmax);
+        assert_eq!(
+            crate::model_type::derive_model_type(
+                &manifest.preprocess_method,
+                &manifest.postprocess_method,
+                manifest.subtype,
+            ),
+            crate::types::ModelType::AudioClassifier,
+        );
+    }
+
+    #[test]
     fn test_audio_rejects_unsupported_preprocess_postprocess_pairs() {
         let cases = [
-            (
-                make_audio_toml(&[("postmethod", r#""softmax""#), ("post_extra", "")]),
-                "unsupported audio",
-            ),
             (
                 make_raw_audio_toml(&[
                     ("postmethod", r#""sigmoid""#),

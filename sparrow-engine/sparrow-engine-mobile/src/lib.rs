@@ -10,8 +10,10 @@
 //! surface. Typed `SparrowEngineError` migration is tracked in RP-25-FU-1.
 
 pub mod cascade;
+pub mod engine;
 #[cfg(feature = "ffi")]
 pub mod ffi;
+pub mod pipeline;
 pub mod sys;
 pub mod tflite;
 
