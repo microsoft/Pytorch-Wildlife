@@ -201,6 +201,9 @@ SparrowEngine *sparrow_engine_engine_new(const char *config_json);
  *
  * # Safety
  * `engine` must be a pointer returned by `sparrow_engine_engine_new`, or null.
+ * Like every engine call, this must run on the thread that created the engine
+ * (single-threaded contract — see the crate-level threading note); freeing from
+ * another thread while the owner thread is mid-call is undefined behaviour.
  */
 void sparrow_engine_engine_free(SparrowEngine *engine);
 
@@ -241,7 +244,8 @@ SparrowEngineModel *sparrow_engine_load_model_by_id(SparrowEngine *engine, const
  *
  * # Safety
  * `model` must be a pointer returned by `sparrow_engine_load_model_by_id`, or
- * null, and freed exactly once.
+ * null, and freed exactly once. Must run on the engine's owner thread
+ * (single-threaded contract — see the crate-level threading note).
  */
 void sparrow_engine_unload_model(SparrowEngineModel *model);
 

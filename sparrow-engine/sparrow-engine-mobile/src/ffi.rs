@@ -284,6 +284,9 @@ pub unsafe extern "C" fn sparrow_engine_engine_new(
 ///
 /// # Safety
 /// `engine` must be a pointer returned by `sparrow_engine_engine_new`, or null.
+/// Like every engine call, this must run on the thread that created the engine
+/// (single-threaded contract — see the crate-level threading note); freeing from
+/// another thread while the owner thread is mid-call is undefined behaviour.
 #[no_mangle]
 pub unsafe extern "C" fn sparrow_engine_engine_free(engine: *mut SparrowEngine) {
     clear_last_error();
@@ -363,7 +366,8 @@ pub unsafe extern "C" fn sparrow_engine_load_model_by_id(
 ///
 /// # Safety
 /// `model` must be a pointer returned by `sparrow_engine_load_model_by_id`, or
-/// null, and freed exactly once.
+/// null, and freed exactly once. Must run on the engine's owner thread
+/// (single-threaded contract — see the crate-level threading note).
 #[no_mangle]
 pub unsafe extern "C" fn sparrow_engine_unload_model(model: *mut SparrowEngineModel) {
     clear_last_error();

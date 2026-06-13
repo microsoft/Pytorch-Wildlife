@@ -9,10 +9,15 @@
 //! ## Threading contract (single-threaded / thread-affine)
 //!
 //! LiteRT compiled models are `&mut`-invoked and the runtime is `Rc`-based, so
-//! the engine is **not** thread-safe. The engine records its creating thread and
-//! every operation rejects calls from any other thread with a clear error rather
-//! than risking undefined behaviour. Create and use one `Engine` per thread.
-//! (JNI / water-sparrow consume from a single inference thread.)
+//! the engine is **not** thread-safe. Create, use, AND free one `Engine` on a
+//! single thread. The engine records its creating thread; the inference and
+//! model/pipeline operations actively reject calls from any other thread with a
+//! clear error. Teardown (`engine_free` / `unload_model`) assumes the contract
+//! is honored — calling it from another thread while the owner thread is mid-call
+//! is undefined behaviour (a non-atomic `Rc`/`Weak` refcount race), the same
+//! hazard any `!Send` handle carries; it is not separately re-checked because a
+//! `void` free cannot surface an error. (JNI / water-sparrow consume from a
+//! single inference thread, so this is honored in practice.)
 //!
 //! ## Image inference (deferred — RP-42)
 //!

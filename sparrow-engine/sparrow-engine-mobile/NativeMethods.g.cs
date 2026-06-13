@@ -35,6 +35,9 @@ namespace SparrowEngine.Native
         ///
         ///  # Safety
         ///  `engine` must be a pointer returned by `sparrow_engine_engine_new`, or null.
+        ///  Like every engine call, this must run on the thread that created the engine
+        ///  (single-threaded contract — see the crate-level threading note); freeing from
+        ///  another thread while the owner thread is mid-call is undefined behaviour.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "sparrow_engine_engine_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void sparrow_engine_engine_free(void* engine);
@@ -80,7 +83,8 @@ namespace SparrowEngine.Native
         ///
         ///  # Safety
         ///  `model` must be a pointer returned by `sparrow_engine_load_model_by_id`, or
-        ///  null, and freed exactly once.
+        ///  null, and freed exactly once. Must run on the engine's owner thread
+        ///  (single-threaded contract — see the crate-level threading note).
         /// </summary>
         [DllImport(__DllName, EntryPoint = "sparrow_engine_unload_model", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void sparrow_engine_unload_model(void* model);
