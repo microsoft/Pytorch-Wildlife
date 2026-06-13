@@ -413,13 +413,13 @@ impl MobileModel {
     }
 }
 
-/// The B2 deferral message shared by `detect` / `classify` (Rust + FFI surfaces).
+/// The RP-42 image-deferral message shared by `detect` / `classify` (Rust + FFI surfaces).
 pub(crate) const IMAGE_UNSUPPORTED_MSG: &str =
     "image inference (detect/classify) is not yet available in the mobile (LiteRT) flavor: no \
      mobile (.tflite) image model is onboarded. It will be enabled by RP-42 (the ONNX→TFLite \
      conversion + onboarding task).";
 
-/// The B2 deferral error shared by `detect` / `classify`.
+/// The RP-42 image-deferral error shared by `detect` / `classify`.
 pub(crate) fn image_not_supported() -> anyhow::Error {
     anyhow!(IMAGE_UNSUPPORTED_MSG)
 }

@@ -44,13 +44,14 @@ pub struct MobilePipeline {
     segment_stride_s: f32,
 }
 
-/// Options for [`run_pipeline`]. `None` fields fall back to the detector
-/// manifest's sliding-window parameters / confidence threshold.
+/// Options for [`crate::engine::Engine::run_pipeline`]. `None` fields fall back
+/// to the detector manifest's sliding-window parameters / confidence threshold.
 #[derive(Debug, Clone, Default)]
 pub struct CascadeOpts {
     /// Sliding-window length in seconds.
     pub window_sec: Option<f32>,
-    /// Sliding-window overlap in seconds (must be < window).
+    /// Sliding-window overlap in seconds (must be < window). May be negative for a
+    /// gapped/duty-cycled window — the cadence is `window - overlap`.
     pub overlap_sec: Option<f32>,
     /// Stage-1 gate threshold override.
     pub detector_threshold: Option<f32>,
@@ -244,8 +245,8 @@ pub(crate) fn run_pipeline(
     if !window_sec.is_finite() || window_sec <= 0.0 {
         bail!("window_sec must be finite and > 0 (got {window_sec})");
     }
-    if !overlap_sec.is_finite() || overlap_sec < 0.0 || overlap_sec >= window_sec {
-        bail!("overlap_sec ({overlap_sec}) must be finite and in [0, window_sec={window_sec})");
+    if !overlap_sec.is_finite() || overlap_sec >= window_sec {
+        bail!("overlap_sec ({overlap_sec}) must be finite and < window_sec ({window_sec})");
     }
     if let Some(t) = opts.detector_threshold {
         if !t.is_finite() || !(0.0..=1.0).contains(&t) {
