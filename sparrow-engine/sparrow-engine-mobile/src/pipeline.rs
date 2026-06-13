@@ -23,7 +23,7 @@ use sparrow_engine_core::preprocess_audio::{
 use sparrow_engine_types::manifest::{
     self, InferenceStrategy, PipelineRole, PostprocessMethod,
 };
-use sparrow_engine_types::types::ModelType;
+use sparrow_engine_types::types::{AudioInput, ModelType};
 
 use crate::cascade::{argmax, sigmoid, softmax};
 use crate::engine::{mel_bytes_for_segment, EngineInner, LoadedModel};
@@ -195,12 +195,11 @@ pub(crate) fn load_pipeline_by_id(inner: &EngineInner, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Run a loaded cascade over raw mono `samples` at `sample_rate`.
+/// Run a loaded cascade over an audio input (WAV file or raw mono samples).
 pub(crate) fn run_pipeline(
     inner: &EngineInner,
     pipeline_id: &str,
-    samples: &[f32],
-    sample_rate: u32,
+    input: &AudioInput,
     opts: &CascadeOpts,
 ) -> Result<CascadeResult> {
     inner.check_thread()?;
@@ -216,14 +215,7 @@ pub(crate) fn run_pipeline(
     let target_sr = pipeline.config.sample_rate;
     // Resample the whole buffer to the model rate ONCE, then window — matches the
     // proven OrcaCascade + CLI contract (resample-before-windowing).
-    let audio = load_audio_at_sample_rate(
-        &sparrow_engine_types::types::AudioInput::Samples {
-            data: samples.to_vec(),
-            sample_rate,
-        },
-        target_sr,
-    )
-    .map_err(|e| anyhow!("{e}"))?;
+    let audio = load_audio_at_sample_rate(input, target_sr).map_err(|e| anyhow!("{e}"))?;
     let total = audio.data.len();
     let duration_s = total as f32 / target_sr as f32;
 
@@ -248,6 +240,11 @@ pub(crate) fn run_pipeline(
     let mut detector_backend = pipeline.detector.backend.borrow_mut();
     let mut classifier_backend = pipeline.classifier.backend.borrow_mut();
 
+    // The mel's `orig_sample_rate` is the input's ORIGINAL rate (before the
+    // whole-buffer resample to `target_sr`), matching the proven OrcaCascade —
+    // it drives `fill_highfreq`. For already-target-rate input (the deployed
+    // water-sparrow path resamples to 24 kHz first) it equals `target_sr`.
+    let orig_sr = audio.orig_sample_rate;
     let mut num_stage2_classes = 0usize;
     let mut segments = Vec::new();
     for offset in compute_segment_offsets(total, segment_samples, stride_samples) {
@@ -256,7 +253,7 @@ pub(crate) fn run_pipeline(
             &audio.data,
             offset,
             segment_samples,
-            target_sr,
+            orig_sr,
             &pipeline.config,
             &pipeline.filterbank,
         )?;

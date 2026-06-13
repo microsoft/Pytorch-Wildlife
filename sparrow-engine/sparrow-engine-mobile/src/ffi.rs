@@ -660,7 +660,14 @@ pub unsafe extern "C" fn sparrow_engine_run_pipeline(
         };
 
         let result = engine
-            .run_pipeline(id, samples, sample_rate, &cascade_opts)
+            .run_pipeline(
+                id,
+                &AudioInput::Samples {
+                    data: samples.to_vec(),
+                    sample_rate,
+                },
+                &cascade_opts,
+            )
             .map_err(|e| format!("{e:#}"))?;
 
         Ok(cascade_result_to_c(result))

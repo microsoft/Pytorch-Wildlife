@@ -226,13 +226,18 @@ impl EngineInner {
 
         let mut backend = model.backend.borrow_mut();
         let mut segments = Vec::new();
+        // The mel's `orig_sample_rate` is the input's ORIGINAL rate (before the
+        // whole-buffer resample to `target_sr`), matching the proven cascade —
+        // it drives `fill_highfreq` (mel bins above the original Nyquist). For
+        // already-target-rate input (the deployed path) it equals `target_sr`.
+        let orig_sr = audio_samples.orig_sample_rate;
         for offset in compute_segment_offsets(total, segment_samples, stride_samples) {
             let logits = run_mel_segment(
                 &mut backend,
                 &audio_samples.data,
                 offset,
                 segment_samples,
-                target_sr,
+                orig_sr,
                 &config,
                 &filterbank,
             )?;
@@ -328,15 +333,14 @@ impl Engine {
         crate::pipeline::load_pipeline_by_id(&self.inner, id)
     }
 
-    /// Run a loaded audio-cascade pipeline over raw mono samples.
+    /// Run a loaded audio-cascade pipeline over an audio input (file or samples).
     pub fn run_pipeline(
         &self,
         pipeline_id: &str,
-        samples: &[f32],
-        sample_rate: u32,
+        input: &AudioInput,
         opts: &crate::pipeline::CascadeOpts,
     ) -> Result<crate::pipeline::CascadeResult> {
-        crate::pipeline::run_pipeline(&self.inner, pipeline_id, samples, sample_rate, opts)
+        crate::pipeline::run_pipeline(&self.inner, pipeline_id, input, opts)
     }
 
     /// Unload a pipeline by id (its stage models stay loaded; unload them
