@@ -488,7 +488,7 @@ struct RawPipelineStep {
 /// - `ManifestNotFound` if the file doesn't exist
 /// - `TomlParse` if the TOML is malformed
 /// - `WrongManifestType` if the file contains a `[pipeline]` section
-/// - `UnsupportedFormat` if `format` is not "onnx"
+/// - `UnsupportedFormat` if `format` is not "onnx" or "tflite"
 /// - `MissingTiledFields` if `strategy = "tiled"` but `tile_size`/`tile_overlap` missing
 /// - `PathTraversal` if any file path contains `..` components or is absolute
 /// - `InvalidManifest` for other validation failures
