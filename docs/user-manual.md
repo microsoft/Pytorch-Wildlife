@@ -806,6 +806,56 @@ $ spe pipeline IMG.jpg \
 
 ---
 
+### 5.7 `spe-mobile` — the mobile-flavor CLI (separate binary, LiteRT backend)
+
+`spe-mobile` is a **separate binary** for the third engine flavor, peer to `spe` (CPU) and
+`spe-gpu` (GPU), built for ARM edge devices (Raspberry Pi; Android via the cdylib). It uses a
+TensorFlow Lite / **LiteRT** backend instead of ONNX Runtime, and ships as a cross-compiled
+`aarch64` cdylib (`libsparrow_engine.so`) plus the `spe-mobile` CLI. **No Python wheel** — mobile
+consumers call the cdylib over native FFI (ctypes / JNI / Swift).
+
+**Current scope (focused).** As of the RP-25 milestone, `spe-mobile` exposes the **orca two-stage
+cascade** (DCLDE 2026 detector → ecotype), not yet the full manifest-driven Engine of the CPU/GPU
+flavors — full FFI parity is a tracked follow-up. Its public C API is the focused
+`sparrow_engine_orca_*` surface.
+
+```
+$ spe-mobile detect-audio recording.wav \
+    --detector orca-detector-fp16.tflite \
+    --ecotype  orca-ecotype-melinput-fp16.tflite \
+    --threads 4 --labels SRKW,TKW,SAR,NRKW,OKW
+```
+
+**Why**: run the orca cascade on a low-power device (e.g. a 512 MB Pi Zero 2W buoy) with no ONNX
+Runtime and no Python.
+**What**: per-window + per-file results (text, or `--format json`) — detector probability, orca
+gate, ecotype argmax + probabilities, and an abstention-aware file verdict.
+**How**: loads BOTH `.tflite` models into one shared LiteRT runtime (4-thread XNNPACK), slides
+3 s / 1.5 s windows over each WAV, computes one dB-mel per window in `sparrow-engine-core`, runs
+the detector then (only when positive) the ecotype.
+
+| Flag | What |
+|------|------|
+| `--detector <path>` | Stage-1 orca detector `.tflite`. |
+| `--ecotype <path>` | Stage-2 ecotype `.tflite` (mel-input). |
+| `--threads <N>` | LiteRT CPU threads (default 4). |
+| `--window-sec` / `--overlap-sec` | Sliding-window length / overlap (default 3.0 / 1.5). |
+| `--abstention <f>` | Ecotype abstention threshold; max prob below this → `Unassigned`. |
+| `--labels a,b,…` | Optional ecotype label names (else class indices). |
+| `--format text\|json` | Output format (default text). |
+
+**Build + deploy**: cross-build with `cross build -p sparrow-engine-mobile --features cli --release
+--target aarch64-unknown-linux-gnu` (use `--features ffi` for the cdylib). The cdylib finds its
+`libLiteRt.so` via `RUNPATH=$ORIGIN`, so co-locate the two. Validated on a Raspberry Pi Zero 2W:
+both fp16 models resident in ~282 MB, ≤ 2 s/segment with 4-thread XNNPACK.
+
+**Plain words**: `spe-mobile` is not a `spe` subcommand — it's its own program for phones/Pis. Today
+it only does the orca whale cascade; the other models (MegaDetector etc.) are CPU/GPU-only for now.
+
+**Cite**: `sparrow-engine/sparrow-engine-mobile/src/{cascade.rs,ffi.rs,bin/spe_mobile.rs}`.
+
+---
+
 ## 6. Python package — `sparrow-engine`
 
 ### Section overview
