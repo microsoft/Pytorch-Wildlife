@@ -814,16 +814,20 @@ TensorFlow Lite / **LiteRT** backend instead of ONNX Runtime, and ships as a cro
 `aarch64` cdylib (`libsparrow_engine.so`) plus the `spe-mobile` CLI. **No Python wheel** — mobile
 consumers call the cdylib over native FFI (ctypes / JNI / Swift).
 
-**Current scope (focused).** As of the RP-25 milestone, `spe-mobile` exposes the **orca two-stage
-cascade** (DCLDE 2026 detector → ecotype), not yet the full manifest-driven Engine of the CPU/GPU
-flavors — full FFI parity is a tracked follow-up. Its public C API is the focused
-`sparrow_engine_orca_*` surface.
+**Scope (generic, manifest-driven).** As of RP-25-FU-1 (2026-06-13), `spe-mobile` runs the **same
+generic, manifest-driven engine** as the CPU/GPU flavors — `engine_new` → `load_pipeline_by_id` →
+`run_pipeline` over an 18-symbol C FFI (`sparrow_engine_*`). The orca two-stage cascade
+(DCLDE 2026 detector → ecotype) is shipped as a manifest-described `pipeline.toml` in the model
+catalog, **not** hardcoded C. The only mobile model onboarded so far is that orca cascade; image
+models (MegaDetector etc.) await the ONNX→`.tflite` conversion pipeline (tracked as **RP-42**), so
+the image FFI is exposed but its tflite-load path returns a clear deferred error today.
 
 ```
-$ spe-mobile detect-audio recording.wav \
-    --detector orca-detector-fp16.tflite \
-    --ecotype  orca-ecotype-melinput-fp16.tflite \
-    --threads 4 --labels SRKW,TKW,SAR,NRKW,OKW
+$ spe-mobile detect-audio \
+    --model-dir /path/to/model_catalog \
+    --pipeline orca-cascade \
+    --threads 4 --labels SRKW,TKW,SAR,NRKW,OKW \
+    recording.wav
 ```
 
 **Why**: run the orca cascade on a low-power device (e.g. a 512 MB Pi Zero 2W buoy) with no ONNX
@@ -836,10 +840,10 @@ the detector then (only when positive) the ecotype.
 
 | Flag | What |
 |------|------|
-| `--detector <path>` | Stage-1 orca detector `.tflite`. |
-| `--ecotype <path>` | Stage-2 ecotype `.tflite` (mel-input). |
-| `--threads <N>` | LiteRT CPU threads (default 4). |
-| `--window-sec` / `--overlap-sec` | Sliding-window length / overlap (default 3.0 / 1.5). |
+| `--model-dir <path>` | Model catalog dir (`{model_dir}/{id}/manifest.toml` + `{pipeline}/pipeline.toml`). |
+| `--pipeline <id>` | Pipeline id to load + run (default `orca-cascade`). |
+| `--threads <N>` | LiteRT CPU threads (default 4; 0 = LiteRT default). |
+| `--window-sec` / `--overlap-sec` | Sliding-window length / overlap (default: pipeline manifest values). |
 | `--abstention <f>` | Ecotype abstention threshold; max prob below this → `Unassigned`. |
 | `--labels a,b,…` | Optional ecotype label names (else class indices). |
 | `--format text\|json` | Output format (default text). |
@@ -849,10 +853,12 @@ the detector then (only when positive) the ecotype.
 `libLiteRt.so` via `RUNPATH=$ORIGIN`, so co-locate the two. Validated on a Raspberry Pi Zero 2W:
 both fp16 models resident in ~282 MB, ≤ 2 s/segment with 4-thread XNNPACK.
 
-**Plain words**: `spe-mobile` is not a `spe` subcommand — it's its own program for phones/Pis. Today
-it only does the orca whale cascade; the other models (MegaDetector etc.) are CPU/GPU-only for now.
+**Plain words**: `spe-mobile` is not a `spe` subcommand — it's its own program for phones/Pis. The
+engine itself is generic (the same manifest-driven API as CPU/GPU), but the only mobile *model*
+shipped so far is the orca whale cascade; the other models (MegaDetector etc.) need the ONNX→`.tflite`
+conversion (RP-42) before they run on mobile.
 
-**Cite**: `sparrow-engine/sparrow-engine-mobile/src/{cascade.rs,ffi.rs,bin/spe_mobile.rs}`.
+**Cite**: `sparrow-engine/sparrow-engine-mobile/src/{engine.rs,pipeline.rs,ffi.rs,bin/spe_mobile.rs}`.
 
 ---
 

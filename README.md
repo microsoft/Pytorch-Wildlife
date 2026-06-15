@@ -212,6 +212,23 @@ For full HTTP API documentation, request shapes, response schemas, and operator-
 
 ---
 
+### Edge / ARM — the mobile flavor (`spe-mobile`)
+
+A third flavor, **`sparrow-engine-mobile`**, targets ARM edge devices (Raspberry Pi; Android via the cdylib). It swaps ONNX Runtime for a **TensorFlow Lite / LiteRT** backend and ships as a cross-compiled `aarch64` cdylib (`libsparrow_engine.so`) plus the `spe-mobile` CLI — **no Homebrew formula and no Python wheel**; mobile consumers call the cdylib over native FFI (ctypes / JNI / Swift). Like the CPU/GPU flavors it is a **generic, manifest-driven engine** (`engine_new` → `load_pipeline_by_id` → `run_pipeline`); the orca two-stage detector→ecotype cascade ships as a manifest-described `pipeline.toml`, not hardcoded C.
+
+```bash
+# cross-build the CLI (use --features ffi for the cdylib instead)
+cross build -p sparrow-engine-mobile --features cli --release --target aarch64-unknown-linux-gnu
+
+# run a config-described cascade over WAVs
+# (model catalog = {model_dir}/{id}/manifest.toml + {pipeline}/pipeline.toml)
+spe-mobile detect-audio --model-dir /path/to/model_catalog --pipeline orca-cascade --threads 4 recording.wav
+```
+
+Validated on a 512 MB Raspberry Pi Zero 2W: both fp16 orca `.tflite` resident at ~297 MB peak, ≤ 2 s/segment (4-thread XNNPACK). The only mobile model onboarded so far is the orca cascade; image models (MegaDetector etc.) await the ONNX→`.tflite` conversion pipeline (tracked as RP-42). Full details + flag reference: §5.7 of the [user manual](docs/user-manual.md).
+
+---
+
 > 📖 **[Read the full user manual →](docs/user-manual.md)**
 >
 > One document covering install, CLI (`spe`), Python wheel (`import sparrow_engine`), HTTP API server, HTTP SDK, native DLL (C ABI), TOML model manifests, the Phase 4 inference-log / drift / provenance surface, cold-start + lazy load, gotchas + edge cases, performance characteristics, and Sparrow Studio integration.
