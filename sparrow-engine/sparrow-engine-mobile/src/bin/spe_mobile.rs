@@ -23,7 +23,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use sparrow_engine::engine::Engine;
 use sparrow_engine::pipeline::{CascadeOpts, CascadeSegment};
-use sparrow_engine::{AudioInput, Device, EngineConfig};
+use sparrow_engine::{AudioInput, DetectOpts, Device, EngineConfig, ImageInput};
 
 /// Default ecotype abstention threshold (calibrated; below this -> Unassigned).
 const DEFAULT_ABSTENTION: f32 = 0.940_095_8;
@@ -43,6 +43,8 @@ struct Cli {
 enum Commands {
     /// Run a config-described audio cascade over one or more WAV files.
     DetectAudio(DetectAudioArgs),
+    /// Run single-shot image detection (yolo_e2e) over one or more images.
+    Detect(DetectArgs),
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -82,6 +84,103 @@ struct DetectAudioArgs {
     inputs: Vec<PathBuf>,
 }
 
+#[derive(Parser)]
+struct DetectArgs {
+    /// Model catalog directory ({model_dir}/{id}/manifest.toml).
+    #[arg(long)]
+    model_dir: PathBuf,
+    /// Model id to load (a {model_dir}/{id}/manifest.toml, format = "tflite").
+    #[arg(long)]
+    model: String,
+    /// LiteRT CPU inference threads (0 = LiteRT default).
+    #[arg(long, default_value_t = 4)]
+    threads: usize,
+    /// Minimum confidence threshold (default: manifest value).
+    #[arg(long)]
+    confidence: Option<f32>,
+    /// Cap on the number of detections returned (default: unlimited).
+    #[arg(long)]
+    max_detections: Option<u32>,
+    /// Output format.
+    #[arg(long, value_enum, default_value_t = Format::Text)]
+    format: Format,
+    /// One or more image files (JPEG/PNG).
+    #[arg(required = true)]
+    inputs: Vec<PathBuf>,
+}
+
+fn run_detect(args: DetectArgs) -> anyhow::Result<()> {
+    let engine = Engine::new(EngineConfig {
+        device: Device::Cpu,
+        inter_threads: 0,
+        intra_threads: args.threads as u32,
+        model_dir: args.model_dir.clone(),
+    })?;
+    let model = engine
+        .load_model_by_id(&args.model)
+        .map_err(|e| anyhow::anyhow!("load model '{}': {e:#}", args.model))?;
+
+    let opts = DetectOpts {
+        confidence_threshold: args.confidence,
+        max_detections: args.max_detections,
+    };
+
+    let mut json_items: Vec<serde_json::Value> = Vec::new();
+    for input in &args.inputs {
+        let result = model
+            .detect(&ImageInput::FilePath(input.clone()), &opts)
+            .map_err(|e| anyhow::anyhow!("detect {}: {e:#}", input.display()))?;
+        match args.format {
+            Format::Text => {
+                println!(
+                    "{}: {} detection(s) [{}x{}, {:.1} ms]",
+                    input.display(),
+                    result.detections.len(),
+                    result.image_width,
+                    result.image_height,
+                    result.processing_time_ms
+                );
+                for d in &result.detections {
+                    println!(
+                        "  {} (id {}, conf {:.4}) bbox [{:.4}, {:.4}, {:.4}, {:.4}]",
+                        d.label,
+                        d.label_id,
+                        d.confidence,
+                        d.bbox.x_min,
+                        d.bbox.y_min,
+                        d.bbox.x_max,
+                        d.bbox.y_max
+                    );
+                }
+            }
+            Format::Json => {
+                json_items.push(serde_json::json!({
+                    "image": input.display().to_string(),
+                    "image_width": result.image_width,
+                    "image_height": result.image_height,
+                    "processing_time_ms": result.processing_time_ms,
+                    "detections": result
+                        .detections
+                        .iter()
+                        .map(|d| {
+                            serde_json::json!({
+                                "label": d.label,
+                                "label_id": d.label_id,
+                                "confidence": d.confidence,
+                                "bbox": [d.bbox.x_min, d.bbox.y_min, d.bbox.x_max, d.bbox.y_max],
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                }));
+            }
+        }
+    }
+    if matches!(args.format, Format::Json) {
+        println!("{}", serde_json::to_string_pretty(&json_items)?);
+    }
+    Ok(())
+}
+
 /// File-level aggregate of the per-window cascade results.
 struct FileAggregate {
     detected: bool,
@@ -102,6 +201,13 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Commands::DetectAudio(args) => match run_detect_audio(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                ExitCode::FAILURE
+            }
+        },
+        Commands::Detect(args) => match run_detect(args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("error: {e:#}");

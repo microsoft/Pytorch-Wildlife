@@ -24,6 +24,9 @@ cli = ["dep:clap", "dep:serde_json"]
 sparrow-engine-types = { path = "../sparrow-engine-types" }
 sparrow-engine-core  = { path = "../sparrow-engine-core" }
 ndarray = "0.17"
+# Image decode for the mobile image-detection path (RP-42). Matches the cpu
+# flavor's decoder feature set; jpeg + png only keeps the cdylib lean.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 tracing = { version = "0.1", features = ["log"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"], optional = true }

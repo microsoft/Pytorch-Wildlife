@@ -100,18 +100,21 @@ namespace SparrowEngine.Native
         internal static extern byte* sparrow_engine_list_models(void* engine);
 
         /// <summary>
-        ///  Image detection — not yet available on the mobile flavor (RP-42). Always
-        ///  returns null with a clear last-error; the symbol exists so consumers can bind
-        ///  the full ABI now.
+        ///  Run single-shot image detection over an encoded image buffer (JPEG/PNG).
+        ///  Returns null on error; call `sparrow_engine_last_error` for details. Free the
+        ///  result with `sparrow_engine_detections_free`.
         ///
         ///  # Safety
-        ///  `model` must be a valid model pointer.
+        ///  `model` must be a valid model pointer; `image` must point to `len` readable
+        ///  bytes; `opts` a valid pointer or null.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "sparrow_engine_detect", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern SparrowEngineDetections* sparrow_engine_detect(void* _model, byte* _image, nuint _len, SparrowEngineDetectOpts* _opts);
+        internal static extern SparrowEngineDetections* sparrow_engine_detect(void* model, byte* image, nuint len, SparrowEngineDetectOpts* opts);
 
         /// <summary>
-        ///  Image classification — not yet available on the mobile flavor (RP-42).
+        ///  Image classification — not yet available on the mobile flavor (no `.tflite`
+        ///  classifier onboarded). Image *detection* (`sparrow_engine_detect`) is
+        ///  available as of RP-42. Always returns null with a clear last-error.
         ///
         ///  # Safety
         ///  `model` must be a valid model pointer.

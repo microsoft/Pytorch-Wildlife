@@ -724,24 +724,27 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
 
         let layout = match layout_str {
             "nchw" => Layout::Nchw,
-            // NHWC is rejected at the manifest boundary. ORT CUDA EP has known
-            // SafeInt overflow bugs in Conv with NHWC + dynamic shapes
-            // (ORT issues #27912, #12288). Convert with
+            // NHWC is rejected for ONNX models: ORT CUDA EP has known SafeInt
+            // overflow bugs in Conv with NHWC + dynamic shapes (ORT issues
+            // #27912, #12288). TFLite models, by contrast, are natively NHWC
+            // (the channels-last TensorFlow convention) and the mobile flavor's
+            // LiteRT backend consumes NHWC directly — so NHWC is permitted for
+            // `format = "tflite"`. Convert ONNX inputs with
             // `python -m tf2onnx.convert --inputs-as-nchw <input> ...` or
-            // `onnx-simplifier` before onboarding. The `Layout::Nhwc` variant
-            // remains for future CPU-only preprocess paths, but the public
-            // manifest format only accepts NCHW.
+            // `onnx-simplifier` before onboarding.
+            "nhwc" if raw.model.format == "tflite" => Layout::Nhwc,
             "nhwc" => {
                 return Err(SparrowEngineError::InvalidManifest(
-                    "layout 'nhwc' is not supported: all ONNX models must use NCHW. \
+                    "layout 'nhwc' is not supported for ONNX models: ORT requires NCHW. \
                      Convert with `tf2onnx --inputs-as-nchw` or onnx-simplifier before \
-                     onboarding. See ORT issues #27912 / #12288 for the NHWC Conv bug."
+                     onboarding. See ORT issues #27912 / #12288 for the NHWC Conv bug. \
+                     (NHWC is permitted only for format = \"tflite\".)"
                         .to_string(),
                 ))
             }
             other => {
                 return Err(SparrowEngineError::InvalidManifest(format!(
-                    "Unknown layout: '{other}' (expected 'nchw')"
+                    "Unknown layout: '{other}' (expected 'nchw' or 'nhwc')"
                 )))
             }
         };
@@ -1492,6 +1495,53 @@ method = "softmax"
                 eco.subtype,
             ),
             crate::types::ModelType::AudioClassifier,
+        );
+    }
+
+    #[test]
+    fn test_nhwc_layout_allowed_for_tflite_image_model() {
+        // RP-42: the mobile (LiteRT) flavor onboards NHWC `.tflite` image
+        // detectors (TensorFlow's channels-last convention). NHWC is permitted
+        // for `format = "tflite"` but still rejected for ONNX (ORT CUDA EP Conv
+        // bug, issues #27912 / #12288).
+        let tflite_nhwc = r#"
+[model]
+id = "mdv6-tflite"
+format = "tflite"
+file = "1/model.tflite"
+
+[preprocessing]
+method = "letterbox"
+input_size = [640, 640]
+layout = "nhwc"
+normalization = "unit"
+
+[inference]
+strategy = "single"
+
+[postprocessing]
+method = "yolo_e2e"
+confidence_threshold = 0.2
+
+[labels]
+file = "labels.txt"
+format = "name_index_csv"
+"#;
+        let dir = write_temp_file("manifest.toml", tflite_nhwc);
+        let m = load_manifest(&dir.path().join("manifest.toml"))
+            .expect("nhwc tflite image manifest should load");
+        assert_eq!(m.format, "tflite");
+        assert_eq!(m.layout, Some(Layout::Nhwc));
+
+        // The same NHWC layout on an ONNX model must still be rejected.
+        let onnx_nhwc = tflite_nhwc
+            .replace("format = \"tflite\"", "format = \"onnx\"")
+            .replace("file = \"1/model.tflite\"", "file = \"1/model.onnx\"");
+        let dir2 = write_temp_file("manifest.toml", &onnx_nhwc);
+        let err = load_manifest(&dir2.path().join("manifest.toml")).unwrap_err();
+        assert!(
+            matches!(err, SparrowEngineError::InvalidManifest(ref s) if s.contains("nhwc")),
+            "ONNX + nhwc must be rejected, got: {err:?}"
         );
     }
 
