@@ -36,7 +36,8 @@ const DEFAULT_DETECTOR_THRESHOLD: f32 = 0.5;
 pub struct MobilePipeline {
     pub id: String,
     detector: Rc<LoadedModel>,
-    classifier: Rc<LoadedModel>,
+    /// Stage-2 classifier. `None` for a detector-only pipeline (stage 2 disabled).
+    classifier: Option<Rc<LoadedModel>>,
     config: AudioPreprocessConfig,
     filterbank: MelFilterbank,
     detector_threshold: f32,
@@ -105,38 +106,36 @@ pub(crate) fn load_pipeline_by_id(inner: &EngineInner, id: &str) -> Result<()> {
         .find(|s| s.role == PipelineRole::Detector)
         .map(|s| s.model.as_str())
         .context("pipeline has no detector step")?;
+    // Stage 2 (classifier) is OPTIONAL: a pipeline with only a detector step runs
+    // detector-only (stage 2 disabled) — the single-stage mode that emits
+    // per-window detection results with no ecotype. A 2-stage cascade still runs
+    // exactly one classifier; reject 2+ classifier steps (the mobile cascade runs
+    // exactly one, and a multi-classifier manifest would silently run only the
+    // first). PipelineRole is {Detector, Classifier}, so 0-or-1 classifier plus
+    // the single detector pins the step count at one or two.
     let classifier_id = manifest
         .steps
         .iter()
         .find(|s| s.role == PipelineRole::Classifier)
-        .map(|s| s.model.as_str())
-        .ok_or_else(|| {
-            anyhow!(
-                "pipeline '{id}' has no classifier step; the mobile audio cascade requires a \
-                 stage-1 detector and a stage-2 classifier"
-            )
-        })?;
+        .map(|s| s.model.as_str());
 
-    // The shared loader guarantees exactly one detector but does not count
-    // classifiers (cpu/gpu pipelines allow zero-or-many). A mobile audio cascade
-    // is strictly detector → one classifier; reject extra classifier steps here
-    // (mobile-local) so a multi-classifier manifest doesn't silently run only the
-    // first one. PipelineRole is {Detector, Classifier}, so one-classifier +
-    // one-detector also pins the step count at two.
     let classifier_steps = manifest
         .steps
         .iter()
         .filter(|s| s.role == PipelineRole::Classifier)
         .count();
-    if classifier_steps != 1 {
+    if classifier_steps > 1 {
         bail!(
             "pipeline '{id}' has {classifier_steps} classifier steps; the mobile audio cascade \
-             requires exactly one stage-2 classifier"
+             runs at most one stage-2 classifier (or none, for a detector-only pipeline)"
         );
     }
 
     let detector = inner.load_model(detector_id)?;
-    let classifier = inner.load_model(classifier_id)?;
+    let classifier = match classifier_id {
+        Some(cid) => Some(inner.load_model(cid)?),
+        None => None,
+    };
 
     // Mobile-local validation: the cpu/gpu `validate_pipeline_compat` matrix is
     // image-only and rejects an AudioDetector→AudioClassifier pair as a "modality
@@ -149,29 +148,34 @@ pub(crate) fn load_pipeline_by_id(inner: &EngineInner, id: &str) -> Result<()> {
             detector.model_type
         );
     }
-    if classifier.model_type != ModelType::AudioClassifier {
-        bail!(
-            "pipeline '{id}' stage 2 model '{}' is {:?}, expected an AudioClassifier \
-             (mel_spectrogram + softmax)",
-            classifier.id,
-            classifier.model_type
-        );
+    if let Some(ref classifier) = classifier {
+        if classifier.model_type != ModelType::AudioClassifier {
+            bail!(
+                "pipeline '{id}' stage 2 model '{}' is {:?}, expected an AudioClassifier \
+                 (mel_spectrogram + softmax)",
+                classifier.id,
+                classifier.model_type
+            );
+        }
     }
 
     let config = AudioPreprocessConfig::from_manifest(&detector.manifest.preprocess_method)
         .ok_or_else(|| anyhow!("detector '{}' is not a mel audio model", detector.id))?;
     config.validate().map_err(|e| anyhow!("{e}"))?;
 
-    // Both stages must share one mel front-end (that is the whole point of the
-    // mel-input ecotype re-export); reject a mismatch loudly.
-    let classifier_config =
-        AudioPreprocessConfig::from_manifest(&classifier.manifest.preprocess_method)
-            .ok_or_else(|| anyhow!("classifier '{}' is not a mel audio model", classifier.id))?;
-    if !same_mel_config(&config, &classifier_config) {
-        bail!(
-            "pipeline '{id}' stages do not share an identical mel front-end; the cascade requires \
-             both stages to consume the same dB-mel"
-        );
+    // When stage 2 is present, both stages must share one mel front-end (that is
+    // the whole point of the mel-input ecotype re-export); reject a mismatch
+    // loudly. A detector-only pipeline has no second stage to match.
+    if let Some(ref classifier) = classifier {
+        let classifier_config =
+            AudioPreprocessConfig::from_manifest(&classifier.manifest.preprocess_method)
+                .ok_or_else(|| anyhow!("classifier '{}' is not a mel audio model", classifier.id))?;
+        if !same_mel_config(&config, &classifier_config) {
+            bail!(
+                "pipeline '{id}' stages do not share an identical mel front-end; the cascade \
+                 requires both stages to consume the same dB-mel"
+            );
+        }
     }
 
     let detector_threshold = match &detector.manifest.postprocess_method {
@@ -269,7 +273,10 @@ pub(crate) fn run_pipeline(
     }
 
     let mut detector_backend = pipeline.detector.backend.borrow_mut();
-    let mut classifier_backend = pipeline.classifier.backend.borrow_mut();
+    let mut classifier_backend = pipeline
+        .classifier
+        .as_ref()
+        .map(|c| c.backend.borrow_mut());
 
     // The mel's `orig_sample_rate` is the input's ORIGINAL rate (before the
     // whole-buffer resample to `target_sr`), matching the proven OrcaCascade —
@@ -312,45 +319,56 @@ pub(crate) fn run_pipeline(
         };
 
         if is_detected {
-            let classifier_out = classifier_backend
-                .invoke_single(mel_bytes, LiteRtElementType::kLiteRtElementTypeFloat32)?;
-            let logits = classifier_out
-                .into_iter()
-                .next()
-                .context("classifier returned no logits")?;
-            if logits.is_empty() {
-                bail!("classifier '{}' returned empty logits", pipeline.classifier.id);
+            // Stage 2 runs only when a classifier is present (a detector-only
+            // pipeline leaves `stage2_ran = false` and empty probabilities).
+            if let (Some(classifier), Some(classifier_backend)) =
+                (pipeline.classifier.as_ref(), classifier_backend.as_mut())
+            {
+                let classifier_out = classifier_backend
+                    .invoke_single(mel_bytes, LiteRtElementType::kLiteRtElementTypeFloat32)?;
+                let logits = classifier_out
+                    .into_iter()
+                    .next()
+                    .context("classifier returned no logits")?;
+                if logits.is_empty() {
+                    bail!("classifier '{}' returned empty logits", classifier.id);
+                }
+                if num_stage2_classes == 0 {
+                    num_stage2_classes = logits.len();
+                } else if logits.len() != num_stage2_classes {
+                    // Fail fast (matching the proven OrcaCascade) rather than silently
+                    // zero-filling an inconsistent per-window class count.
+                    bail!(
+                        "classifier '{}' returned {} logits, expected {} (inconsistent per-window \
+                         class count)",
+                        classifier.id,
+                        logits.len(),
+                        num_stage2_classes
+                    );
+                }
+                let probs = softmax(&logits);
+                seg.stage2_ran = true;
+                seg.stage2_argmax = argmax(&probs);
+                seg.stage2_confidence = seg
+                    .stage2_argmax
+                    .and_then(|i| probs.get(i).copied())
+                    .unwrap_or(0.0);
+                seg.stage2_probabilities = probs;
             }
-            if num_stage2_classes == 0 {
-                num_stage2_classes = logits.len();
-            } else if logits.len() != num_stage2_classes {
-                // Fail fast (matching the proven OrcaCascade) rather than silently
-                // zero-filling an inconsistent per-window class count.
-                bail!(
-                    "classifier '{}' returned {} logits, expected {} (inconsistent per-window \
-                     class count)",
-                    pipeline.classifier.id,
-                    logits.len(),
-                    num_stage2_classes
-                );
-            }
-            let probs = softmax(&logits);
-            seg.stage2_ran = true;
-            seg.stage2_argmax = argmax(&probs);
-            seg.stage2_confidence = seg
-                .stage2_argmax
-                .and_then(|i| probs.get(i).copied())
-                .unwrap_or(0.0);
-            seg.stage2_probabilities = probs;
         }
 
         segments.push(seg);
     }
 
     // If no window fired stage 2, fall back to the classifier's declared class
-    // count so consumers can still size their probability buffers.
+    // count so consumers can still size their probability buffers. A detector-only
+    // pipeline has no classifier, so the count stays 0.
     if num_stage2_classes == 0 {
-        num_stage2_classes = pipeline.classifier.labels.len();
+        num_stage2_classes = pipeline
+            .classifier
+            .as_ref()
+            .map(|c| c.labels.len())
+            .unwrap_or(0);
     }
 
     Ok(CascadeResult {

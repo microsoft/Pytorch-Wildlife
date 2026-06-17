@@ -156,6 +156,112 @@ fn generic_cascade_matches_orca_reference() {
     eprintln!("generic_cascade_matches_orca_reference: {checked} fixtures matched");
 }
 
+/// A detector-only pipeline (no classifier step) loads and runs stage 1 only:
+/// every segment has `stage2_ran = false`, `num_stage2_classes = 0`, and no
+/// stage-2 probabilities. This is the single-stage mode water-sparrow deploys
+/// when stage 2 is disabled.
+#[test]
+fn detector_only_pipeline_skips_stage2() {
+    let model_dir = PathBuf::from(
+        std::env::var("SPE_MOBILE_MODEL_DIR").unwrap_or_else(|_| DEFAULT_MODEL_DIR.into()),
+    );
+    let fixtures_root = PathBuf::from(
+        std::env::var("SPE_MOBILE_FIXTURES").unwrap_or_else(|_| DEFAULT_FIXTURES.into()),
+    );
+    let detector_src = model_dir.join("orca-detector-fp16-tflite");
+    if !detector_src.exists() || !fixtures_root.exists() {
+        eprintln!(
+            "SKIP detector_only_pipeline_skips_stage2: missing detector model/fixtures \
+             (detector={}, fixtures={}).",
+            detector_src.display(),
+            fixtures_root.display()
+        );
+        return;
+    }
+
+    // Build a temp catalog: the detector model (symlinked) + a detector-only
+    // pipeline.toml (no classifier step).
+    let tmp = std::env::temp_dir().join(format!("spe-detonly-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("mk tmp catalog");
+    std::os::unix::fs::symlink(&detector_src, tmp.join("orca-detector-fp16-tflite"))
+        .expect("symlink detector model");
+    let pipe_dir = tmp.join("orca-detector-only");
+    std::fs::create_dir_all(&pipe_dir).expect("mk pipe dir");
+    std::fs::write(
+        pipe_dir.join("pipeline.toml"),
+        "[pipeline]\nid = \"orca-detector-only\"\n\n\
+         [[pipeline.steps]]\nrole = \"detector\"\nmodel = \"orca-detector-fp16-tflite\"\n",
+    )
+    .expect("write detector-only pipeline.toml");
+
+    let engine = Engine::new(EngineConfig {
+        device: Device::Cpu,
+        inter_threads: 0,
+        intra_threads: 0,
+        model_dir: tmp.clone(),
+    })
+    .expect("engine new");
+    engine
+        .load_pipeline_by_id("orca-detector-only")
+        .expect("load detector-only pipeline");
+
+    let fixtures = fixture_dirs(&fixtures_root);
+    assert!(
+        !fixtures.is_empty(),
+        "no fixtures under {}",
+        fixtures_root.display()
+    );
+
+    let mut checked = 0usize;
+    for fixture in &fixtures {
+        let audio = load_npy_f32_flat(&fixture.join("ecotype_audio.npy"));
+        let sample_rate = load_npy_i64_first(&fixture.join("ecotype_sample_rate.npy")) as u32;
+        let result = engine
+            .run_pipeline(
+                "orca-detector-only",
+                &AudioInput::Samples {
+                    data: audio,
+                    sample_rate,
+                },
+                &CascadeOpts::default(),
+            )
+            .expect("run_pipeline detector-only");
+
+        assert_eq!(
+            result.num_stage2_classes,
+            0,
+            "{}: detector-only must report 0 stage-2 classes",
+            fixture.display()
+        );
+        assert!(
+            !result.segments.is_empty(),
+            "{}: expected at least one window",
+            fixture.display()
+        );
+        for seg in &result.segments {
+            assert!(
+                !seg.stage2_ran,
+                "{}: stage 2 must not run in a detector-only pipeline",
+                fixture.display()
+            );
+            assert!(
+                seg.stage2_probabilities.is_empty(),
+                "{}: detector-only must emit no stage-2 probabilities",
+                fixture.display()
+            );
+            assert!(
+                seg.detector_probability.is_finite(),
+                "{}: detector probability must be finite",
+                fixture.display()
+            );
+        }
+        checked += 1;
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+    eprintln!("detector_only_pipeline_skips_stage2: {checked} fixtures ran detector-only");
+}
+
 fn fixture_dirs(root: &Path) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)
         .expect("read fixtures dir")
