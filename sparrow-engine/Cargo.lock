@@ -2665,6 +2665,7 @@ dependencies = [
  "cbindgen",
  "clap",
  "csbindgen",
+ "image",
  "ndarray",
  "npyz",
  "serde",

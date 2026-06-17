@@ -2,9 +2,9 @@
 //!
 //! Replaces the focused 5-export orca cascade API with a documented ~18-symbol
 //! subset of the cpu/gpu 35-symbol surface: engine lifecycle, model management,
-//! image inference (exposed but deferred to RP-42), single-model audio
-//! detection, and the audio-cascade pipeline family (the orca cascade is now a
-//! `pipeline.toml`, not C code).
+//! image inference (`detect` implemented in RP-42; `classify` still deferred),
+//! single-model audio detection, and the audio-cascade pipeline family (the orca
+//! cascade is now a `pipeline.toml`, not C code).
 //!
 //! Conventions (shared with the cpu/gpu/mobile flavors): a thread-local errno
 //! style last-error, `catch_unwind` on every export, opaque `Box::into_raw` /
@@ -20,7 +20,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::ptr;
 
-use sparrow_engine_types::types::{AudioDetectOpts, AudioInput};
+use sparrow_engine_types::types::{AudioDetectOpts, AudioInput, DetectOpts, ImageInput};
 use sparrow_engine_types::{Device, EngineConfig};
 
 use crate::engine::Engine;
@@ -415,26 +415,85 @@ pub unsafe extern "C" fn sparrow_engine_list_models(engine: *const SparrowEngine
 }
 
 // ===========================================================================
-// Image inference (exposed for ABI stability; deferred to RP-42)
+// Image inference
 // ===========================================================================
 
-/// Image detection — not yet available on the mobile flavor (RP-42). Always
-/// returns null with a clear last-error; the symbol exists so consumers can bind
-/// the full ABI now.
+/// Run single-shot image detection over an encoded image buffer (JPEG/PNG).
+/// Returns null on error; call `sparrow_engine_last_error` for details. Free the
+/// result with `sparrow_engine_detections_free`.
 ///
 /// # Safety
-/// `model` must be a valid model pointer.
+/// `model` must be a valid model pointer; `image` must point to `len` readable
+/// bytes; `opts` a valid pointer or null.
 #[no_mangle]
 pub unsafe extern "C" fn sparrow_engine_detect(
-    _model: *const SparrowEngineModel,
-    _image: *const u8,
-    _len: usize,
-    _opts: *const SparrowEngineDetectOpts,
+    model: *const SparrowEngineModel,
+    image: *const u8,
+    len: usize,
+    opts: *const SparrowEngineDetectOpts,
 ) -> *mut SparrowEngineDetections {
-    guard_ptr(|| Err(image_unsupported_msg()))
+    guard_ptr(|| {
+        if model.is_null() {
+            return Err("null model handle".to_string());
+        }
+        if image.is_null() || len == 0 {
+            return Err("null or empty image buffer".to_string());
+        }
+        let model = &*(model as *const crate::engine::MobileModel);
+        let bytes = std::slice::from_raw_parts(image, len).to_vec();
+
+        let detect_opts = if opts.is_null() {
+            DetectOpts::default()
+        } else {
+            let o = &*opts;
+            DetectOpts {
+                confidence_threshold: opt_f32(o.confidence_threshold),
+                max_detections: if o.max_detections == 0 {
+                    None
+                } else {
+                    Some(o.max_detections)
+                },
+            }
+        };
+
+        let result = model
+            .detect(&ImageInput::Encoded(bytes), &detect_opts)
+            .map_err(|e| format!("{e:#}"))?;
+
+        let detections: Vec<SparrowEngineDetection> = result
+            .detections
+            .iter()
+            .map(|d| SparrowEngineDetection {
+                bbox: SparrowEngineBBox {
+                    x_min: d.bbox.x_min,
+                    y_min: d.bbox.y_min,
+                    x_max: d.bbox.x_max,
+                    y_max: d.bbox.y_max,
+                },
+                label: CString::new(d.label.as_str())
+                    .unwrap_or_else(|_| CString::new("?").unwrap())
+                    .into_raw(),
+                label_id: d.label_id,
+                confidence: d.confidence,
+            })
+            .collect();
+        let out_len = detections.len();
+        let boxed = detections.into_boxed_slice();
+        let data = boxed.as_ptr();
+        std::mem::forget(boxed);
+
+        Ok(Box::into_raw(Box::new(SparrowEngineDetections {
+            data,
+            len: out_len,
+            image_width: result.image_width,
+            image_height: result.image_height,
+        })))
+    })
 }
 
-/// Image classification — not yet available on the mobile flavor (RP-42).
+/// Image classification — not yet available on the mobile flavor (no `.tflite`
+/// classifier onboarded). Image *detection* (`sparrow_engine_detect`) is
+/// available as of RP-42. Always returns null with a clear last-error.
 ///
 /// # Safety
 /// `model` must be a valid model pointer.
@@ -445,11 +504,11 @@ pub unsafe extern "C" fn sparrow_engine_classify(
     _len: usize,
     _opts: *const SparrowEngineClassifyOpts,
 ) -> *mut SparrowEngineClassifyResult {
-    guard_ptr(|| Err(image_unsupported_msg()))
+    guard_ptr(|| Err(classify_unsupported_msg()))
 }
 
-fn image_unsupported_msg() -> String {
-    crate::engine::IMAGE_UNSUPPORTED_MSG.to_string()
+fn classify_unsupported_msg() -> String {
+    crate::engine::CLASSIFY_UNSUPPORTED_MSG.to_string()
 }
 
 /// Free a detections result. Null-safe.

@@ -19,12 +19,14 @@
 //! `void` free cannot surface an error. (JNI / water-sparrow consume from a
 //! single inference thread, so this is honored in practice.)
 //!
-//! ## Image inference (deferred — RP-42)
+//! ## Image inference (RP-42)
 //!
-//! [`MobileModel::detect`] / [`MobileModel::classify`] are exposed for ABI stability but
-//! return a clear error: no mobile (`.tflite`) image model is onboarded yet. The
-//! image preprocessing + decode path lands with the first converted image model
-//! in RP-42 (the ONNX→TFLite conversion + onboarding task).
+//! [`MobileModel::detect`] runs single-shot image detection for `yolo_e2e`
+//! detectors (the MegaDetector family) — decode → letterbox (NHWC) → LiteRT
+//! invoke → shared [`sparrow_engine_core::postprocess::yolo_e2e`]. Landed in
+//! RP-42 with the first ONNX→TFLite-converted image model.
+//! [`MobileModel::classify`] is still exposed for ABI stability but returns a
+//! clear error until a mobile (`.tflite`) classifier model is onboarded.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -42,15 +44,21 @@ use sparrow_engine_core::preprocess_audio::{
     AudioPreprocessConfig, MelFilterbank,
 };
 use sparrow_engine_types::manifest::{
-    self, InferenceStrategy, ModelManifest, PostprocessMethod,
+    self, InferenceStrategy, ModelManifest, Normalization, PostprocessMethod,
 };
 use sparrow_engine_types::derive_model_type;
 use sparrow_engine_types::types::{
-    AudioClass, AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment, ModelInfo, ModelType,
+    AudioClass, AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment, DetectOpts,
+    DetectResult, ImageInput, ModelInfo, ModelType,
 };
 pub use sparrow_engine_types::EngineConfig;
 
+use ndarray::ArrayView2;
+use sparrow_engine_core::postprocess;
+use sparrow_engine_core::preprocess::decode_to_rgb;
+
 use crate::cascade::{nchw_mel_to_nhwc_le_bytes, sigmoid, softmax};
+use crate::preprocess::{f32_slice_to_le_bytes, letterbox_nhwc};
 use crate::sys::LiteRtElementType;
 use crate::tflite::{LiteRtBackend, LiteRtRuntime};
 
@@ -281,6 +289,91 @@ impl EngineInner {
             processing_time_ms: start.elapsed().as_secs_f32() * 1000.0,
         })
     }
+
+    /// Run single-shot image detection with a `yolo_e2e` detector model.
+    ///
+    /// decode → letterbox (NHWC f32) → LiteRT invoke → shared
+    /// [`postprocess::try_yolo_e2e`] (which undoes the letterbox via the
+    /// [`sparrow_engine_types::PreprocessMeta`] returned by [`letterbox_nhwc`]).
+    pub(crate) fn detect(
+        &self,
+        model: &LoadedModel,
+        image: &ImageInput,
+        opts: &DetectOpts,
+    ) -> Result<DetectResult> {
+        self.check_thread()?;
+        let start = Instant::now();
+
+        // Flavor scope: the mobile image path implements `yolo_e2e` single-shot
+        // detection (MegaDetector family). Other postprocess methods
+        // (`megadet_v5a`, `heatmap_peaks`) and classification are not yet ported.
+        if !matches!(model.manifest.postprocess_method, PostprocessMethod::YoloE2e) {
+            bail!(
+                "model '{}' uses postprocess '{:?}', which the mobile flavor does not yet support \
+                 for image detection (only yolo_e2e is implemented)",
+                model.id,
+                model.manifest.postprocess_method
+            );
+        }
+
+        // Preprocess: decode → letterbox → NHWC f32. A yolo_e2e model is always an
+        // image model, so the image-only manifest fields must be present.
+        let input_size = model.manifest.input_size.ok_or_else(|| {
+            anyhow!("model '{}' has no input_size; not an image model", model.id)
+        })?;
+        let normalization = model.manifest.normalization.unwrap_or(Normalization::Unit);
+        let channel_order = model.manifest.channel_order.unwrap_or_default();
+        let pad_value = model.manifest.pad_value.unwrap_or(0.0);
+
+        let rgb = decode_to_rgb(image).map_err(|e| anyhow!("{e}"))?;
+        let (nhwc, meta) = letterbox_nhwc(
+            &rgb,
+            input_size[0],
+            input_size[1],
+            pad_value,
+            normalization,
+            channel_order,
+        );
+
+        // Inference: single-input NHWC f32 little-endian bytes.
+        let bytes = f32_slice_to_le_bytes(&nhwc);
+        let outputs = model
+            .backend
+            .borrow_mut()
+            .invoke_single(bytes, LiteRtElementType::kLiteRtElementTypeFloat32)
+            .map_err(|e| anyhow!("{e}"))?;
+        let flat = outputs
+            .first()
+            .ok_or_else(|| anyhow!("model '{}' returned no output tensor", model.id))?;
+
+        // yolo_e2e output is a flat row-major `[N, 6]` block (N = top-K candidates).
+        if flat.is_empty() || flat.len() % 6 != 0 {
+            bail!(
+                "model '{}' yolo_e2e output length {} is not a positive multiple of 6",
+                model.id,
+                flat.len()
+            );
+        }
+        let rows = flat.len() / 6;
+        let view = ArrayView2::from_shape((rows, 6), flat)
+            .map_err(|e| anyhow!("reshape yolo_e2e output to [{rows}, 6]: {e}"))?;
+
+        let detections = postprocess::try_yolo_e2e(
+            &view,
+            &model.labels,
+            opts,
+            &meta,
+            model.manifest.confidence_threshold.unwrap_or(0.2),
+        )
+        .map_err(|e| anyhow!("{e}"))?;
+
+        Ok(DetectResult {
+            detections,
+            image_width: meta.original_width,
+            image_height: meta.original_height,
+            processing_time_ms: start.elapsed().as_secs_f32() * 1000.0,
+        })
+    }
 }
 
 /// Public manifest-driven mobile engine. Cheap to clone (`Rc` to shared state).
@@ -393,14 +486,15 @@ impl MobileModel {
         inner.detect_audio(&loaded, audio, opts)
     }
 
-    /// Image detection — exposed for ABI stability, not yet available on mobile.
-    pub fn detect(&self) -> Result<()> {
-        Err(image_not_supported())
+    /// Run single-shot image detection with this model (`yolo_e2e` detectors).
+    pub fn detect(&self, image: &ImageInput, opts: &DetectOpts) -> Result<DetectResult> {
+        let (inner, loaded) = self.resolve()?;
+        inner.detect(&loaded, image, opts)
     }
 
     /// Image classification — exposed for ABI stability, not yet available on mobile.
     pub fn classify(&self) -> Result<()> {
-        Err(image_not_supported())
+        Err(classify_not_supported())
     }
 
     /// Unload the model this handle refers to.
@@ -413,15 +507,16 @@ impl MobileModel {
     }
 }
 
-/// The RP-42 image-deferral message shared by `detect` / `classify` (Rust + FFI surfaces).
-pub(crate) const IMAGE_UNSUPPORTED_MSG: &str =
-    "image inference (detect/classify) is not yet available in the mobile (LiteRT) flavor: no \
-     mobile (.tflite) image model is onboarded. It will be enabled by RP-42 (the ONNX→TFLite \
-     conversion + onboarding task).";
+/// Classification-deferral message (Rust + FFI surfaces). Image *detection*
+/// (`detect`) is implemented as of RP-42; only `classify` remains deferred until
+/// a mobile (`.tflite`) classifier model is onboarded.
+pub(crate) const CLASSIFY_UNSUPPORTED_MSG: &str =
+    "image classification is not yet available in the mobile (LiteRT) flavor: no mobile \
+     (.tflite) classifier model is onboarded. Image detection (detect) is available as of RP-42.";
 
-/// The RP-42 image-deferral error shared by `detect` / `classify`.
-pub(crate) fn image_not_supported() -> anyhow::Error {
-    anyhow!(IMAGE_UNSUPPORTED_MSG)
+/// The classification-deferral error used by `MobileModel::classify` and the FFI.
+pub(crate) fn classify_not_supported() -> anyhow::Error {
+    anyhow!(CLASSIFY_UNSUPPORTED_MSG)
 }
 
 /// Resolve sliding-window (duration, stride) from manifest, overridable by opts.

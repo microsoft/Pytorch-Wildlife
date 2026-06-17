@@ -14,6 +14,7 @@ pub mod engine;
 #[cfg(feature = "ffi")]
 pub mod ffi;
 pub mod pipeline;
+pub mod preprocess;
 pub mod sys;
 pub mod tflite;
 

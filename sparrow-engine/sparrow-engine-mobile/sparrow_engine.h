@@ -259,20 +259,23 @@ void sparrow_engine_unload_model(SparrowEngineModel *model);
 char *sparrow_engine_list_models(const SparrowEngine *engine);
 
 /**
- * Image detection — not yet available on the mobile flavor (RP-42). Always
- * returns null with a clear last-error; the symbol exists so consumers can bind
- * the full ABI now.
+ * Run single-shot image detection over an encoded image buffer (JPEG/PNG).
+ * Returns null on error; call `sparrow_engine_last_error` for details. Free the
+ * result with `sparrow_engine_detections_free`.
  *
  * # Safety
- * `model` must be a valid model pointer.
+ * `model` must be a valid model pointer; `image` must point to `len` readable
+ * bytes; `opts` a valid pointer or null.
  */
-struct SparrowEngineDetections *sparrow_engine_detect(const SparrowEngineModel *_model,
-                                                      const uint8_t *_image,
-                                                      uintptr_t _len,
-                                                      const struct SparrowEngineDetectOpts *_opts);
+struct SparrowEngineDetections *sparrow_engine_detect(const SparrowEngineModel *model,
+                                                      const uint8_t *image,
+                                                      uintptr_t len,
+                                                      const struct SparrowEngineDetectOpts *opts);
 
 /**
- * Image classification — not yet available on the mobile flavor (RP-42).
+ * Image classification — not yet available on the mobile flavor (no `.tflite`
+ * classifier onboarded). Image *detection* (`sparrow_engine_detect`) is
+ * available as of RP-42. Always returns null with a clear last-error.
  *
  * # Safety
  * `model` must be a valid model pointer.
