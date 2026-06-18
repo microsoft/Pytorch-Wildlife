@@ -119,6 +119,10 @@ pub enum Precision {
     Fp32,
     /// 16-bit float — ~1.7x faster on Tensor Cores, ≤0.5% IoU drop.
     Fp16,
+    /// 8-bit integer (quantized). TFLite/LiteRT (mobile) only — precision is
+    /// baked into the single `.tflite` file, so the mobile loader uses `file`
+    /// directly. Rejected for `format = "onnx"` (cpu/gpu) at manifest parse.
+    Int8,
 }
 
 /// Inference strategy: single-shot, tiled, or sliding window.
@@ -867,16 +871,25 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
         }
     }
 
-    // -- Parse precision (Phase 3.8: FP16 support) --
+    // -- Parse precision (Phase 3.8: FP16 support; int8 is tflite/mobile-only) --
     let precision = match raw.inference.precision.as_deref() {
         None | Some("fp32") => Precision::Fp32,
         Some("fp16") => Precision::Fp16,
+        Some("int8") => Precision::Int8,
         Some(other) => {
             return Err(SparrowEngineError::InvalidManifest(format!(
-                "Unknown precision: '{other}' (expected 'fp32' or 'fp16')"
+                "Unknown precision: '{other}' (expected 'fp32', 'fp16', or 'int8')"
             )))
         }
     };
+    // int8 is supported only by the mobile TFLite/LiteRT flavor (the .tflite bakes
+    // the quantization into its single `file`). ONNX (cpu/gpu) has no int8 path
+    // wired, so reject int8 + onnx at parse rather than fail obscurely at load.
+    if raw.model.format == "onnx" && precision == Precision::Int8 {
+        return Err(SparrowEngineError::InvalidManifest(
+            "precision = 'int8' is only supported for tflite (mobile) models, not onnx".to_string(),
+        ));
+    }
     // ONNX fp16 uses a separate fp16-converted file (`file_fp16`), with `file`
     // holding the fp32 original (Phase 3.8). TFLite artifacts bake precision into
     // the single `file` (there is no fp32/fp16 file pair), so the mobile LiteRT

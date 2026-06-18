@@ -272,6 +272,7 @@ impl Engine {
         // present whenever `precision == Fp16`.
         let onnx_path = match manifest.precision {
             manifest::Precision::Fp32 => manifest_dir.join(&manifest.model_file),
+            manifest::Precision::Int8 => manifest_dir.join(&manifest.model_file),
             manifest::Precision::Fp16 => manifest_dir.join(
                 manifest
                     .model_file_fp16

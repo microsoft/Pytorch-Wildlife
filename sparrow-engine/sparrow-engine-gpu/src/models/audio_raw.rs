@@ -155,6 +155,7 @@ impl RawAudioModel {
         // AudioModel + YoloModel + ClassifierModel).
         let onnx_path = match manifest.precision {
             Precision::Fp32 => manifest_dir.join(&manifest.model_file),
+            Precision::Int8 => manifest_dir.join(&manifest.model_file),
             Precision::Fp16 => {
                 manifest_dir.join(manifest.model_file_fp16.as_ref().ok_or_else(|| {
                     SparrowEngineError::InvalidManifest(format!(
