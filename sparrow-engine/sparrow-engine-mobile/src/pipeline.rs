@@ -28,6 +28,7 @@ use sparrow_engine_types::types::{AudioInput, ModelType};
 use crate::cascade::{argmax, sigmoid, softmax};
 use crate::engine::{mel_bytes_for_segment, EngineInner, LoadedModel};
 use crate::sys::LiteRtElementType;
+use crate::timing;
 
 /// Default stage-1 gate threshold when the detector manifest omits one.
 const DEFAULT_DETECTOR_THRESHOLD: f32 = 0.5;
@@ -218,6 +219,81 @@ pub(crate) fn load_pipeline_by_id(inner: &EngineInner, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Per-window timing accumulator for the `SPE_TIMING` E2 batching micro-benchmark.
+/// Sums (not means) are kept; `emit` divides by the window count. Detector spans
+/// are tracked separately so the GO/NO-GO "fixed-overhead fraction" can be read at
+/// the aggregate line without re-parsing the per-window records.
+#[derive(Default)]
+struct TimingWindows {
+    n: u64,
+    gated: u64,
+    mel_ns: u128,
+    det_ns: u128,
+    det_setup_ns: u128,
+    det_run_ns: u128,
+    det_read_ns: u128,
+    eco_ns: u128,
+    resid_ns: u128,
+    win_ns: u128,
+}
+
+impl TimingWindows {
+    #[allow(clippy::too_many_arguments)]
+    fn add(
+        &mut self,
+        mel_ns: u128,
+        det_ns: u128,
+        det_spans: (u128, u128, u128),
+        stage2_ran: bool,
+        eco_ns: u128,
+        resid_ns: u128,
+        win_ns: u128,
+    ) {
+        self.n += 1;
+        if stage2_ran {
+            self.gated += 1;
+        }
+        self.mel_ns += mel_ns;
+        self.det_ns += det_ns;
+        self.det_setup_ns += det_spans.0;
+        self.det_run_ns += det_spans.1;
+        self.det_read_ns += det_spans.2;
+        self.eco_ns += eco_ns;
+        self.resid_ns += resid_ns;
+        self.win_ns += win_ns;
+    }
+
+    /// Emit the aggregate `SPE_TIMING_AGG` line: per-window means (ms) plus the
+    /// detector invoke's fixed-overhead fraction = (setup + readout) / invoke,
+    /// the quantity the E2 decision tree thresholds for the batching GO/NO-GO.
+    fn emit(&self) {
+        if self.n == 0 {
+            return;
+        }
+        let n = self.n as f64;
+        let mean = |x: u128| timing::ns_ms(x) / n;
+        let det_invoke = (self.det_setup_ns + self.det_run_ns + self.det_read_ns).max(1) as f64;
+        let det_fixed = (self.det_setup_ns + self.det_read_ns) as f64;
+        eprintln!(
+            "SPE_TIMING_AGG windows={} gated={} mel_ms_mean={:.3} det_ms_mean={:.3} \
+             det_setup_ms_mean={:.3} det_run_ms_mean={:.3} det_read_ms_mean={:.3} \
+             eco_ms_mean={:.3} resid_ms_mean={:.3} win_ms_mean={:.3} \
+             det_fixed_overhead_frac={:.3}",
+            self.n,
+            self.gated,
+            mean(self.mel_ns),
+            mean(self.det_ns),
+            mean(self.det_setup_ns),
+            mean(self.det_run_ns),
+            mean(self.det_read_ns),
+            mean(self.eco_ns),
+            mean(self.resid_ns),
+            mean(self.win_ns),
+            det_fixed / det_invoke,
+        );
+    }
+}
+
 /// Run a loaded cascade over an audio input (WAV file or raw mono samples).
 pub(crate) fn run_pipeline(
     inner: &EngineInner,
@@ -285,8 +361,14 @@ pub(crate) fn run_pipeline(
     let orig_sr = audio.orig_sample_rate;
     let mut num_stage2_classes = 0usize;
     let mut segments = Vec::new();
+
+    let timed = timing::enabled();
+    let mut tw = TimingWindows::default();
+
     for offset in compute_segment_offsets(total, segment_samples, stride_samples) {
+        let w_start = timed.then(Instant::now);
         // Compute the dB-mel ONCE for this window and feed both stages.
+        let t_mel = timed.then(Instant::now);
         let mel_bytes = mel_bytes_for_segment(
             &audio.data,
             offset,
@@ -295,10 +377,20 @@ pub(crate) fn run_pipeline(
             &pipeline.config,
             &pipeline.filterbank,
         )?;
+        let mel_ns = t_mel.map(|t| t.elapsed().as_nanos()).unwrap_or(0);
         let (start_s, end_s) = segment_time_range(offset, segment_samples, total, target_sr);
 
+        if timed {
+            timing::reset_invoke();
+        }
+        let t_det = timed.then(Instant::now);
         let detector_out = detector_backend
             .invoke_single(mel_bytes.clone(), LiteRtElementType::kLiteRtElementTypeFloat32)?;
+        let det_ns = t_det.map(|t| t.elapsed().as_nanos()).unwrap_or(0);
+        let det_spans = if timed { timing::take_invoke() } else { (0, 0, 0) };
+        // Per-window ecotype timing — filled when stage 2 runs below.
+        let mut eco_ns = 0u128;
+        let mut eco_spans = (0u128, 0u128, 0u128);
         let detector_logit = *detector_out
             .first()
             .and_then(|v| v.first())
@@ -324,8 +416,14 @@ pub(crate) fn run_pipeline(
             if let (Some(classifier), Some(classifier_backend)) =
                 (pipeline.classifier.as_ref(), classifier_backend.as_mut())
             {
+                if timed {
+                    timing::reset_invoke();
+                }
+                let t_eco = timed.then(Instant::now);
                 let classifier_out = classifier_backend
                     .invoke_single(mel_bytes, LiteRtElementType::kLiteRtElementTypeFloat32)?;
+                eco_ns = t_eco.map(|t| t.elapsed().as_nanos()).unwrap_or(0);
+                eco_spans = if timed { timing::take_invoke() } else { (0, 0, 0) };
                 let logits = classifier_out
                     .into_iter()
                     .next()
@@ -357,7 +455,44 @@ pub(crate) fn run_pipeline(
             }
         }
 
+        if timed {
+            let win_ns = w_start.map(|t| t.elapsed().as_nanos()).unwrap_or(0);
+            let resid_ns = win_ns.saturating_sub(mel_ns + det_ns + eco_ns);
+            eprintln!(
+                "SPE_TIMING win={} det_prob={:.4} gated={} mel_ms={:.3} \
+                 det_ms={:.3} det_setup_ms={:.3} det_run_ms={:.3} det_read_ms={:.3} \
+                 eco_ms={:.3} eco_setup_ms={:.3} eco_run_ms={:.3} eco_read_ms={:.3} \
+                 resid_ms={:.3} win_ms={:.3}",
+                tw.n,
+                detector_probability,
+                seg.stage2_ran as u8,
+                timing::ns_ms(mel_ns),
+                timing::ns_ms(det_ns),
+                timing::ns_ms(det_spans.0),
+                timing::ns_ms(det_spans.1),
+                timing::ns_ms(det_spans.2),
+                timing::ns_ms(eco_ns),
+                timing::ns_ms(eco_spans.0),
+                timing::ns_ms(eco_spans.1),
+                timing::ns_ms(eco_spans.2),
+                timing::ns_ms(resid_ns),
+                timing::ns_ms(win_ns),
+            );
+            tw.add(
+                mel_ns,
+                det_ns,
+                det_spans,
+                seg.stage2_ran,
+                eco_ns,
+                resid_ns,
+                win_ns,
+            );
+        }
         segments.push(seg);
+    }
+
+    if timed {
+        tw.emit();
     }
 
     // If no window fired stage 2, fall back to the classifier's declared class

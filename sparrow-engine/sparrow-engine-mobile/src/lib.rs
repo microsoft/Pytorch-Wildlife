@@ -17,6 +17,7 @@ pub mod pipeline;
 pub mod preprocess;
 pub mod sys;
 pub mod tflite;
+pub(crate) mod timing;
 
 // Match the CPU/GPU flavor convention: consumers can continue importing shared
 // types and device-agnostic helpers through the flavor crate.

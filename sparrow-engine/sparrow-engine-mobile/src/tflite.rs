@@ -1,12 +1,14 @@
 //! LiteRT/TensorFlow Lite backend wrapper for the mobile engine flavor.
 
 use crate::sys;
+use crate::timing;
 use anyhow::{anyhow, bail, Context, Result};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
 use std::ptr;
 use std::rc::Rc;
+use std::time::Instant;
 
 /// LiteRT tensor element type accepted by [`LiteRtBackend::invoke_single`] /
 /// [`LiteRtBackend::invoke_named`].
@@ -249,7 +251,9 @@ impl LiteRtBackend {
             );
         }
 
+        let timed = timing::enabled();
         unsafe {
+            let t_setup = Instant::now();
             let mut in_bufs: Vec<OwnedTensorBuffer> = Vec::with_capacity(self.num_inputs);
             for (i, (bytes, etype)) in inputs.iter().enumerate() {
                 let mut req: sys::LiteRtTensorBufferRequirements = ptr::null_mut();
@@ -335,6 +339,10 @@ impl LiteRtBackend {
                 in_bufs.iter().map(OwnedTensorBuffer::as_raw).collect();
             let mut out_raws: Vec<sys::LiteRtTensorBuffer> =
                 out_bufs.iter().map(OwnedTensorBuffer::as_raw).collect();
+            if timed {
+                timing::add_setup(t_setup.elapsed().as_nanos());
+            }
+            let t_run = Instant::now();
             check(
                 sys::LiteRtRunCompiledModel(
                     self.compiled,
@@ -346,6 +354,10 @@ impl LiteRtBackend {
                 ),
                 "LiteRtRunCompiledModel",
             )?;
+            if timed {
+                timing::add_run(t_run.elapsed().as_nanos());
+            }
+            let t_read = Instant::now();
 
             let mut outs: Vec<Vec<f32>> = Vec::with_capacity(self.num_outputs);
             for (i, buf) in out_bufs.iter().enumerate() {
@@ -363,6 +375,9 @@ impl LiteRtBackend {
                 let slice = std::slice::from_raw_parts(host_ptr as *const f32, n_elems);
                 outs.push(slice.to_vec());
                 lock.unlock("LiteRtUnlockTensorBuffer(output)")?;
+            }
+            if timed {
+                timing::add_read(t_read.elapsed().as_nanos());
             }
 
             Ok(outs)
