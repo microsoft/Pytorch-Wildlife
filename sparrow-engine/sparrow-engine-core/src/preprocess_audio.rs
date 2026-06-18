@@ -356,6 +356,15 @@ pub fn segment_time_range(
 }
 
 
+/// Non-zero band `[start, start + weights.len())` of one triangular mel filter.
+/// Mel filters are triangular, so each row of the dense filterbank is non-zero
+/// only over a small contiguous freq span. Storing just that span lets the
+/// projection skip the ~95% zero bins.
+struct MelBand {
+    start: usize,
+    weights: Vec<f32>,
+}
+
 /// Pre-computed mel filterbank matrix for reuse across segments.
 ///
 /// The filterbank depends only on static config parameters (n_mels, n_fft,
@@ -367,6 +376,11 @@ pub struct MelFilterbank {
     pub data: Vec<f32>,
     pub n_mels: usize,
     pub n_freqs: usize,
+    /// Banded form of `data`, pre-computed once: the non-zero span of each mel
+    /// filter. The projection multiplies only the band — bit-identical to the
+    /// dense matmul (adding 0.0 is exact in IEEE-754) but ~20-50× fewer FLOPs,
+    /// which is the bulk of the per-window mel cost on ARM edge devices.
+    bands: Vec<MelBand>,
 }
 
 impl MelFilterbank {
@@ -377,12 +391,33 @@ impl MelFilterbank {
         let n_fft = config.n_fft as usize;
         let n_freqs = n_fft / 2 + 1;
         let data = mel_filterbank(n_mels, n_fft, config.sample_rate, config.fmin, config.fmax);
+        let bands = build_mel_bands(&data, n_mels, n_freqs);
         Ok(Self {
             data,
             n_mels,
             n_freqs,
+            bands,
         })
     }
+}
+
+/// Extract each mel filter's non-zero band from the dense filterbank rows.
+fn build_mel_bands(data: &[f32], n_mels: usize, n_freqs: usize) -> Vec<MelBand> {
+    let mut bands = Vec::with_capacity(n_mels);
+    for m in 0..n_mels {
+        let row = &data[m * n_freqs..(m + 1) * n_freqs];
+        let start = row.iter().position(|&w| w != 0.0).unwrap_or(0);
+        let end = row
+            .iter()
+            .rposition(|&w| w != 0.0)
+            .map(|e| e + 1)
+            .unwrap_or(start);
+        bands.push(MelBand {
+            start,
+            weights: row[start..end].to_vec(),
+        });
+    }
+    bands
 }
 
 /// Compute mel spectrogram for one segment of audio.
@@ -450,18 +485,37 @@ pub fn mel_spectrogram(
     }
     let n_frames = power.len();
 
-    // Step 2: Apply pre-computed filterbank → mel spectrogram [n_mels, n_frames]
+    // Step 2: Apply pre-computed filterbank → mel spectrogram [n_mels, n_frames].
+    // Use the banded form (skips the ~95% zero freq bins per triangular filter);
+    // fall back to the dense matmul if bands are unavailable (e.g. a filterbank
+    // built by struct literal rather than `MelFilterbank::new`). Both paths are
+    // bit-identical — the band carries exactly the non-zero weights.
     let t_gemm = Instant::now();
     let mut mel = vec![0.0f32; n_mels * n_frames];
-    for (t, frame) in power.iter().enumerate() {
-        for m in 0..n_mels {
-            let filter_row = &filterbank.data[m * n_freqs..(m + 1) * n_freqs];
-            let sum: f32 = filter_row
-                .iter()
-                .zip(frame.iter())
-                .map(|(f, p)| f * p)
-                .sum();
-            mel[m * n_frames + t] = sum;
+    if filterbank.bands.len() == n_mels {
+        for (t, frame) in power.iter().enumerate() {
+            for (m, band) in filterbank.bands.iter().enumerate() {
+                let hi = (band.start + band.weights.len()).min(frame.len());
+                let lo = band.start.min(hi);
+                let sum: f32 = band.weights[..hi - lo]
+                    .iter()
+                    .zip(&frame[lo..hi])
+                    .map(|(w, p)| w * p)
+                    .sum();
+                mel[m * n_frames + t] = sum;
+            }
+        }
+    } else {
+        for (t, frame) in power.iter().enumerate() {
+            for m in 0..n_mels {
+                let filter_row = &filterbank.data[m * n_freqs..(m + 1) * n_freqs];
+                let sum: f32 = filter_row
+                    .iter()
+                    .zip(frame.iter())
+                    .map(|(f, p)| f * p)
+                    .sum();
+                mel[m * n_frames + t] = sum;
+            }
         }
     }
     tracing::info!(
@@ -1213,6 +1267,7 @@ mod tests {
             data: vec![0.0; 3 * 33],
             n_mels: 3,
             n_freqs: 33,
+            bands: Vec::new(),
         };
         assert!(mel_spectrogram(&samples, config.sample_rate, &config, &wrong_mels).is_err());
 
@@ -1220,6 +1275,7 @@ mod tests {
             data: vec![0.0; 2 * 32],
             n_mels: 2,
             n_freqs: 32,
+            bands: Vec::new(),
         };
         assert!(mel_spectrogram(&samples, config.sample_rate, &config, &wrong_freqs).is_err());
     }
