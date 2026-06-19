@@ -2,13 +2,13 @@
 # scripts/download_models.sh — download the sparrow-engine model zoo from Zenodo.
 #
 # Downloads the ONNX model bundles from the public Zenodo record
-# (https://doi.org/10.5281/zenodo.20360316, concept DOI 10.5281/zenodo.20348978
+# (https://doi.org/10.5281/zenodo.20723037, concept DOI 10.5281/zenodo.20348978
 # which always resolves to the latest version), verifies SHA-256 integrity,
 # and unpacks each model into a layout directly loadable by sparrow-engine
 # (i.e. `<dest>/<model_id>/manifest.toml` + `model.onnx` + `labels.txt`).
 #
 # Usage:
-#   bash scripts/download_models.sh                    # all 16 models to ~/.sparrow-engine/models/
+#   bash scripts/download_models.sh                    # all 18 models to ~/.sparrow-engine/models/
 #   bash scripts/download_models.sh --dest /path       # custom destination dir
 #   bash scripts/download_models.sh MDV6-yolov10-e ... # specific model(s) only
 #   bash scripts/download_models.sh --list             # show available models
@@ -17,7 +17,7 @@
 #
 # After the script completes, point sparrow-engine at the directory:
 #   export SPARROW_ENGINE_MODEL_DIR=$(realpath ~/.sparrow-engine/models)
-#   spe list-models     # lists the 16 catalog entries
+#   spe list-models     # lists the 18 catalog entries
 #   spe detect --model MDV6-yolov10-e --image /path/to/image.jpg
 #
 # (No explicit env var is needed if the default ~/.sparrow-engine/models is
@@ -29,17 +29,21 @@
 set -euo pipefail
 
 # ---- Constants ----
-ZENODO_RECORD="${ZENODO_RECORD:-20674275}"
+ZENODO_RECORD="${ZENODO_RECORD:-20723037}"
 ZENODO_DOI="10.5281/zenodo.${ZENODO_RECORD}"
 ZENODO_BASE="https://zenodo.org/records/${ZENODO_RECORD}/files"
 
-# All 20 model entries published in the v0.6.0 Zenodo bundle (adds the two fp16 orca-cascade
-# .tflite re-exports for spe-mobile on top of the v0.5.0 set).
+# The 18 ONNX model entries auto-downloaded by default. The v0.7.0 Zenodo bundle also
+# carries spe-mobile .tflite artifacts (the two fp16 orca-cascade re-exports +
+# MDV6-yolov10-c-tflite) and the orca-cascade pipeline.toml; those are fetched on demand
+# by spe-mobile consumers (e.g. the water-sparrow bundle), not part of this default catalog.
 # (v0.1.0 had 14; v0.2.0 added perch-v2 — bird vocalization classifier;
 #  v0.3.0 added md-audiobirds-v1 — default audio detector, MIT;
 #  v0.4.0 — OWL + HerdNet manifest fix (subtype = "overhead"). No new models;
 #  v0.5.0 — added orca-detector-dclde2026-v1 + orca-ecotype-dclde2026-v1
-#           cascade for DCLDE 2026 (requires sparrow-engine >= v0.1.16).)
+#           cascade for DCLDE 2026 (requires sparrow-engine >= v0.1.16);
+#  v0.6.0 — added the two fp16 orca-cascade .tflite re-exports for spe-mobile;
+#  v0.7.0 — added MDV6-yolov10-c-tflite (mobile fp16 detector) + orca-cascade pipeline.)
 ALL_MODELS=(
   "MDV6-yolov10-e"
   "MDV6-yolov10-c"
