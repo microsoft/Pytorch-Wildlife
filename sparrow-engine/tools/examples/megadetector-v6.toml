@@ -1,3 +1,10 @@
+# Example manifest for MegaDetector v6 — the shipped catalog default is the
+# YOLOv10 variant (MDV6-yolov10-c / MDV6-yolov10-e; postprocessing "yolo_nms").
+# See `sparrow-engine/scripts/download_models.sh` (ALL_MODELS) for the catalog.
+# NOTE: MegaDetector v6 also has RT-DETR variants; for those, set
+# [model.postprocessing] type = "rtdetr_topk". This example uses the shipped
+# YOLOv10 configuration.
+
 schema_version = "1.0"
 
 [model]
@@ -7,7 +14,7 @@ type            = "detection"
 format          = "onnx"
 version         = "6.0.0"
 license         = "MIT"
-description     = "General-purpose camera trap animal detector trained with RT-DETR. Detects animals, persons, and vehicles."
+description     = "General-purpose camera trap animal detector (MegaDetector v6, YOLOv10). Detects animals, persons, and vehicles."
 tags            = ["camera-trap", "detection", "megadetector", "general"]
 file            = "megadetector_v6.onnx"
 sha256          = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -25,9 +32,10 @@ color_space = "RGB"
 pad_value   = 114
 
 [model.postprocessing]
-type                   = "rtdetr_topk"
-topk                   = 300
+type                   = "yolo_nms"
 default_conf_threshold = 0.2
+iou_threshold          = 0.45
+max_detections         = 300
 
 [model.labels]
 "0" = "animal"
