@@ -17,7 +17,7 @@ spe device                              # {"device":"cpu"}  or  {"device":"cuda:
 
 # One-time: download a model from the Zenodo bundle (brew doesn't ship models)
 mkdir -p ~/.sparrow-engine/models && cd ~/.sparrow-engine/models
-curl -fLO https://zenodo.org/records/20723037/files/MDV6-yolov10-e.zip
+curl -fLO https://zenodo.org/records/20769094/files/MDV6-yolov10-e.zip
 unzip -q MDV6-yolov10-e.zip && rm MDV6-yolov10-e.zip
 cd -
 
@@ -239,7 +239,7 @@ Validated on a 512 MB Raspberry Pi Zero 2W: both fp16 orca `.tflite` resident at
 
 Sparrow Engine doesn't ship the ONNX model weights in the repo. They live in a public Zenodo record so the repo stays small and operators can pull just the models they need.
 
-**Zenodo DOI**: [10.5281/zenodo.20723037](https://doi.org/10.5281/zenodo.20723037) (v0.7.0) — concept DOI [10.5281/zenodo.20348978](https://doi.org/10.5281/zenodo.20348978) always resolves to the latest version.
+**Zenodo DOI**: [10.5281/zenodo.20769094](https://doi.org/10.5281/zenodo.20769094) (v0.8.0) — concept DOI [10.5281/zenodo.20348978](https://doi.org/10.5281/zenodo.20348978) always resolves to the latest version.
 
 Download all 16 models to `~/.sparrow-engine/models/` (the default model dir read by `spe`, `sparrow-engine-server`, and the Python wheel):
 
