@@ -7,7 +7,7 @@
 //! [`crate::kernels::center_crop::CenterCropKernel`] and a cached
 //! [`crate::models::classifier::JpegDecoder`] from `EngineInner`.
 
-use sparrow_engine_types::error::{SparrowEngineError, Result};
+use sparrow_engine_types::error::{Result, SparrowEngineError};
 use sparrow_engine_types::manifest::{ModelManifest, PostprocessMethod, PreprocessMethod};
 use sparrow_engine_types::types::{ClassifyOpts, ClassifyResult, ImageInput};
 
@@ -80,14 +80,18 @@ pub fn classify(
                 opts,
             )
         }
-        LoadedModelInner::Yolo(_) | LoadedModelInner::Tiled(_) => Err(SparrowEngineError::NotAClassifier {
-            id: inner.manifest.id.clone(),
-            method: inner.manifest.postprocess_method.as_str().to_string(),
-        }),
-        LoadedModelInner::Audio(_) | LoadedModelInner::AudioRaw(_) => Err(SparrowEngineError::IsAudioModel {
-            id: inner.manifest.id.clone(),
-            method: inner.manifest.preprocess_method.as_str().to_string(),
-        }),
+        LoadedModelInner::Yolo(_) | LoadedModelInner::Tiled(_) => {
+            Err(SparrowEngineError::NotAClassifier {
+                id: inner.manifest.id.clone(),
+                method: inner.manifest.postprocess_method.as_str().to_string(),
+            })
+        }
+        LoadedModelInner::Audio(_) | LoadedModelInner::AudioRaw(_) => {
+            Err(SparrowEngineError::IsAudioModel {
+                id: inner.manifest.id.clone(),
+                method: inner.manifest.preprocess_method.as_str().to_string(),
+            })
+        }
     }
 }
 
@@ -117,6 +121,7 @@ mod tests {
             channel_order: None,
             precision: Precision::Fp32,
             inference_strategy: InferenceStrategy::Single,
+            trt: None,
             postprocess_method: PostprocessMethod::YoloE2e,
             confidence_threshold: None,
             label_file: None,

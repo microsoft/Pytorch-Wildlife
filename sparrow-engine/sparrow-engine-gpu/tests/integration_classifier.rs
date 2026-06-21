@@ -34,12 +34,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use sparrow_engine::kernels::center_crop::CenterCropKernel;
-use sparrow_engine::kernels::resize::ResizeKernel;
-use sparrow_engine::models::classifier::{ClassifierModel, JpegDecoder};
-use sparrow_engine_core::postprocess;
-use sparrow_engine_types::manifest::{self, ChannelOrder, ModelManifest, Normalization, Precision};
-use sparrow_engine_types::{Classification, ClassifyOpts, ClassifyResult, ImageInput, PixelFormat};
 use cudarc::driver::CudaContext;
 use fast_image_resize::images::Image as FirImage;
 use fast_image_resize::{FilterType as FirFilter, PixelType, ResizeAlg, ResizeOptions, Resizer};
@@ -47,6 +41,12 @@ use ndarray::{Array4, ArrayView2, ArrayViewD};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
+use sparrow_engine::kernels::center_crop::CenterCropKernel;
+use sparrow_engine::kernels::resize::ResizeKernel;
+use sparrow_engine::models::classifier::{ClassifierModel, JpegDecoder};
+use sparrow_engine_core::postprocess;
+use sparrow_engine_types::manifest::{self, ChannelOrder, ModelManifest, Normalization, Precision};
+use sparrow_engine_types::{Classification, ClassifyOpts, ClassifyResult, ImageInput, PixelFormat};
 
 /// Score-Δ goal for top-5 classification parity. The directive target.
 ///
@@ -60,7 +60,10 @@ use ort::value::TensorRef;
 const TOP5_SCORE_EPSILON_DOC: f32 = 0.005;
 
 fn gpu_tests_enabled() -> bool {
-    !matches!(std::env::var("SPARROW_ENGINE_GPU_TESTS").as_deref(), Ok("0"))
+    !matches!(
+        std::env::var("SPARROW_ENGINE_GPU_TESTS").as_deref(),
+        Ok("0")
+    )
 }
 
 struct EnvVarGuard {
@@ -242,6 +245,7 @@ impl CpuClassifier {
     fn load(manifest: &ModelManifest, manifest_dir: &Path) -> CpuClassifier {
         let onnx_path = match manifest.precision {
             Precision::Fp32 => manifest_dir.join(&manifest.model_file),
+            Precision::Int8 => manifest_dir.join(&manifest.model_file),
             Precision::Fp16 => manifest_dir.join(
                 manifest
                     .model_file_fp16
@@ -655,7 +659,8 @@ fn classifier_latency_bench_stages() {
         Ok(c) => c,
         Err(_) => return,
     };
-    let center_crop = sparrow_engine::kernels::center_crop::CenterCropKernel::new(&ctx).expect("kernel");
+    let center_crop =
+        sparrow_engine::kernels::center_crop::CenterCropKernel::new(&ctx).expect("kernel");
     let resize = ResizeKernel::new(&ctx).expect("resize kernel");
     let mut decoder = JpegDecoder::new(&ctx).expect("JpegDecoder");
     let model = ClassifierModel::load(&ctx, &manifest, &manifest_dir).expect("load");
@@ -1145,7 +1150,9 @@ fn amazon_classifier_parity_vs_cpu_baseline() {
 #[ignore]
 fn b1_force_cpu_decode_classifier_decode_to_gpu() {
     if !gpu_tests_enabled() {
-        eprintln!("SPARROW_ENGINE_GPU_TESTS=0 → skipping b1_force_cpu_decode_classifier_decode_to_gpu");
+        eprintln!(
+            "SPARROW_ENGINE_GPU_TESTS=0 → skipping b1_force_cpu_decode_classifier_decode_to_gpu"
+        );
         return;
     }
     let imgs = corpus_jpegs(1);

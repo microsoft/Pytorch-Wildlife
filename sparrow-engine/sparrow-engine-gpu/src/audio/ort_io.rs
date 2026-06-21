@@ -122,7 +122,7 @@ impl AudioOrtSession {
     /// detect). The stream pointer must outlive the session — the
     /// `Arc<CudaStream>` is held here as a field so dropping the session
     /// doesn't invalidate the pointer.
-    pub(crate) fn load(
+    pub fn load(
         ctx: &Arc<cudarc::driver::CudaContext>,
         stream: &Arc<CudaStream>,
         onnx_path: &Path,

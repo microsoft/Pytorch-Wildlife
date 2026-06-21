@@ -17,7 +17,7 @@
 //! `handle.engine_ref.upgrade()`. The kernel is engine-shared (one per
 //! process) so we do not pay re-compile cost per call.
 
-use sparrow_engine_types::error::{SparrowEngineError, Result};
+use sparrow_engine_types::error::{Result, SparrowEngineError};
 use sparrow_engine_types::manifest::{ModelManifest, PostprocessMethod, PreprocessMethod};
 use sparrow_engine_types::types::{DetectOpts, DetectResult, ImageInput};
 
@@ -70,7 +70,10 @@ pub fn detect(handle: &ModelHandle, image: &ImageInput, opts: &DetectOpts) -> Re
         inner.manifest.confidence_threshold.unwrap_or(0.0),
     )?;
 
-    let engine_inner = handle.engine_ref.upgrade().ok_or(SparrowEngineError::EngineFreed)?;
+    let engine_inner = handle
+        .engine_ref
+        .upgrade()
+        .ok_or(SparrowEngineError::EngineFreed)?;
 
     match &inner.inner {
         LoadedModelInner::Yolo(model) => {
@@ -81,10 +84,12 @@ pub fn detect(handle: &ModelHandle, image: &ImageInput, opts: &DetectOpts) -> Re
             id: inner.manifest.id.clone(),
             method: inner.manifest.postprocess_method.as_str().to_string(),
         }),
-        LoadedModelInner::Audio(_) | LoadedModelInner::AudioRaw(_) => Err(SparrowEngineError::IsAudioModel {
-            id: inner.manifest.id.clone(),
-            method: inner.manifest.preprocess_method.as_str().to_string(),
-        }),
+        LoadedModelInner::Audio(_) | LoadedModelInner::AudioRaw(_) => {
+            Err(SparrowEngineError::IsAudioModel {
+                id: inner.manifest.id.clone(),
+                method: inner.manifest.preprocess_method.as_str().to_string(),
+            })
+        }
     }
 }
 
@@ -181,6 +186,7 @@ mod tests {
                 segment_duration_s: 3.0,
                 segment_stride_s: 1.5,
             },
+            trt: None,
             postprocess_method: PostprocessMethod::Sigmoid {
                 confidence_threshold: 0.5,
             },
@@ -232,6 +238,7 @@ mod tests {
                 segment_duration_s: 3.0,
                 segment_stride_s: 1.5,
             },
+            trt: None,
             postprocess_method: PostprocessMethod::YoloE2e,
             confidence_threshold: Some(0.3),
             label_file: None,

@@ -468,9 +468,8 @@ impl YoloModel {
     /// - `OutputShapeMismatch` if the ONNX output shape isn't compatible
     ///   with `yolo_e2e` postprocess.
     /// - `Ort` on ORT session creation failures.
-    pub(crate) fn load(
+    pub fn load(
         ctx: &Arc<CudaContext>,
-        gpu: &GpuIdentity,
         manifest: &ModelManifest,
         manifest_dir: &Path,
     ) -> Result<Self> {
@@ -554,7 +553,8 @@ impl YoloModel {
         // Build ORT session: CUDA EP first, CPU fallback.
         // EXHAUSTIVE cuDNN algo selection is ORT's default for the CUDA
         // EP — matches sparrow-engine-cpu.
-        let session = build_session(ctx, gpu, manifest, &onnx_path, device_id)?;
+        let gpu = GpuIdentity::from_context(ctx)?;
+        let session = build_session(ctx, &gpu, manifest, &onnx_path, device_id)?;
         validate_output_shape(
             &session,
             &manifest.id,

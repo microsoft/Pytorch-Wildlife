@@ -466,9 +466,8 @@ impl ClassifierModel {
     ///   (the variant is reserved for ORT runtime errors).
     /// - `SparrowEngineError::ManifestNotFound` / `LabelFileNotFound` propagated
     ///   from `load_labels`.
-    pub(crate) fn load(
+    pub fn load(
         ctx: &Arc<CudaContext>,
-        gpu: &GpuIdentity,
         manifest: &ModelManifest,
         manifest_dir: &Path,
     ) -> Result<Self> {
@@ -583,11 +582,12 @@ impl ClassifierModel {
         // failures are silent by default — `error_on_failure()` opts into
         // hard failure for the CUDA EP. The CPU EP is not gated this way:
         // its job is per-op fallback, not full-engine fallback.
+        let gpu = GpuIdentity::from_context(ctx)?;
         let manifest_cache_material = manifest_cache_material(manifest);
         let providers = TrtEpBuilder::new(
             &manifest.id,
             manifest.trt.as_ref(),
-            gpu,
+            &gpu,
             CudaEpConfig::new(device_id),
             &onnx_path,
             &manifest_cache_material,
@@ -1067,6 +1067,7 @@ mod tests {
             precision: Precision::Fp32,
             model_file_fp16: None,
             inference_strategy: InferenceStrategy::Single,
+            trt: None,
             postprocess_method: method,
             confidence_threshold: None,
             label_file: Some("labels.txt".into()),
@@ -1136,8 +1137,7 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        let gpu = GpuIdentity::from_context(&ctx).unwrap();
-        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
+        match ClassifierModel::load(&ctx, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("audio model") => {}
             Err(other) => panic!("expected audio rejection, got Err({other:?})"),
             Ok(_) => panic!("expected audio rejection, got Ok(_)"),
@@ -1152,8 +1152,7 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        let gpu = GpuIdentity::from_context(&ctx).unwrap();
-        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
+        match ClassifierModel::load(&ctx, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("expected softmax") => {}
             Err(other) => panic!("expected non-softmax rejection, got Err({other:?})"),
             Ok(_) => panic!("expected non-softmax rejection, got Ok(_)"),
@@ -1177,8 +1176,7 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        let gpu = GpuIdentity::from_context(&ctx).unwrap();
-        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
+        match ClassifierModel::load(&ctx, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg))
                 if msg.contains("model_file_fp16") && msg.contains("fp16") => {}
             Err(other) => panic!(
@@ -1211,8 +1209,7 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        let gpu = GpuIdentity::from_context(&ctx).unwrap();
-        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
+        match ClassifierModel::load(&ctx, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("letterbox") => {}
             Err(other) => panic!("expected letterbox rejection, got Err({other:?})"),
             Ok(_) => panic!("expected letterbox rejection, got Ok(_)"),
@@ -1228,8 +1225,7 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        let gpu = GpuIdentity::from_context(&ctx).unwrap();
-        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
+        match ClassifierModel::load(&ctx, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("input_size") => {}
             Err(other) => panic!("expected missing-input_size rejection, got Err({other:?})"),
             Ok(_) => panic!("expected missing-input_size rejection, got Ok(_)"),
@@ -1245,8 +1241,7 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        let gpu = GpuIdentity::from_context(&ctx).unwrap();
-        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
+        match ClassifierModel::load(&ctx, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("normalization") => {}
             Err(other) => panic!("expected normalization-none rejection, got Err({other:?})"),
             Ok(_) => panic!("expected normalization-none rejection, got Ok(_)"),
@@ -1262,8 +1257,7 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        let gpu = GpuIdentity::from_context(&ctx).unwrap();
-        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
+        match ClassifierModel::load(&ctx, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("NHWC") => {}
             Err(other) => panic!("expected NHWC-layout rejection, got Err({other:?})"),
             Ok(_) => panic!("expected NHWC-layout rejection, got Ok(_)"),
