@@ -5,6 +5,7 @@
 //!
 //! All file paths in manifests are relative to the manifest directory.
 
+use std::collections::BTreeMap;
 use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
@@ -125,6 +126,23 @@ pub enum Precision {
     Int8,
 }
 
+/// TensorRT inference precision for the GPU flavor's per-model TRT opt-in.
+///
+/// This is independent from `[inference] precision`: the existing precision
+/// selects the model artifact (`file` vs `file_fp16`), while this value configures
+/// TensorRT engine building for manifests that opt into `[inference.trt]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TrtPrecision {
+    /// Build a 32-bit float TensorRT engine.
+    Fp32,
+    /// Build a 16-bit float TensorRT engine.
+    #[default]
+    Fp16,
+    /// Build an 8-bit integer TensorRT engine.
+    Int8,
+}
+
 /// Inference strategy: single-shot, tiled, or sliding window.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InferenceStrategy {
@@ -140,6 +158,32 @@ pub enum InferenceStrategy {
         segment_duration_s: f32,
         segment_stride_s: f32,
     },
+}
+
+/// Optional `[inference.trt]` TensorRT settings for the GPU flavor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrtConfig {
+    /// Opt into TensorRT for this model. Missing field defaults to false.
+    #[serde(default)]
+    pub enabled: bool,
+    /// TensorRT builder precision. Missing field defaults to FP16.
+    #[serde(default)]
+    pub precision: TrtPrecision,
+    /// TensorRT builder optimization level. Valid range is 1..=5.
+    #[serde(default = "default_trt_builder_optimization_level")]
+    pub builder_optimization_level: u8,
+    /// False = SM-specific engine; true = SM-portable hardware-compatible mode.
+    #[serde(default)]
+    pub engine_hw_compatible: bool,
+    /// Minimum dynamic-shape profile dimensions, keyed by ONNX input tensor name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_min: Option<BTreeMap<String, Vec<i64>>>,
+    /// Optimal dynamic-shape profile dimensions, keyed by ONNX input tensor name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_opt: Option<BTreeMap<String, Vec<i64>>>,
+    /// Maximum dynamic-shape profile dimensions, keyed by ONNX input tensor name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_max: Option<BTreeMap<String, Vec<i64>>>,
 }
 
 /// Postprocessing method: how raw model output becomes detections/classifications.
@@ -242,6 +286,9 @@ pub struct ModelManifest {
     pub model_file_fp16: Option<String>,
 
     pub inference_strategy: InferenceStrategy,
+    /// Optional per-model TensorRT settings from `[inference.trt]`.
+    /// `None` preserves backward compatibility for manifests without the section.
+    pub trt: Option<TrtConfig>,
 
     pub postprocess_method: PostprocessMethod,
     pub confidence_threshold: Option<f32>,
@@ -444,6 +491,9 @@ struct RawInference {
     // Sliding window fields.
     segment_duration_s: Option<f32>,
     segment_stride_s: Option<f32>,
+    /// Optional `[inference.trt]` nested table.
+    #[serde(default)]
+    trt: Option<TrtConfig>,
 }
 
 #[derive(Deserialize)]
@@ -559,10 +609,7 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
                     .preprocessing
                     .window_samples
                     .ok_or_else(|| raw_err("window_samples"))?,
-                pass_orig_sample_rate: raw
-                    .preprocessing
-                    .pass_orig_sample_rate
-                    .unwrap_or(false),
+                pass_orig_sample_rate: raw.preprocessing.pass_orig_sample_rate.unwrap_or(false),
             }
         }
         "mel_spectrogram" => {
@@ -894,10 +941,7 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
     // holding the fp32 original (Phase 3.8). TFLite artifacts bake precision into
     // the single `file` (there is no fp32/fp16 file pair), so the mobile LiteRT
     // flavor loads `file` directly and does not require `file_fp16`.
-    if raw.model.format == "onnx"
-        && precision == Precision::Fp16
-        && raw.model.file_fp16.is_none()
-    {
+    if raw.model.format == "onnx" && precision == Precision::Fp16 && raw.model.file_fp16.is_none() {
         return Err(SparrowEngineError::InvalidManifest(
             "precision = 'fp16' requires [model] file_fp16 to be set".to_string(),
         ));
@@ -905,6 +949,9 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
     if let Some(fp16_path) = &raw.model.file_fp16 {
         reject_unsafe_path(fp16_path, "fp16 model file")?;
     }
+
+    let trt = raw.inference.trt;
+    validate_trt_config(&trt)?;
 
     // -- Parse postprocessing method --
     let postprocess_method = match raw.postprocessing.method.as_str() {
@@ -1071,6 +1118,7 @@ pub fn load_manifest(path: &Path) -> Result<ModelManifest> {
         channel_order,
         precision,
         inference_strategy,
+        trt,
         postprocess_method,
         confidence_threshold: raw.postprocessing.confidence_threshold,
         label_file,
@@ -1185,6 +1233,56 @@ pub fn load_labels(path: &Path, format: &LabelFormat) -> Result<Vec<String>> {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+fn default_trt_builder_optimization_level() -> u8 {
+    3
+}
+
+fn validate_trt_config(trt: &Option<TrtConfig>) -> Result<()> {
+    let Some(trt) = trt else {
+        return Ok(());
+    };
+
+    if !(1..=5).contains(&trt.builder_optimization_level) {
+        return Err(SparrowEngineError::InvalidManifest(format!(
+            "inference.trt.builder_optimization_level must be in 1..=5, got {}",
+            trt.builder_optimization_level
+        )));
+    }
+
+    if trt.enabled
+        && (trt.profile_min.is_some() || trt.profile_opt.is_some() || trt.profile_max.is_some())
+    {
+        let Some(profile_min) = &trt.profile_min else {
+            return Err(SparrowEngineError::InvalidManifest(
+                "inference.trt profiles must set profile_min, profile_opt, and profile_max together"
+                    .to_string(),
+            ));
+        };
+        let Some(profile_opt) = &trt.profile_opt else {
+            return Err(SparrowEngineError::InvalidManifest(
+                "inference.trt profiles must set profile_min, profile_opt, and profile_max together"
+                    .to_string(),
+            ));
+        };
+        let Some(profile_max) = &trt.profile_max else {
+            return Err(SparrowEngineError::InvalidManifest(
+                "inference.trt profiles must set profile_min, profile_opt, and profile_max together"
+                    .to_string(),
+            ));
+        };
+
+        if !profile_min.keys().eq(profile_opt.keys()) || !profile_min.keys().eq(profile_max.keys())
+        {
+            return Err(SparrowEngineError::InvalidManifest(
+                "inference.trt profile_min/profile_opt/profile_max must have identical input keys"
+                    .to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
 
 /// Reject paths containing parent-directory components (`..`) or absolute prefixes.
 ///
@@ -1336,6 +1434,120 @@ format = "one_per_line"
         ));
         assert_eq!(manifest.confidence_threshold, Some(0.2));
         assert_eq!(manifest.label_format, Some(LabelFormat::OnePerLine));
+        assert_eq!(manifest.trt, None);
+    }
+
+    #[test]
+    fn trt_config_round_trips() {
+        let toml = r#"
+enabled = true
+precision = "fp16"
+builder_optimization_level = 3
+engine_hw_compatible = false
+
+[profile_min]
+audio = [1, 1, 224, 90]
+
+[profile_opt]
+audio = [1, 1, 224, 90]
+
+[profile_max]
+audio = [1, 1, 224, 90]
+"#;
+        let trt: TrtConfig = toml::from_str(toml).expect("valid TRT config should parse");
+        let serialized = toml::to_string(&trt).expect("TRT config should serialize");
+        let reparsed: TrtConfig =
+            toml::from_str(&serialized).expect("serialized TRT config should reparse");
+
+        assert_eq!(reparsed, trt);
+        assert!(trt.enabled);
+        assert_eq!(trt.precision, TrtPrecision::Fp16);
+        assert_eq!(trt.builder_optimization_level, 3);
+        assert_eq!(trt.engine_hw_compatible, false);
+        assert_eq!(
+            trt.profile_min
+                .as_ref()
+                .and_then(|profiles| profiles.get("audio")),
+            Some(&vec![1, 1, 224, 90])
+        );
+    }
+
+    #[test]
+    fn test_manifest_without_trt_section_keeps_trt_none() {
+        let toml = make_model_toml(&[]);
+        let dir = write_temp_file("manifest.toml", &toml);
+        let manifest = load_manifest(&dir.path().join("manifest.toml")).unwrap();
+
+        assert_eq!(manifest.trt, None);
+    }
+
+    #[test]
+    fn test_trt_precision_values_parse_and_invalid_errors() {
+        for (value, expected) in [
+            ("fp16", TrtPrecision::Fp16),
+            ("fp32", TrtPrecision::Fp32),
+            ("int8", TrtPrecision::Int8),
+        ] {
+            let toml = format!("enabled = true\nprecision = \"{value}\"\n");
+            let trt: TrtConfig = toml::from_str(&toml).unwrap();
+            assert_eq!(trt.precision, expected);
+        }
+
+        let err = toml::from_str::<TrtConfig>("enabled = true\nprecision = \"bf16\"\n")
+            .expect_err("invalid TRT precision should fail deserialization");
+        assert!(err.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn test_trt_profile_tables_must_be_all_or_none_when_enabled() {
+        let mut toml = make_model_toml(&[]);
+        toml.push_str(
+            r#"
+[inference.trt]
+enabled = true
+
+[inference.trt.profile_min]
+audio = [1, 1, 224, 90]
+"#,
+        );
+        let dir = write_temp_file("manifest.toml", &toml);
+        let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
+        assert!(matches!(err, SparrowEngineError::InvalidManifest(_)));
+        assert!(
+            err.to_string().contains("profile_min")
+                && err.to_string().contains("profile_opt")
+                && err.to_string().contains("profile_max"),
+            "error should name the required profile tables: {err}"
+        );
+    }
+
+    #[test]
+    fn test_trt_builder_optimization_level_must_be_one_through_five() {
+        let mut toml = make_model_toml(&[]);
+        toml.push_str(
+            r#"
+[inference.trt]
+enabled = true
+builder_optimization_level = 6
+"#,
+        );
+        let dir = write_temp_file("manifest.toml", &toml);
+        let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
+        assert!(matches!(err, SparrowEngineError::InvalidManifest(_)));
+        assert!(err.to_string().contains("builder_optimization_level"));
+    }
+
+    #[test]
+    fn test_real_shipped_manifest_still_parses_without_trt() {
+        let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("types crate should live under the workspace root")
+            .join("models/audiobirds.toml");
+        let manifest =
+            load_manifest(&manifest_path).expect("real audiobirds manifest should parse");
+
+        assert_eq!(manifest.id, "md-audiobirds-v1");
+        assert_eq!(manifest.trt, None);
     }
 
     #[test]
