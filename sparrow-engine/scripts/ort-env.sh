@@ -191,6 +191,105 @@ export ORT_PREFER_DYNAMIC_LINK=1
 # Exported so aliases like `sparrow-engine-gpu` can read $EXTRA_LIB_PATHS directly.
 export EXTRA_LIB_PATHS=""
 
+# RP-24 dev support: ORT's TensorRT EP dlopens TensorRT 10 runtime libraries
+# (libnvinfer, libnvinfer_plugin, libnvonnxparser). Production Docker images
+# install those libs via apt; local GPU tests usually get them from the
+# `tensorrt-cu12` pip package's sibling `tensorrt_libs` directory.
+find_tensorrt_libs_dir() {
+    if [[ -n "${TENSORRT_LIBS_DIR:-}" ]]; then
+        if [[ -f "$TENSORRT_LIBS_DIR/libnvinfer.so.10" ]]; then
+            echo "$TENSORRT_LIBS_DIR"
+            return 0
+        fi
+        echo >&2 "warn: TENSORRT_LIBS_DIR does not contain libnvinfer.so.10: $TENSORRT_LIBS_DIR"
+        return 1
+    fi
+
+    local candidate
+    candidate=$(
+        for search_root in \
+            "${VIRTUAL_ENV:-}" \
+            "$HOME/.local/lib" \
+            "$HOME/.venvs" \
+            "$HOME/.cache/uv"; do
+            [[ -z "$search_root" || ! -d "$search_root" ]] && continue
+            find "$search_root" -path '*/site-packages/tensorrt_libs/libnvinfer.so.10' -type f 2>/dev/null
+        done |
+            while IFS= read -r p; do
+                lib_dir=$(dirname "$p")
+                site_dir=$(dirname "$lib_dir")
+                dist_info=$(find "$site_dir" -maxdepth 1 -name 'tensorrt_cu12_libs-*.dist-info' -type d 2>/dev/null | sort -V | tail -1)
+                if [[ -n "$dist_info" ]]; then
+                    version=$(basename "$dist_info" | sed -E 's/^tensorrt_cu12_libs-([0-9][^/]+)\.dist-info$/\1/')
+                else
+                    version=0
+                fi
+                printf '%s %s\n' "$version" "$lib_dir"
+            done |
+            sort -V -r | head -1 | awk '{print $2}'
+    )
+    if [[ -n "$candidate" ]]; then
+        echo "$candidate"
+        return 0
+    fi
+
+    for search_root in \
+        "${VIRTUAL_ENV:-}" \
+        "$HOME/.local/lib" \
+        "$HOME/.venvs" \
+        "$HOME/.cache/uv"; do
+        [[ -z "$search_root" || ! -d "$search_root" ]] && continue
+        candidate=$(find "$search_root" -path '*/site-packages/tensorrt_libs/libnvinfer.so.10' -type f 2>/dev/null | sort -V | tail -1)
+        if [[ -n "$candidate" ]]; then
+            dirname "$candidate"
+            return 0
+        fi
+    done
+
+    candidate=$(python3 -c "
+import pathlib
+import site
+import sys
+
+roots = []
+for getter in (getattr(site, 'getusersitepackages', None),):
+    if getter is not None:
+        try:
+            roots.append(getter())
+        except Exception:
+            pass
+try:
+    roots.extend(site.getsitepackages())
+except Exception:
+    pass
+roots.extend(sys.path)
+
+seen = set()
+for root in roots:
+    if not root or root in seen:
+        continue
+    seen.add(root)
+    p = pathlib.Path(root) / 'tensorrt_libs' / 'libnvinfer.so.10'
+    if p.is_file():
+        print(p.parent)
+        raise SystemExit(0)
+" 2>/dev/null || true)
+    if [[ -n "$candidate" ]]; then
+        echo "$candidate"
+        return 0
+    fi
+
+    return 1
+}
+
+tensorrt_libs_dir=$(find_tensorrt_libs_dir || true)
+if [[ -n "$tensorrt_libs_dir" ]]; then
+    EXTRA_LIB_PATHS="${tensorrt_libs_dir}:${EXTRA_LIB_PATHS}"
+    echo "TensorRT: $tensorrt_libs_dir"
+else
+    echo >&2 "warn: TensorRT libs not found; install tensorrt-cu12 or set TENSORRT_LIBS_DIR for TRT EP dev tests"
+fi
+
 # cuDNN: we require 9.10+ for SpeciesNet on sm_89 (cuDNN 9.8 has a Conv engine
 # bug with asymmetric padding — "No valid engine configs for ConvFwd_").
 # PyTorch/TF bundle 9.8, so we prefer a standalone nvidia-cudnn-cu12>=9.10 if

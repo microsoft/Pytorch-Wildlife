@@ -55,14 +55,24 @@ RUN cargo build --release -p sparrow-engine-server --no-default-features --featu
 
 # Stage 2: Runtime with CUDA
 FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+# RP-24 §4 item 3: the CUDA runtime image's NVIDIA container license chain covers
+# the TensorRT runtime libraries shipped in this image layer. Runtime libs only:
+# ORT's TensorRT EP needs libnvinfer, libnvinfer_plugin, and libnvonnxparser.
+ARG TENSORRT_VERSION=10.7.0.23-1+cuda12.6
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    curl \
+    libnvinfer10=${TENSORRT_VERSION} \
+    libnvinfer-plugin10=${TENSORRT_VERSION} \
+    libnvonnxparsers10=${TENSORRT_VERSION} \
+    && rm -rf /var/lib/apt/lists/* \
+    && ldconfig
 
 COPY --from=builder /build/target/release/sparrow-engine-server /usr/local/bin/
 COPY --from=builder /build/ort-lib/lib/libonnxruntime.so* /usr/local/lib/
 # Copy CUDA execution provider if present in the ORT release
 COPY --from=builder /build/ort-lib/lib/libonnxruntime_providers_cuda.so* /usr/local/lib/
+COPY --from=builder /build/ort-lib/lib/libonnxruntime_providers_tensorrt.so* /usr/local/lib/
 COPY --from=builder /build/ort-lib/lib/libonnxruntime_providers_shared.so* /usr/local/lib/
 RUN ldconfig
 # Phase F audit-fix round 1 (2026-05-28, B-07 defensive symlink): mirror Dockerfile.cpu's B-06 fix.
