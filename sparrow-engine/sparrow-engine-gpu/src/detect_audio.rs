@@ -21,11 +21,9 @@
 //! `sparrow_engine_gpu::detect_audio::AudioRange` symmetric to
 //! `engine_dispatch::detect_audio::AudioRange`.
 
-use sparrow_engine_types::error::{SparrowEngineError, Result};
+use sparrow_engine_types::error::{Result, SparrowEngineError};
 use sparrow_engine_types::manifest::{ModelManifest, PostprocessMethod, PreprocessMethod};
-use sparrow_engine_types::types::{
-    AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment,
-};
+use sparrow_engine_types::types::{AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment};
 
 use crate::engine::{LoadedModelInner, ModelHandle};
 use crate::models::audio::GpuAudioDetectOpts;
@@ -209,6 +207,7 @@ mod tests {
             channel_order: None,
             precision: Precision::Fp32,
             inference_strategy: InferenceStrategy::Single,
+            trt: None,
             postprocess_method: PostprocessMethod::YoloE2e,
             confidence_threshold: None,
             label_file: None,

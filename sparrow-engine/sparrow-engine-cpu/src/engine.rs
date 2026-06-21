@@ -1534,6 +1534,7 @@ mod tests {
             channel_order: Some(manifest::ChannelOrder::Rgb),
             precision: manifest::Precision::Fp32,
             inference_strategy: manifest::InferenceStrategy::Single,
+            trt: None,
             postprocess_method: PostprocessMethod::Softmax,
             confidence_threshold: None,
             label_file: Some("labels.txt".to_string()),
@@ -1806,7 +1807,9 @@ mod tests {
         let err = engine
             .get_or_load_model("foo")
             .expect_err("poisoned loading lock must return an error");
-        assert!(matches!(err, SparrowEngineError::Ort(msg) if msg.contains("loading_lock poisoned")));
+        assert!(
+            matches!(err, SparrowEngineError::Ort(msg) if msg.contains("loading_lock poisoned"))
+        );
 
         drop(engine);
     }
@@ -2075,33 +2078,53 @@ mod tests {
 
     #[test]
     fn validate_output_dims_rejects_rank_two_yolo_e2e_wrong_last() {
-        let err = validate_output_dims(&[8400, 5], "bad-yolo-rank-two-last", &PostprocessMethod::YoloE2e)
-            .expect_err("rank-2 yolo_e2e [N, 5] must be rejected");
-        assert!(matches!(err, SparrowEngineError::OutputShapeMismatch { .. }));
+        let err = validate_output_dims(
+            &[8400, 5],
+            "bad-yolo-rank-two-last",
+            &PostprocessMethod::YoloE2e,
+        )
+        .expect_err("rank-2 yolo_e2e [N, 5] must be rejected");
+        assert!(matches!(
+            err,
+            SparrowEngineError::OutputShapeMismatch { .. }
+        ));
     }
 
     #[test]
     fn validate_output_dims_accepts_rank_three_yolo_e2e() {
-        validate_output_dims(&[1, 8400, 6], "yolo-rank-three", &PostprocessMethod::YoloE2e)
-            .expect("rank-3 yolo_e2e [1, N, 6] should be accepted");
+        validate_output_dims(
+            &[1, 8400, 6],
+            "yolo-rank-three",
+            &PostprocessMethod::YoloE2e,
+        )
+        .expect("rank-3 yolo_e2e [1, N, 6] should be accepted");
     }
 
     #[test]
     fn validate_output_dims_keeps_yolo_strict_at_six() {
         let err = validate_output_dims(&[1, 8400, 8], "bad-yolo-last", &PostprocessMethod::YoloE2e)
             .expect_err("yolo_e2e static last_dim > 6 must still be rejected");
-        assert!(matches!(err, SparrowEngineError::OutputShapeMismatch { .. }));
+        assert!(matches!(
+            err,
+            SparrowEngineError::OutputShapeMismatch { .. }
+        ));
     }
 
     #[test]
     fn validate_output_dims_rejects_megadet_static_last_dim_at_or_below_five() {
         let err = validate_output_dims(&[1, 8400, 5], "bad-last-5", &megadet_v5a_method())
             .expect_err("megadet static last_dim == 5 must be rejected");
-        assert!(matches!(err, SparrowEngineError::OutputShapeMismatch { .. }));
+        assert!(matches!(
+            err,
+            SparrowEngineError::OutputShapeMismatch { .. }
+        ));
 
         let err = validate_output_dims(&[1, 8400, 4], "bad-last-4", &megadet_v5a_method())
             .expect_err("megadet static last_dim < 5 must be rejected");
-        assert!(matches!(err, SparrowEngineError::OutputShapeMismatch { .. }));
+        assert!(matches!(
+            err,
+            SparrowEngineError::OutputShapeMismatch { .. }
+        ));
     }
 
     #[test]
@@ -2216,8 +2239,10 @@ format = "name_index_csv"
         // Sanity: scan picks up both, with the expected model_types.
         let available = engine.list_available_models();
         assert_eq!(available.len(), 2, "scan must find both manifests");
-        let by_id: std::collections::HashMap<_, _> =
-            available.iter().map(|m| (m.id.as_str(), m.model_type)).collect();
+        let by_id: std::collections::HashMap<_, _> = available
+            .iter()
+            .map(|m| (m.id.as_str(), m.model_type))
+            .collect();
         assert_eq!(by_id["std-det"], ModelType::Detector);
         assert_eq!(by_id["ovh-det"], ModelType::OverheadDetector);
 

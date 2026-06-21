@@ -101,9 +101,8 @@ impl RawAudioModel {
     /// Build a `RawAudioModel` from a parsed manifest. Called by
     /// `engine::Engine::load_from_manifest` when
     /// `manifest.preprocess_method == PreprocessMethod::RawAudio`.
-    pub(crate) fn load_from_manifest(
+    pub fn load_from_manifest(
         ctx: &Arc<CudaContext>,
-        gpu: &GpuIdentity,
         manifest: &ModelManifest,
         manifest_dir: &Path,
     ) -> Result<Self> {
@@ -188,11 +187,12 @@ impl RawAudioModel {
             .try_into()
             .map_err(|e| SparrowEngineError::Ort(format!("ctx.ordinal as i32: {e}")))?;
 
+        let gpu = GpuIdentity::from_context(ctx)?;
         let manifest_cache_material = manifest_cache_material(manifest);
         let providers = TrtEpBuilder::new(
             &manifest.id,
             manifest.trt.as_ref(),
-            gpu,
+            &gpu,
             CudaEpConfig::new(device_id),
             &onnx_path,
             &manifest_cache_material,
@@ -288,7 +288,7 @@ impl RawAudioModel {
         let providers = TrtEpBuilder::new(
             &manifest.id,
             manifest.trt.as_ref(),
-            gpu,
+            &gpu,
             CudaEpConfig::new(device_id),
             &onnx_path,
             &manifest_cache_material,

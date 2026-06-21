@@ -489,9 +489,8 @@ impl TiledModel {
     ///
     /// Returns `SparrowEngineError::InvalidManifest` if the manifest does not match
     /// the expected tiled-heatmap shape.
-    pub(crate) fn load(
+    pub fn load(
         ctx: &Arc<CudaContext>,
-        gpu: &GpuIdentity,
         manifest: &ModelManifest,
         manifest_dir: &Path,
     ) -> Result<Self> {
@@ -611,11 +610,12 @@ impl TiledModel {
         let builder = builder
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| SparrowEngineError::Ort(format!("ort with_optimization_level: {e}")))?;
+        let gpu = GpuIdentity::from_context(ctx)?;
         let manifest_cache_material = manifest_cache_material(manifest);
         let providers = TrtEpBuilder::new(
             &manifest.id,
             manifest.trt.as_ref(),
-            gpu,
+            &gpu,
             CudaEpConfig::new(device_id),
             &onnx_path,
             &manifest_cache_material,
@@ -708,8 +708,7 @@ impl TiledModel {
             });
         }
         let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-        let gpu = GpuIdentity::from_context(ctx)?;
-        Self::load(ctx, &gpu, &manifest, manifest_dir)
+        Self::load(ctx, &manifest, manifest_dir)
     }
 
     /// Run tiled detection on a single image.
@@ -1228,6 +1227,7 @@ mod tests {
                 tile_size,
                 tile_overlap,
             },
+            trt: None,
             postprocess_method: PostprocessMethod::HeatmapPeaks {
                 peak_threshold: 0.2,
                 adaptive: false,
@@ -1276,8 +1276,7 @@ mod tests {
         };
         let manifest_dir = Path::new("/tmp");
         let m = dummy_tiled_manifest([512, 512], 512);
-        let gpu = GpuIdentity::from_context(&ctx).unwrap();
-        match TiledModel::load(&ctx, &gpu, &m, manifest_dir) {
+        match TiledModel::load(&ctx, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg))
                 if msg.contains("tile_overlap") && msg.contains("must be strictly less than") =>
             {
@@ -1302,8 +1301,7 @@ mod tests {
         };
         let manifest_dir = Path::new("/tmp");
         let m = dummy_tiled_manifest([512, 512], 768);
-        let gpu = GpuIdentity::from_context(&ctx).unwrap();
-        match TiledModel::load(&ctx, &gpu, &m, manifest_dir) {
+        match TiledModel::load(&ctx, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("tile_overlap") => {
                 // expected
             }
