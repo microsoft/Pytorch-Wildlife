@@ -821,16 +821,27 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         // Mirrors `sparrow_engine_cpu::Engine::drop` (MT-17 mitigation): mark
-        // every loaded model inactive before clearing the map so stale
-        // handles see `ModelUnloaded` rather than reach into a freed
-        // session. Then leak the EngineInner Arc to avoid running
-        // `Drop` on cudarc/ORT primitives during glibc `_dl_fini` (the
-        // pykeio/ort #564 class of teardown bug).
+        // every loaded model inactive so stale handles see `ModelUnloaded`
+        // rather than reach into a freed session. Then LEAK the loaded
+        // sessions (and the EngineInner Arc below) to avoid running `Drop` on
+        // cudarc/ORT primitives during glibc `_dl_fini` (the pykeio/ort #564
+        // class of teardown bug).
+        //
+        // RP-24 manual test (2026-06-20): the ORT TensorRT EP's session
+        // teardown is far more fragile than the CUDA EP's — dropping a
+        // TRT-backed session during `_dl_fini` SIGABRTs ~50% of the time with
+        // "corrupted double-linked list", AFTER a fully correct inference.
+        // `take` + `forget` leaks the session map so the TRT engines are never
+        // torn down at process exit. Benign: the process is exiting (CLI) or
+        // the `Engine` is a process-lifetime singleton (server) — the OS
+        // reclaims at exit. Per-model runtime `unload_model` still drops
+        // sessions normally (outside `_dl_fini`), so live eviction is
+        // unaffected; only the final teardown leaks.
         if let Ok(mut models) = self.models.write() {
             for model in models.values() {
                 model.active.store(false, Ordering::Release);
             }
-            models.clear();
+            std::mem::forget(std::mem::take(&mut *models));
         }
         if let Ok(mut pipelines) = self.pipelines.lock() {
             pipelines.clear();
