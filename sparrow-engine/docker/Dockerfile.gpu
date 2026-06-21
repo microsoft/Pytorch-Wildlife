@@ -85,11 +85,16 @@ RUN ldconfig
 RUN ln -sf libonnxruntime.so.1 /usr/local/lib/libonnxruntime.so && ldconfig
 
 RUN groupadd -g 1000 sparrow-engine 2>/dev/null || true && useradd -u 1000 -g 1000 -s /sbin/nologin sparrow-engine 2>/dev/null || true
+# RP-24 §2: Sparrow Web TRT engine-cache. Pre-create + chown so the non-root
+# runtime user can write compiled TensorRT engines. Operators may volume-mount
+# this path (e.g. a named volume in compose) to persist the cache across restarts.
+RUN mkdir -p /var/cache/sparrow-engine/trt && chown -R 1000:1000 /var/cache/sparrow-engine
 USER 1000:1000
 
 ENV SPARROW_ENGINE_MODEL_DIR=/models \
     SPARROW_ENGINE_BIND_ADDR=0.0.0.0:8080 \
     SPARROW_ENGINE_LOG_FORMAT=json \
+    SPARROW_ENGINE_TRT_CACHE_DIR=/var/cache/sparrow-engine/trt \
     SPARROW_ENGINE_DEVICE=cuda:0
 EXPOSE 8080
 
