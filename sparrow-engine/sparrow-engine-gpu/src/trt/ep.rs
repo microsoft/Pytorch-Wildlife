@@ -136,6 +136,7 @@ impl<'a> TrtEpBuilder<'a> {
             &self.gpu.name,
         )?;
 
+        let mut trt_cache_dir = None;
         match plan.decision {
             TrtPolicyDecision::EnvDisabled => {
                 tracing::info!("TRT disabled via SPARROW_ENGINE_TRT_DISABLE");
@@ -153,16 +154,17 @@ impl<'a> TrtEpBuilder<'a> {
             }
             TrtPolicyDecision::TensorRtEnabled => {
                 let config = self.trt.expect("TensorRT plan requires config");
-                let cache = self.cache_dir(config, libs_probe.version.as_deref())?;
+                let cache_dir = self.cache_dir(config, libs_probe.version.as_deref())?;
                 tracing::info!(
                     model_id = self.model_id,
                     precision = ?config.precision,
                     builder_optimization_level = config.builder_optimization_level,
                     engine_hw_compatible = config.engine_hw_compatible,
-                    cache_dir = %cache.display(),
+                    cache_dir = %cache_dir.display(),
                     fallback = "CUDA→CPU",
                     "TRT EP registered"
                 );
+                trt_cache_dir = Some(cache_dir);
             }
         }
 
@@ -171,9 +173,11 @@ impl<'a> TrtEpBuilder<'a> {
             match provider {
                 TrtProviderKind::TensorRt => {
                     let config = self.trt.expect("TensorRT provider requires config");
-                    let cache_dir = self.cache_dir(config, libs_probe.version.as_deref())?;
+                    let cache_dir = trt_cache_dir
+                        .as_ref()
+                        .expect("TensorRT cache dir computed for TensorRT provider");
                     providers.push(
-                        self.build_trt_provider(config, &cache_dir)
+                        self.build_trt_provider(config, cache_dir)
                             .error_on_failure(),
                     );
                 }
