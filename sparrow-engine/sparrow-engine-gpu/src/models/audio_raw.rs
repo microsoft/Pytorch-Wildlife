@@ -38,9 +38,6 @@ use ndarray::ArrayViewD;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
-
-use crate::trt::ep::{manifest_cache_material, CudaEpConfig, GpuIdentity, TrtEpBuilder};
-
 use sparrow_engine_core::preprocess_audio;
 use sparrow_engine_types::error::{Result, SparrowEngineError};
 use sparrow_engine_types::manifest::{
@@ -49,6 +46,8 @@ use sparrow_engine_types::manifest::{
 use sparrow_engine_types::types::{
     AudioClass, AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment,
 };
+
+use crate::trt::ep::{manifest_cache_material, CudaEpConfig, GpuIdentity, TrtEpBuilder};
 
 /// Default top-K when caller doesn't override. Mirrors
 /// `sparrow_engine_cpu::detect_audio::DEFAULT_AUDIO_CLASSIFIER_TOP_K`.
