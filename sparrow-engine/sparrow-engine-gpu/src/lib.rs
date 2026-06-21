@@ -32,6 +32,7 @@ pub mod kernels;
 pub mod models;
 pub mod pipeline;
 pub mod profile;
+pub(crate) mod trt;
 
 // Phase 3.8 Phase C Wave 4b: C FFI surface mirrors sparrow-engine-cpu's
 // `pub mod ffi;` declaration. Gated on `--features ffi` so default

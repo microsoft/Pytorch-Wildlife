@@ -51,27 +51,28 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use sparrow_engine_core::postprocess::{
-    apply_max_detections, is_local_maximum, label_for_id, owl_adaptive_threshold,
-    resolve_confidence_threshold, validate_heatmap_maps,
-};
-use sparrow_engine_core::preprocess::checked_tensor_len_3hw;
-use sparrow_engine_types::error::{SparrowEngineError, Result};
-use sparrow_engine_types::manifest::{
-    self, ChannelOrder, InferenceStrategy, Layout, ModelManifest, Normalization, PostprocessMethod,
-    Precision, PreprocessMethod,
-};
-use sparrow_engine_types::{BBox, DetectOpts, DetectResult, Detection, ImageInput};
 use cudarc::driver::{CudaContext, CudaStream};
 use ndarray::ArrayViewD;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
+use sparrow_engine_core::postprocess::{
+    apply_max_detections, is_local_maximum, label_for_id, owl_adaptive_threshold,
+    resolve_confidence_threshold, validate_heatmap_maps,
+};
+use sparrow_engine_core::preprocess::checked_tensor_len_3hw;
+use sparrow_engine_types::error::{Result, SparrowEngineError};
+use sparrow_engine_types::manifest::{
+    self, ChannelOrder, InferenceStrategy, Layout, ModelManifest, Normalization, PostprocessMethod,
+    Precision, PreprocessMethod,
+};
+use sparrow_engine_types::{BBox, DetectOpts, DetectResult, Detection, ImageInput};
 
 use crate::decode::GpuImage;
 use crate::kernels::tiled_preprocess::{
     tiled_preprocess_gpu, NormalizeStats, TiledPreprocessKernel,
 };
+use crate::trt::ep::{manifest_cache_material, CudaEpConfig, GpuIdentity, TrtEpBuilder};
 
 // ---------------------------------------------------------------------------
 // Cached tile-loop parameters (locked at load time, validated against manifest)
@@ -488,8 +489,9 @@ impl TiledModel {
     ///
     /// Returns `SparrowEngineError::InvalidManifest` if the manifest does not match
     /// the expected tiled-heatmap shape.
-    pub fn load(
+    pub(crate) fn load(
         ctx: &Arc<CudaContext>,
+        gpu: &GpuIdentity,
         manifest: &ModelManifest,
         manifest_dir: &Path,
     ) -> Result<Self> {
@@ -604,23 +606,27 @@ impl TiledModel {
             .ordinal()
             .try_into()
             .map_err(|e| SparrowEngineError::Ort(format!("ctx.ordinal as i32: {e}")))?;
-        let builder =
-            Session::builder().map_err(|e| SparrowEngineError::Ort(format!("ort SessionBuilder: {e}")))?;
+        let builder = Session::builder()
+            .map_err(|e| SparrowEngineError::Ort(format!("ort SessionBuilder: {e}")))?;
         let builder = builder
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| SparrowEngineError::Ort(format!("ort with_optimization_level: {e}")))?;
+        let manifest_cache_material = manifest_cache_material(manifest);
+        let providers = TrtEpBuilder::new(
+            &manifest.id,
+            manifest.trt.as_ref(),
+            gpu,
+            CudaEpConfig::new(device_id),
+            &onnx_path,
+            &manifest_cache_material,
+        )
+        .execution_providers()?;
         let mut builder = builder
-            .with_execution_providers([
-                ort::ep::CUDA::default()
-                    .with_device_id(device_id)
-                    .build()
-                    .error_on_failure(),
-                ort::ep::CPU::default().build(),
-            ])
+            .with_execution_providers(providers)
             .map_err(|e| SparrowEngineError::Ort(format!("ort with_execution_providers: {e}")))?;
-        let session = builder
-            .commit_from_file(&onnx_path)
-            .map_err(|e| SparrowEngineError::Ort(format!("ort commit_from_file({onnx_path:?}): {e}")))?;
+        let session = builder.commit_from_file(&onnx_path).map_err(|e| {
+            SparrowEngineError::Ort(format!("ort commit_from_file({onnx_path:?}): {e}"))
+        })?;
 
         // Phase 3.8 Step 1 audit-fix R2 B10 (M-NEW-5): the FP32 binding code
         // assumes Float32 I/O. Reject FP16 ONNX converted without
@@ -702,7 +708,8 @@ impl TiledModel {
             });
         }
         let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-        Self::load(ctx, &manifest, manifest_dir)
+        let gpu = GpuIdentity::from_context(ctx)?;
+        Self::load(ctx, &gpu, &manifest, manifest_dir)
     }
 
     /// Run tiled detection on a single image.
@@ -807,7 +814,9 @@ impl TiledModel {
                 //     the host buffer is populated before ORT reads it.
                 stream
                     .memcpy_dtoh(&dst_gpu, host_buf.as_mut_slice())
-                    .map_err(|e| SparrowEngineError::Ort(format!("cudarc memcpy_dtoh (tile): {e}")))?;
+                    .map_err(|e| {
+                        SparrowEngineError::Ort(format!("cudarc memcpy_dtoh (tile): {e}"))
+                    })?;
                 stream.synchronize().map_err(|e| {
                     SparrowEngineError::Ort(format!("cudarc synchronize (after dtoh): {e}"))
                 })?;
@@ -823,10 +832,9 @@ impl TiledModel {
                 .map_err(|e| SparrowEngineError::Ort(format!("tile tensor reshape: {e}")))?;
                 let input_value = TensorRef::from_array_view(arr)
                     .map_err(|e| SparrowEngineError::Ort(format!("ort TensorRef: {e}")))?;
-                let mut guard = self
-                    .session
-                    .lock()
-                    .map_err(|_| SparrowEngineError::Ort("TiledModel session lock poisoned".into()))?;
+                let mut guard = self.session.lock().map_err(|_| {
+                    SparrowEngineError::Ort("TiledModel session lock poisoned".into())
+                })?;
                 let outputs = guard
                     .run(ort::inputs![input_value])
                     .map_err(|e| SparrowEngineError::Ort(format!("ort session.run: {e}")))?;
@@ -1268,7 +1276,8 @@ mod tests {
         };
         let manifest_dir = Path::new("/tmp");
         let m = dummy_tiled_manifest([512, 512], 512);
-        match TiledModel::load(&ctx, &m, manifest_dir) {
+        let gpu = GpuIdentity::from_context(&ctx).unwrap();
+        match TiledModel::load(&ctx, &gpu, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg))
                 if msg.contains("tile_overlap") && msg.contains("must be strictly less than") =>
             {
@@ -1293,7 +1302,8 @@ mod tests {
         };
         let manifest_dir = Path::new("/tmp");
         let m = dummy_tiled_manifest([512, 512], 768);
-        match TiledModel::load(&ctx, &m, manifest_dir) {
+        let gpu = GpuIdentity::from_context(&ctx).unwrap();
+        match TiledModel::load(&ctx, &gpu, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("tile_overlap") => {
                 // expected
             }

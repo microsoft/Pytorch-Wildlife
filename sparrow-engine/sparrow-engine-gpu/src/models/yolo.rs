@@ -61,20 +61,21 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use sparrow_engine_types::error::{SparrowEngineError, Result};
-use sparrow_engine_types::manifest::{
-    self, ChannelOrder, Layout, ModelManifest, Normalization, PostprocessMethod, Precision,
-    PreprocessMethod,
-};
-use sparrow_engine_types::{DetectOpts, DetectResult, Detection, ImageInput, PreprocessMeta};
 use cudarc::driver::{CudaContext, CudaSlice, CudaStream, DevicePtr, DevicePtrMut};
 use ndarray::{Array2, ArrayView2};
 use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
 use ort::session::Session;
 use ort::value::{Shape, TensorRef, TensorRefMut};
+use sparrow_engine_types::error::{Result, SparrowEngineError};
+use sparrow_engine_types::manifest::{
+    self, ChannelOrder, Layout, ModelManifest, Normalization, PostprocessMethod, Precision,
+    PreprocessMethod,
+};
+use sparrow_engine_types::{DetectOpts, DetectResult, Detection, ImageInput, PreprocessMeta};
 
 use crate::decode::GpuImage;
 use crate::kernels::letterbox::{letterbox_gpu, LetterboxKernel, LetterboxMeta};
+use crate::trt::ep::{manifest_cache_material, CudaEpConfig, GpuIdentity, TrtEpBuilder};
 
 // ===========================================================================
 // JpegDecoder — stateful nvjpeg wrapper.
@@ -467,8 +468,9 @@ impl YoloModel {
     /// - `OutputShapeMismatch` if the ONNX output shape isn't compatible
     ///   with `yolo_e2e` postprocess.
     /// - `Ort` on ORT session creation failures.
-    pub fn load(
+    pub(crate) fn load(
         ctx: &Arc<CudaContext>,
+        gpu: &GpuIdentity,
         manifest: &ModelManifest,
         manifest_dir: &Path,
     ) -> Result<Self> {
@@ -552,7 +554,7 @@ impl YoloModel {
         // Build ORT session: CUDA EP first, CPU fallback.
         // EXHAUSTIVE cuDNN algo selection is ORT's default for the CUDA
         // EP — matches sparrow-engine-cpu.
-        let session = build_session(ctx, &onnx_path, device_id)?;
+        let session = build_session(ctx, gpu, manifest, &onnx_path, device_id)?;
         validate_output_shape(
             &session,
             &manifest.id,
@@ -679,10 +681,9 @@ impl YoloModel {
             ImageInput::Encoded(_) | ImageInput::FilePath(_) => {
                 let bytes = image_input_to_bytes(image)?;
                 let t = start.elapsed();
-                let mut dec = self
-                    .decoder
-                    .lock()
-                    .map_err(|_| SparrowEngineError::Ort("YoloModel decoder lock poisoned".into()))?;
+                let mut dec = self.decoder.lock().map_err(|_| {
+                    SparrowEngineError::Ort("YoloModel decoder lock poisoned".into())
+                })?;
                 let img = dec.decode_to_gpu(&stream, &bytes)?;
                 (img, t)
             }
@@ -856,10 +857,9 @@ impl YoloModel {
         // immediately and the GPU work runs concurrent with ORT below.
         if let Some(next) = next_bytes {
             let next_decoded = {
-                let mut dec = self
-                    .decoder
-                    .lock()
-                    .map_err(|_| SparrowEngineError::Ort("YoloModel decoder lock poisoned".into()))?;
+                let mut dec = self.decoder.lock().map_err(|_| {
+                    SparrowEngineError::Ort("YoloModel decoder lock poisoned".into())
+                })?;
                 dec.decode_to_gpu(&decode_stream, next)?
             };
             let next_w = next_decoded.width;
@@ -1154,10 +1154,9 @@ impl YoloModel {
             .map_err(|e| SparrowEngineError::Ort(format!("ort Session::run: {e}")))?;
         let t3 = std::time::Instant::now();
 
-        let output = outputs
-            .values()
-            .next()
-            .ok_or_else(|| SparrowEngineError::Ort("yolo_e2e session returned no outputs".to_string()))?;
+        let output = outputs.values().next().ok_or_else(|| {
+            SparrowEngineError::Ort("yolo_e2e session returned no outputs".to_string())
+        })?;
         let view = output
             .try_extract_array::<f32>()
             .map_err(|e| SparrowEngineError::Ort(format!("ort try_extract_array: {e}")))?;
@@ -1201,9 +1200,9 @@ impl YoloModel {
         let host_in = stream
             .clone_dtoh(&input_gpu)
             .map_err(|e| SparrowEngineError::Ort(format!("cudarc memcpy_dtov (input): {e}")))?;
-        stream
-            .synchronize()
-            .map_err(|e| SparrowEngineError::Ort(format!("cudarc stream.synchronize (input): {e}")))?;
+        stream.synchronize().map_err(|e| {
+            SparrowEngineError::Ort(format!("cudarc stream.synchronize (input): {e}"))
+        })?;
         let t1 = std::time::Instant::now();
 
         let arr = ndarray::Array4::<f32>::from_shape_vec(
@@ -1211,17 +1210,17 @@ impl YoloModel {
             host_in,
         )
         .map_err(|e| SparrowEngineError::Ort(format!("input tensor reshape: {e}")))?;
-        let input_value = TensorRef::from_array_view(&arr)
-            .map_err(|e| SparrowEngineError::Ort(format!("ort::TensorRef::from_array_view: {e}")))?;
+        let input_value = TensorRef::from_array_view(&arr).map_err(|e| {
+            SparrowEngineError::Ort(format!("ort::TensorRef::from_array_view: {e}"))
+        })?;
         let outputs = session
             .run(ort::inputs![input_value])
             .map_err(|e| SparrowEngineError::Ort(format!("ort Session::run: {e}")))?;
         let t3 = std::time::Instant::now();
 
-        let output = outputs
-            .values()
-            .next()
-            .ok_or_else(|| SparrowEngineError::Ort("yolo_e2e session returned no outputs".to_string()))?;
+        let output = outputs.values().next().ok_or_else(|| {
+            SparrowEngineError::Ort("yolo_e2e session returned no outputs".to_string())
+        })?;
         let view = output
             .try_extract_array::<f32>()
             .map_err(|e| SparrowEngineError::Ort(format!("ort try_extract_array: {e}")))?;
@@ -1262,7 +1261,13 @@ impl YoloModel {
 /// resolved to device 0 in ORT's EP factory regardless of the caller's
 /// actual context — the per-call ordinal guard at the top of `detect()`
 /// would catch a later mismatch, but the session itself was mis-pinned.
-fn build_session(_ctx: &Arc<CudaContext>, onnx_path: &Path, device_id: i32) -> Result<Session> {
+fn build_session(
+    _ctx: &Arc<CudaContext>,
+    gpu: &GpuIdentity,
+    manifest: &ModelManifest,
+    onnx_path: &Path,
+    device_id: i32,
+) -> Result<Session> {
     use ort::ep::cuda::ConvAlgorithmSearch;
     use ort::session::builder::GraphOptimizationLevel;
 
@@ -1305,15 +1310,19 @@ fn build_session(_ctx: &Arc<CudaContext>, onnx_path: &Path, device_id: i32) -> R
         Some("default") => ConvAlgorithmSearch::Default,
         _ => ConvAlgorithmSearch::Heuristic,
     };
+    let cuda = CudaEpConfig::new(device_id).with_conv_algorithm_search(conv_search);
+    let manifest_cache_material = manifest_cache_material(manifest);
+    let providers = TrtEpBuilder::new(
+        &manifest.id,
+        manifest.trt.as_ref(),
+        gpu,
+        cuda,
+        onnx_path,
+        &manifest_cache_material,
+    )
+    .execution_providers()?;
     let mut builder = builder
-        .with_execution_providers([
-            ort::ep::CUDA::default()
-                .with_device_id(device_id)
-                .with_conv_algorithm_search(conv_search)
-                .build()
-                .error_on_failure(),
-            ort::ep::CPU::default().build(),
-        ])
+        .with_execution_providers(providers)
         .map_err(|e| SparrowEngineError::Ort(e.to_string()))?;
     builder
         .commit_from_file(onnx_path)
@@ -1538,8 +1547,13 @@ mod tests {
             .expect("rank-2 yolo output should be accepted");
         validate_output_dims(&[8400, 8], "mdv5a-unlabeled", &megadet_v5a_method(), 0)
             .expect("megadet output should accept unlabeled manifests");
-        validate_output_dims(&[1, 8400, 8], "mdv5a-short-labels", &megadet_v5a_method(), 2)
-            .expect("megadet output should accept short label lists");
+        validate_output_dims(
+            &[1, 8400, 8],
+            "mdv5a-short-labels",
+            &megadet_v5a_method(),
+            2,
+        )
+        .expect("megadet output should accept short label lists");
         validate_output_dims(&[1, 8400, 8], "mdv5a", &megadet_v5a_method(), 3)
             .expect("batch-1 megadet output should still be accepted");
         validate_output_dims(&[-1, -1, -1], "dynamic", &megadet_v5a_method(), 3)
@@ -1550,24 +1564,36 @@ mod tests {
     fn validate_output_dims_rejects_unsupported_batch_axis() {
         let err = validate_output_dims(&[2, 8400, 6], "bad-batch", &PostprocessMethod::YoloE2e, 0)
             .expect_err("batch>1 must be rejected at load time");
-        assert!(matches!(err, SparrowEngineError::OutputShapeMismatch { .. }));
+        assert!(matches!(
+            err,
+            SparrowEngineError::OutputShapeMismatch { .. }
+        ));
     }
 
     #[test]
     fn validate_output_dims_rejects_nonpositive_candidate_count() {
         let err = validate_output_dims(&[0, 6], "bad-count", &PostprocessMethod::YoloE2e, 0)
             .expect_err("N=0 must be rejected at load time");
-        assert!(matches!(err, SparrowEngineError::OutputShapeMismatch { .. }));
+        assert!(matches!(
+            err,
+            SparrowEngineError::OutputShapeMismatch { .. }
+        ));
     }
 
     #[test]
     fn validate_output_dims_rejects_megadet_static_last_dim_below_six() {
         let err = validate_output_dims(&[8400, 5], "bad-last-5", &megadet_v5a_method(), 0)
             .expect_err("megadet outputs with last_dim == 5 must be rejected");
-        assert!(matches!(err, SparrowEngineError::OutputShapeMismatch { .. }));
+        assert!(matches!(
+            err,
+            SparrowEngineError::OutputShapeMismatch { .. }
+        ));
 
         let err = validate_output_dims(&[8400, 4], "bad-last-4", &megadet_v5a_method(), 2)
             .expect_err("megadet outputs with last_dim <= 5 must be rejected");
-        assert!(matches!(err, SparrowEngineError::OutputShapeMismatch { .. }));
+        assert!(matches!(
+            err,
+            SparrowEngineError::OutputShapeMismatch { .. }
+        ));
     }
 }

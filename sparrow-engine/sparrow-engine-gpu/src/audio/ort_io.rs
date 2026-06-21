@@ -40,12 +40,14 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use sparrow_engine_types::error::{SparrowEngineError, Result};
 use cudarc::driver::{CudaSlice, CudaStream, DevicePtr};
 use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::{Shape, TensorRef, TensorRefMut};
+use sparrow_engine_types::error::{Result, SparrowEngineError};
+
+use crate::trt::ep::{CudaEpConfig, GpuIdentity, TrtEpBuilder};
 
 /// CUDA-bound audio classifier with cached IoBinding metadata.
 pub struct AudioOrtSession {
@@ -120,7 +122,7 @@ impl AudioOrtSession {
     /// detect). The stream pointer must outlive the session — the
     /// `Arc<CudaStream>` is held here as a field so dropping the session
     /// doesn't invalidate the pointer.
-    pub fn load(
+    pub(crate) fn load(
         ctx: &Arc<cudarc::driver::CudaContext>,
         stream: &Arc<CudaStream>,
         onnx_path: &Path,
@@ -139,23 +141,32 @@ impl AudioOrtSession {
         // ORT cannot dereference the stream after it's freed.
         let cu_stream_ptr = stream.cu_stream() as *mut ();
 
+        let gpu = GpuIdentity::from_context(ctx)?;
+        let model_id = onnx_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("audio-ort");
+        let providers = TrtEpBuilder::new(
+            model_id,
+            None,
+            &gpu,
+            CudaEpConfig::new(device_id).with_compute_stream(cu_stream_ptr),
+            onnx_path,
+            "audio-ort-io-no-manifest",
+        )
+        .execution_providers()?;
         let session = Session::builder()
             .map_err(|e| SparrowEngineError::Ort(format!("ort Session::builder: {e}")))?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| SparrowEngineError::Ort(format!("with_optimization_level: {e}")))?
-            .with_execution_providers([
-                unsafe {
-                    ort::ep::CUDA::default()
-                        .with_device_id(device_id)
-                        .with_compute_stream(cu_stream_ptr)
-                }
-                .build()
-                .error_on_failure(),
-                ort::ep::CPU::default().build(),
-            ])
-            .map_err(|e| SparrowEngineError::Ort(format!("with_execution_providers(CUDA, CPU): {e}")))?
+            .with_execution_providers(providers)
+            .map_err(|e| {
+                SparrowEngineError::Ort(format!("with_execution_providers(TRT, CUDA, CPU): {e}"))
+            })?
             .commit_from_file(onnx_path)
-            .map_err(|e| SparrowEngineError::Ort(format!("commit_from_file({onnx_path:?}): {e}")))?;
+            .map_err(|e| {
+                SparrowEngineError::Ort(format!("commit_from_file({onnx_path:?}): {e}"))
+            })?;
 
         let input_name = session
             .inputs()
@@ -261,7 +272,9 @@ impl AudioOrtSession {
                 shape,
             )
         }
-        .map_err(|e| SparrowEngineError::Ort(format!("TensorRefMut::from_raw (audio chunk): {e}")))?;
+        .map_err(|e| {
+            SparrowEngineError::Ort(format!("TensorRefMut::from_raw (audio chunk): {e}"))
+        })?;
 
         let mut guard = self
             .session
@@ -269,7 +282,9 @@ impl AudioOrtSession {
             .map_err(|_| SparrowEngineError::Ort("AudioOrtSession session lock poisoned".into()))?;
         let outputs = guard
             .run(ort::inputs![&self.input_name => input_tensor])
-            .map_err(|e| SparrowEngineError::Ort(format!("Session::run (audio iobinding chunk): {e}")))?;
+            .map_err(|e| {
+                SparrowEngineError::Ort(format!("Session::run (audio iobinding chunk): {e}"))
+            })?;
 
         let output = outputs.get(self.output_name.as_str()).ok_or_else(|| {
             SparrowEngineError::Ort(format!("audio output '{}' not found", self.output_name))
@@ -311,7 +326,9 @@ impl AudioOrtSession {
             .map_err(|_| SparrowEngineError::Ort("AudioOrtSession session lock poisoned".into()))?;
         let outputs = guard
             .run(ort::inputs![&self.input_name => input_value])
-            .map_err(|e| SparrowEngineError::Ort(format!("Session::run (audio host roundtrip): {e}")))?;
+            .map_err(|e| {
+                SparrowEngineError::Ort(format!("Session::run (audio host roundtrip): {e}"))
+            })?;
         let output = outputs.get(self.output_name.as_str()).ok_or_else(|| {
             SparrowEngineError::Ort(format!("audio output '{}' not found", self.output_name))
         })?;
