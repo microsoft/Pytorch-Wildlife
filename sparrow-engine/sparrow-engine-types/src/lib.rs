@@ -18,13 +18,13 @@ pub(crate) mod preprocess_meta;
 pub(crate) mod engine_config;
 
 // Crate-root re-exports for ergonomic consumer access.
-pub use error::{SparrowEngineError, Result};
+pub use error::{Result, SparrowEngineError};
 pub use types::*;
 pub use device::Device;
 pub use model_type::derive_model_type;
-pub use preprocess_meta::{PreprocessMeta, PreprocessConfig};
+pub use preprocess_meta::{PreprocessConfig, PreprocessMeta};
 pub use engine_config::EngineConfig;
-pub use manifest::{ModelManifest, PipelineManifest, ProvenanceRecord};
+pub use manifest::{ModelManifest, PipelineManifest, ProvenanceRecord, TrtConfig, TrtPrecision};
 pub use drift_metrics::{DriftMetrics, DriftReference};
 pub use inference_log::{InferenceLogRecord, SCHEMA_VERSION};
 
