@@ -166,6 +166,14 @@ pub fn parse_preload_ids(raw: Option<&str>, catalog: &Catalog) -> Result<Vec<Str
         return Ok(Vec::new());
     }
 
+    // `all` (case-insensitive) preloads every discovered model. The GPU Docker
+    // image sets SPARROW_ENGINE_PRELOAD=all so each model's TensorRT engine is
+    // built + cached at boot — before the server binds — eliminating the
+    // first-request 408 that otherwise occurs while the engine compiles.
+    if raw.trim().eq_ignore_ascii_case("all") {
+        return Ok(catalog.models.keys().cloned().collect());
+    }
+
     let mut seen = BTreeSet::new();
     let mut ids = Vec::new();
     let mut duplicates = Vec::new();
@@ -382,6 +390,25 @@ mod tests {
         let err = parse_preload_ids(Some("missing,a,other"), &catalog).unwrap_err();
         assert!(err.contains("missing"), "missing first unknown: {err}");
         assert!(err.contains("other"), "missing second unknown: {err}");
+    }
+
+    #[test]
+    fn parse_preload_ids_all_sentinel_returns_every_model() {
+        let catalog = catalog_with(&["b", "a", "c"]);
+        // `all` (any case, trimmed) expands to all discovered models in sorted
+        // (BTreeMap) order — used by the GPU Docker image to warm the TRT cache.
+        assert_eq!(
+            parse_preload_ids(Some("all"), &catalog).unwrap(),
+            vec!["a", "b", "c"]
+        );
+        assert_eq!(
+            parse_preload_ids(Some("  ALL  "), &catalog).unwrap(),
+            vec!["a", "b", "c"]
+        );
+        // `all` on an empty catalog is a no-op, not an error.
+        assert!(parse_preload_ids(Some("all"), &Catalog::default())
+            .unwrap()
+            .is_empty());
     }
 
     fn unique_dir(name: &str) -> PathBuf {

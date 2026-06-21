@@ -38,6 +38,9 @@ services:
       - "8080:8080"
     volumes:
       - ${SPARROW_ENGINE_MODEL_DIR:-./models}:/models:ro
+      # RP-24 OQ-1: persist the TensorRT engine cache across restarts so the
+      # boot-time engine build (preload=all) happens once per GPU, not every boot.
+      - sparrow-engine-trt-cache:/var/cache/sparrow-engine/trt
     environment:
       - SPARROW_ENGINE_DEVICE=cuda:0
       - SPARROW_ENGINE_LOG_FORMAT=pretty
@@ -65,3 +68,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+volumes:
+  # Named volume for the GPU flavor's TensorRT engine cache (RP-24 OQ-1).
+  sparrow-engine-trt-cache:

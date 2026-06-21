@@ -92,13 +92,22 @@ RUN groupadd -g 1000 sparrow-engine 2>/dev/null || true && useradd -u 1000 -g 10
 RUN mkdir -p /var/cache/sparrow-engine/trt && chown -R 1000:1000 /var/cache/sparrow-engine
 USER 1000:1000
 
+# RP-24 OQ-1: preload=all builds every mounted model's TensorRT engine at boot
+# (before the listener binds), so the first request never returns 408 while the
+# ~3-min engine compile runs. The build is one-time per GPU when the cache dir is
+# a persisted volume (see docker-compose.yml). Operators wanting lazy boot can
+# override with SPARROW_ENGINE_PRELOAD= (empty).
 ENV SPARROW_ENGINE_MODEL_DIR=/models \
     SPARROW_ENGINE_BIND_ADDR=0.0.0.0:8080 \
     SPARROW_ENGINE_LOG_FORMAT=json \
     SPARROW_ENGINE_TRT_CACHE_DIR=/var/cache/sparrow-engine/trt \
+    SPARROW_ENGINE_PRELOAD=all \
     SPARROW_ENGINE_DEVICE=cuda:0
 EXPOSE 8080
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+# start-period covers a cold-cache first boot: preload compiles the TRT engine(s)
+# before the server binds, so the healthcheck can't pass until the build finishes
+# (~3 min/model cold; fast once the cache volume is warm).
+HEALTHCHECK --interval=15s --timeout=5s --start-period=600s --retries=3 \
   CMD ["/usr/local/bin/sparrow-engine-server", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/sparrow-engine-server"]

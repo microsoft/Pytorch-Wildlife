@@ -56,7 +56,7 @@ variables are:
   SPARROW_ENGINE_LOG_FORMAT                'json' or 'pretty'                    [default: json]
   SPARROW_ENGINE_LOG_LEVEL                 tracing filter directive              [default: info]
   SPARROW_ENGINE_DEVICE                    'auto', 'cpu', or 'cuda:N'            [default: auto]
-  SPARROW_ENGINE_PRELOAD                   Comma-separated model ids to eager-load at boot [optional]
+  SPARROW_ENGINE_PRELOAD                   Comma-separated model ids, or 'all', to eager-load at boot [optional]
   SPARROW_ENGINE_MAX_BODY_SIZE             Max request body size, e.g. 100mb     [default: 100mb]
   SPARROW_ENGINE_MAX_CONCURRENT_INFERENCE  Concurrency limit                     [default: 32]
   SPARROW_ENGINE_MAX_BATCH_SIZE            Max batch size                        [default: 64]
