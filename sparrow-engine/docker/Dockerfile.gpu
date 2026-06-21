@@ -27,6 +27,7 @@ COPY sparrow-engine-types/ sparrow-engine-types/
 COPY sparrow-engine-core/ sparrow-engine-core/
 COPY sparrow-engine-cpu/ sparrow-engine-cpu/
 COPY sparrow-engine-gpu/ sparrow-engine-gpu/
+COPY sparrow-engine-mobile/ sparrow-engine-mobile/
 COPY sparrow-engine-server/ sparrow-engine-server/
 COPY sparrow-engine-cli/ sparrow-engine-cli/
 COPY sparrow-engine-python/ sparrow-engine-python/
