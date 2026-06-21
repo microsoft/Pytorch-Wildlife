@@ -39,10 +39,12 @@ use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
 
+use crate::trt::ep::{manifest_cache_material, CudaEpConfig, GpuIdentity, TrtEpBuilder};
+
 use sparrow_engine_core::preprocess_audio;
-use sparrow_engine_types::error::{SparrowEngineError, Result};
+use sparrow_engine_types::error::{Result, SparrowEngineError};
 use sparrow_engine_types::manifest::{
-    InferenceStrategy, ModelManifest, PostprocessMethod, PreprocessMethod, Precision,
+    InferenceStrategy, ModelManifest, PostprocessMethod, Precision, PreprocessMethod,
 };
 use sparrow_engine_types::types::{
     AudioClass, AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment,
@@ -99,25 +101,31 @@ impl RawAudioModel {
     /// Build a `RawAudioModel` from a parsed manifest. Called by
     /// `engine::Engine::load_from_manifest` when
     /// `manifest.preprocess_method == PreprocessMethod::RawAudio`.
-    pub fn load_from_manifest(
+    pub(crate) fn load_from_manifest(
         ctx: &Arc<CudaContext>,
+        gpu: &GpuIdentity,
         manifest: &ModelManifest,
         manifest_dir: &Path,
     ) -> Result<Self> {
         // 1. Extract sample_rate + window_samples from the RawAudio variant.
-        let (sample_rate, segment_samples, pass_orig_sample_rate) = match &manifest.preprocess_method {
-            PreprocessMethod::RawAudio {
-                sample_rate,
-                window_samples,
-                pass_orig_sample_rate,
-            } => (*sample_rate, *window_samples as usize, *pass_orig_sample_rate),
-            other => {
-                return Err(SparrowEngineError::NotAnAudioModel {
-                    id: manifest.id.clone(),
-                    method: other.as_str().to_string(),
-                });
-            }
-        };
+        let (sample_rate, segment_samples, pass_orig_sample_rate) =
+            match &manifest.preprocess_method {
+                PreprocessMethod::RawAudio {
+                    sample_rate,
+                    window_samples,
+                    pass_orig_sample_rate,
+                } => (
+                    *sample_rate,
+                    *window_samples as usize,
+                    *pass_orig_sample_rate,
+                ),
+                other => {
+                    return Err(SparrowEngineError::NotAnAudioModel {
+                        id: manifest.id.clone(),
+                        method: other.as_str().to_string(),
+                    });
+                }
+            };
 
         // 2. Default stride: SlidingWindow inference strategy carries the
         // manifest-declared stride_s; fall back to the CPU default (0.3 s)
@@ -180,19 +188,23 @@ impl RawAudioModel {
             .try_into()
             .map_err(|e| SparrowEngineError::Ort(format!("ctx.ordinal as i32: {e}")))?;
 
+        let manifest_cache_material = manifest_cache_material(manifest);
+        let providers = TrtEpBuilder::new(
+            &manifest.id,
+            manifest.trt.as_ref(),
+            gpu,
+            CudaEpConfig::new(device_id),
+            &onnx_path,
+            &manifest_cache_material,
+        )
+        .execution_providers()?;
         let session = Session::builder()
             .map_err(|e| SparrowEngineError::Ort(format!("ort Session::builder: {e}")))?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| SparrowEngineError::Ort(format!("with_optimization_level: {e}")))?
-            .with_execution_providers([
-                ort::ep::CUDA::default()
-                    .with_device_id(device_id)
-                    .build()
-                    .error_on_failure(),
-                ort::ep::CPU::default().build(),
-            ])
+            .with_execution_providers(providers)
             .map_err(|e| {
-                SparrowEngineError::Ort(format!("with_execution_providers(CUDA, CPU): {e}"))
+                SparrowEngineError::Ort(format!("with_execution_providers(TRT, CUDA, CPU): {e}"))
             })?
             .commit_from_file(&onnx_path)
             .map_err(|e| {
@@ -220,15 +232,22 @@ impl RawAudioModel {
             let probe_sr_arr;
             let probe_outputs = if pass_orig_sample_rate {
                 probe_sr_arr = ndarray::Array1::from_vec(vec![sample_rate as i64]);
-                let probe_sr_value = TensorRef::from_array_view(&probe_sr_arr)
-                    .map_err(|e| SparrowEngineError::Ort(format!("probe orig_sr TensorRef: {e}")))?;
-                let inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = vec![
+                let probe_sr_value = TensorRef::from_array_view(&probe_sr_arr).map_err(|e| {
+                    SparrowEngineError::Ort(format!("probe orig_sr TensorRef: {e}"))
+                })?;
+                let inputs: Vec<(
+                    std::borrow::Cow<'_, str>,
+                    ort::session::SessionInputValue<'_>,
+                )> = vec![
                     (std::borrow::Cow::Borrowed("audio"), probe_value.into()),
-                    (std::borrow::Cow::Borrowed("orig_sample_rate"), probe_sr_value.into()),
+                    (
+                        std::borrow::Cow::Borrowed("orig_sample_rate"),
+                        probe_sr_value.into(),
+                    ),
                 ];
-                probe_session
-                    .run(inputs)
-                    .map_err(|e| SparrowEngineError::Ort(format!("probe Session::run (2-input): {e}")))?
+                probe_session.run(inputs).map_err(|e| {
+                    SparrowEngineError::Ort(format!("probe Session::run (2-input): {e}"))
+                })?
             } else {
                 probe_session
                     .run(ort::inputs![probe_value])
@@ -266,22 +285,23 @@ impl RawAudioModel {
         // `session` by-value, so rebuild from disk. This pays the
         // commit-from-file cost twice on load, but load only happens once
         // per process per model; runtime detect calls are unaffected.
+        let providers = TrtEpBuilder::new(
+            &manifest.id,
+            manifest.trt.as_ref(),
+            gpu,
+            CudaEpConfig::new(device_id),
+            &onnx_path,
+            &manifest_cache_material,
+        )
+        .execution_providers()?;
         let session = Session::builder()
             .map_err(|e| SparrowEngineError::Ort(format!("ort Session::builder (retain): {e}")))?
             .with_optimization_level(GraphOptimizationLevel::All)
-            .map_err(|e| {
-                SparrowEngineError::Ort(format!("with_optimization_level (retain): {e}"))
-            })?
-            .with_execution_providers([
-                ort::ep::CUDA::default()
-                    .with_device_id(device_id)
-                    .build()
-                    .error_on_failure(),
-                ort::ep::CPU::default().build(),
-            ])
+            .map_err(|e| SparrowEngineError::Ort(format!("with_optimization_level (retain): {e}")))?
+            .with_execution_providers(providers)
             .map_err(|e| {
                 SparrowEngineError::Ort(format!(
-                    "with_execution_providers(CUDA, CPU) (retain): {e}"
+                    "with_execution_providers(TRT, CUDA, CPU) (retain): {e}"
                 ))
             })?
             .commit_from_file(&onnx_path)
@@ -328,7 +348,12 @@ impl RawAudioModel {
     where
         F: FnMut(&AudioSegment),
     {
-        self.detect_inner(audio, opts, labels, Some(&mut on_segment as &mut dyn FnMut(&AudioSegment)))
+        self.detect_inner(
+            audio,
+            opts,
+            labels,
+            Some(&mut on_segment as &mut dyn FnMut(&AudioSegment)),
+        )
     }
 
     fn detect_inner(
@@ -401,14 +426,13 @@ impl RawAudioModel {
                     batch_data.resize(batch_data.len() + (segment_samples - remaining), 0.0);
                 }
             }
-            let batch_tensor =
-                ndarray::Array2::from_shape_vec((batch_len, segment_samples), batch_data).map_err(
-                    |e| {
-                        SparrowEngineError::Ort(format!(
-                            "raw audio batch reshape failed (GPU): {e}"
-                        ))
-                    },
-                )?;
+            let batch_tensor = ndarray::Array2::from_shape_vec(
+                (batch_len, segment_samples),
+                batch_data,
+            )
+            .map_err(|e| {
+                SparrowEngineError::Ort(format!("raw audio batch reshape failed (GPU): {e}"))
+            })?;
 
             // ----- ORT (CUDA EP handles H2D internally) ------------------
             let input_value = TensorRef::from_array_view(&batch_tensor)
@@ -421,14 +445,19 @@ impl RawAudioModel {
             // second ONNX input (same as CPU path).
             let orig_sr_arr;
             let outputs = if self.pass_orig_sample_rate {
-                orig_sr_arr = ndarray::Array1::from_vec(vec![
-                    audio_samples.orig_sample_rate as i64,
-                ]);
+                orig_sr_arr =
+                    ndarray::Array1::from_vec(vec![audio_samples.orig_sample_rate as i64]);
                 let orig_sr_value = TensorRef::from_array_view(&orig_sr_arr)
                     .map_err(|e| SparrowEngineError::Ort(format!("orig_sr TensorRef: {e}")))?;
-                let inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = vec![
+                let inputs: Vec<(
+                    std::borrow::Cow<'_, str>,
+                    ort::session::SessionInputValue<'_>,
+                )> = vec![
                     (std::borrow::Cow::Borrowed("audio"), input_value.into()),
-                    (std::borrow::Cow::Borrowed("orig_sample_rate"), orig_sr_value.into()),
+                    (
+                        std::borrow::Cow::Borrowed("orig_sample_rate"),
+                        orig_sr_value.into(),
+                    ),
                 ];
                 guard
                     .run(inputs)

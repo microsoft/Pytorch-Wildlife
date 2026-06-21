@@ -52,10 +52,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sparrow_engine_types::error::{SparrowEngineError, Result};
+use cudarc::driver::CudaContext;
+use sparrow_engine_types::error::{Result, SparrowEngineError};
 use sparrow_engine_types::manifest::{self, ModelManifest, PipelineManifest};
 use sparrow_engine_types::{derive_model_type, ModelInfo, ModelType};
-use cudarc::driver::CudaContext;
 
 // Phase 3.8 Phase C Wave 4b: re-export `Device` + `EngineConfig` at the
 // `engine::*` path to mirror `sparrow_engine_cpu::engine::{Device, EngineConfig}`
@@ -72,6 +72,7 @@ use crate::models::audio_raw::RawAudioModel;
 use crate::models::classifier::{ClassifierModel, JpegDecoder};
 use crate::models::tiled::TiledModel;
 use crate::models::yolo::YoloModel;
+use crate::trt::ep::GpuIdentity;
 
 // ---------------------------------------------------------------------------
 // Singleton guard
@@ -181,6 +182,8 @@ pub(crate) struct EngineInner {
     pub(crate) resolved_device: Device,
     /// Engine config snapshot.
     pub(crate) config: EngineConfig,
+    /// GPU identity used by TensorRT's SM safety gate and cache key.
+    pub(crate) gpu_identity: GpuIdentity,
     /// Compiled CUDA letterbox kernel. Used by YOLO dispatch.
     pub(crate) letterbox: LetterboxKernel,
     /// Compiled CUDA center-crop kernel. Held for forward compat; today's
@@ -283,8 +286,10 @@ impl Engine {
         // Build engine-shared CUDA primitives. On any failure release
         // the singleton slot before propagating the error.
         let init = move || -> Result<EngineInner> {
-            let ctx = CudaContext::new(ordinal as usize)
-                .map_err(|e| SparrowEngineError::Ort(format!("CudaContext::new({ordinal}): {e}")))?;
+            let ctx = CudaContext::new(ordinal as usize).map_err(|e| {
+                SparrowEngineError::Ort(format!("CudaContext::new({ordinal}): {e}"))
+            })?;
+            let gpu_identity = GpuIdentity::from_context(&ctx)?;
             let letterbox = LetterboxKernel::new(&ctx)?;
             let center_crop = CenterCropKernel::new(&ctx)?;
             let resize = ResizeKernel::new(&ctx)?;
@@ -293,6 +298,7 @@ impl Engine {
                 ctx,
                 resolved_device,
                 config,
+                gpu_identity,
                 letterbox,
                 center_crop,
                 resize,
@@ -375,11 +381,17 @@ impl Engine {
                 // `inference.strategy = tiled`. Single-shot YOLO
                 // manifests build a `YoloModel`.
                 match manifest_owned.inference_strategy {
-                    manifest::InferenceStrategy::Tiled { .. } => LoadedModelInner::Tiled(
-                        TiledModel::load(&self.inner.ctx, &manifest_owned, manifest_dir)?,
-                    ),
+                    manifest::InferenceStrategy::Tiled { .. } => {
+                        LoadedModelInner::Tiled(TiledModel::load(
+                            &self.inner.ctx,
+                            &self.inner.gpu_identity,
+                            &manifest_owned,
+                            manifest_dir,
+                        )?)
+                    }
                     manifest::InferenceStrategy::Single => LoadedModelInner::Yolo(YoloModel::load(
                         &self.inner.ctx,
+                        &self.inner.gpu_identity,
                         &manifest_owned,
                         manifest_dir,
                     )?),
@@ -393,6 +405,7 @@ impl Engine {
             }
             ModelType::Classifier => LoadedModelInner::Classifier(ClassifierModel::load(
                 &self.inner.ctx,
+                &self.inner.gpu_identity,
                 &manifest_owned,
                 manifest_dir,
             )?),
@@ -404,6 +417,7 @@ impl Engine {
                     manifest::PreprocessMethod::RawAudio { .. } => {
                         LoadedModelInner::AudioRaw(RawAudioModel::load_from_manifest(
                             &self.inner.ctx,
+                            &self.inner.gpu_identity,
                             &manifest_owned,
                             manifest_dir,
                         )?)

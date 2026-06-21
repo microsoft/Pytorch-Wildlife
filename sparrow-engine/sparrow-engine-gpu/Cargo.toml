@@ -68,9 +68,10 @@ ndarray = "0.17"
 # from the pip `onnxruntime-gpu` install. CUDA EP itself
 # (libonnxruntime_providers_cuda.so) is loaded internally by ORT,
 # orthogonal to how ORT itself is loaded.
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "load-dynamic", "api-24", "cuda"] }
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "copy-dylibs", "load-dynamic", "api-24", "cuda", "tensorrt"] }
 
 tracing = { version = "0.1", features = ["log"] }
+sha2 = "0.10"
 
 # Phase 3.8 Phase C Wave 4b: ffi.rs (gated on `--features ffi`) parses
 # `EngineConfig` JSON via serde + serde_json and produces JSON output for

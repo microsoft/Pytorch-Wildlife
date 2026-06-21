@@ -63,24 +63,25 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use sparrow_engine_core::postprocess;
-use sparrow_engine_types::error::{SparrowEngineError, Result};
-use sparrow_engine_types::manifest::{
-    self, ChannelOrder, Layout, ModelManifest, Normalization, PostprocessMethod, Precision,
-    PreprocessMethod,
-};
-use sparrow_engine_types::{ClassifyOpts, ClassifyResult, ImageInput};
 use cudarc::driver::{CudaContext, CudaSlice, CudaStream, DevicePtr, DevicePtrMut};
 use ndarray::{ArrayView2, ArrayViewD};
 use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::{Shape, TensorRef, TensorRefMut};
+use sparrow_engine_core::postprocess;
+use sparrow_engine_types::error::{Result, SparrowEngineError};
+use sparrow_engine_types::manifest::{
+    self, ChannelOrder, Layout, ModelManifest, Normalization, PostprocessMethod, Precision,
+    PreprocessMethod,
+};
+use sparrow_engine_types::{ClassifyOpts, ClassifyResult, ImageInput};
 
 use crate::decode::GpuImage;
 use crate::kernels::center_crop::CenterCropKernel;
 use crate::kernels::resize::{resize_gpu, ResizeKernel};
 use crate::kernels::tiled_preprocess::NormalizeStats;
+use crate::trt::ep::{manifest_cache_material, CudaEpConfig, GpuIdentity, TrtEpBuilder};
 
 // ===========================================================================
 // JpegDecoder — stateful nvjpeg wrapper.
@@ -465,8 +466,9 @@ impl ClassifierModel {
     ///   (the variant is reserved for ORT runtime errors).
     /// - `SparrowEngineError::ManifestNotFound` / `LabelFileNotFound` propagated
     ///   from `load_labels`.
-    pub fn load(
+    pub(crate) fn load(
         ctx: &Arc<CudaContext>,
+        gpu: &GpuIdentity,
         manifest: &ModelManifest,
         manifest_dir: &Path,
     ) -> Result<Self> {
@@ -581,20 +583,28 @@ impl ClassifierModel {
         // failures are silent by default — `error_on_failure()` opts into
         // hard failure for the CUDA EP. The CPU EP is not gated this way:
         // its job is per-op fallback, not full-engine fallback.
+        let manifest_cache_material = manifest_cache_material(manifest);
+        let providers = TrtEpBuilder::new(
+            &manifest.id,
+            manifest.trt.as_ref(),
+            gpu,
+            CudaEpConfig::new(device_id),
+            &onnx_path,
+            &manifest_cache_material,
+        )
+        .execution_providers()?;
         let session = Session::builder()
             .map_err(|e| SparrowEngineError::Ort(format!("ort Session::builder: {e}")))?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| SparrowEngineError::Ort(format!("with_optimization_level: {e}")))?
-            .with_execution_providers([
-                ort::ep::CUDA::default()
-                    .with_device_id(device_id)
-                    .build()
-                    .error_on_failure(),
-                ort::ep::CPU::default().build(),
-            ])
-            .map_err(|e| SparrowEngineError::Ort(format!("with_execution_providers(CUDA, CPU): {e}")))?
+            .with_execution_providers(providers)
+            .map_err(|e| {
+                SparrowEngineError::Ort(format!("with_execution_providers(TRT, CUDA, CPU): {e}"))
+            })?
             .commit_from_file(&onnx_path)
-            .map_err(|e| SparrowEngineError::Ort(format!("commit_from_file({onnx_path:?}): {e}")))?;
+            .map_err(|e| {
+                SparrowEngineError::Ort(format!("commit_from_file({onnx_path:?}): {e}"))
+            })?;
 
         // Phase 3.8 Step 1 audit-fix R2 B10 (M-NEW-5): the FP32 binding code
         // below assumes Float32 I/O. Reject FP16 ONNX converted without
@@ -608,7 +618,9 @@ impl ClassifierModel {
         let input_name = session
             .inputs()
             .first()
-            .ok_or_else(|| SparrowEngineError::Ort(format!("session for '{}' has no inputs", manifest.id)))?
+            .ok_or_else(|| {
+                SparrowEngineError::Ort(format!("session for '{}' has no inputs", manifest.id))
+            })?
             .name()
             .to_owned();
         let output_name = session
@@ -838,12 +850,12 @@ impl ClassifierModel {
             std::env::var("SPARROW_ENGINE_GPU_CLASSIFIER_HOST_ROUNDTRIP").as_deref() == Ok("1");
 
         let classifications = if host_roundtrip {
-            let host_buf: Vec<f32> = stream
-                .clone_dtoh(&dev_tensor)
-                .map_err(|e| SparrowEngineError::Ort(format!("stream.clone_dtoh (host roundtrip): {e}")))?;
-            stream
-                .synchronize()
-                .map_err(|e| SparrowEngineError::Ort(format!("stream.synchronize after dtoh: {e}")))?;
+            let host_buf: Vec<f32> = stream.clone_dtoh(&dev_tensor).map_err(|e| {
+                SparrowEngineError::Ort(format!("stream.clone_dtoh (host roundtrip): {e}"))
+            })?;
+            stream.synchronize().map_err(|e| {
+                SparrowEngineError::Ort(format!("stream.synchronize after dtoh: {e}"))
+            })?;
             let arr: ndarray::Array4<f32> = ndarray::Array4::from_shape_vec(
                 (1, 3, target_h as usize, target_w as usize),
                 host_buf,
@@ -851,13 +863,14 @@ impl ClassifierModel {
             .map_err(|e| SparrowEngineError::Ort(format!("Array4::from_shape_vec: {e}")))?;
             let input_value = TensorRef::from_array_view(&arr)
                 .map_err(|e| SparrowEngineError::Ort(format!("TensorRef::from_array_view: {e}")))?;
-            let mut guard = self
-                .session
-                .lock()
-                .map_err(|_| SparrowEngineError::Ort("ClassifierModel session lock poisoned".into()))?;
+            let mut guard = self.session.lock().map_err(|_| {
+                SparrowEngineError::Ort("ClassifierModel session lock poisoned".into())
+            })?;
             let outputs = guard
                 .run(ort::inputs![&self.input_name => input_value])
-                .map_err(|e| SparrowEngineError::Ort(format!("Session::run (host roundtrip): {e}")))?;
+                .map_err(|e| {
+                    SparrowEngineError::Ort(format!("Session::run (host roundtrip): {e}"))
+                })?;
             extract_softmax_top_k(&outputs, &self.output_name, &self.labels, opts)?
         } else {
             // Zero-copy CUDA path.
@@ -881,10 +894,9 @@ impl ClassifierModel {
             }
             .map_err(|e| SparrowEngineError::Ort(format!("TensorRefMut::from_raw: {e}")))?;
 
-            let mut guard = self
-                .session
-                .lock()
-                .map_err(|_| SparrowEngineError::Ort("ClassifierModel session lock poisoned".into()))?;
+            let mut guard = self.session.lock().map_err(|_| {
+                SparrowEngineError::Ort("ClassifierModel session lock poisoned".into())
+            })?;
             let outputs = guard
                 .run(ort::inputs![&self.input_name => input_tensor])
                 .map_err(|e| SparrowEngineError::Ort(format!("Session::run: {e}")))?;
@@ -923,9 +935,9 @@ fn extract_softmax_top_k(
     labels: &[String],
     opts: &ClassifyOpts,
 ) -> Result<Vec<sparrow_engine_types::Classification>> {
-    let output = outputs
-        .get(output_name)
-        .ok_or_else(|| SparrowEngineError::Ort(format!("classifier output '{output_name}' not found")))?;
+    let output = outputs.get(output_name).ok_or_else(|| {
+        SparrowEngineError::Ort(format!("classifier output '{output_name}' not found"))
+    })?;
     let output_view: ArrayViewD<'_, f32> = output
         .try_extract_array::<f32>()
         .map_err(|e| SparrowEngineError::Ort(format!("try_extract_array: {e}")))?;
@@ -1124,7 +1136,8 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        match ClassifierModel::load(&ctx, &m, manifest_dir) {
+        let gpu = GpuIdentity::from_context(&ctx).unwrap();
+        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("audio model") => {}
             Err(other) => panic!("expected audio rejection, got Err({other:?})"),
             Ok(_) => panic!("expected audio rejection, got Ok(_)"),
@@ -1139,7 +1152,8 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        match ClassifierModel::load(&ctx, &m, manifest_dir) {
+        let gpu = GpuIdentity::from_context(&ctx).unwrap();
+        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("expected softmax") => {}
             Err(other) => panic!("expected non-softmax rejection, got Err({other:?})"),
             Ok(_) => panic!("expected non-softmax rejection, got Ok(_)"),
@@ -1163,7 +1177,8 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        match ClassifierModel::load(&ctx, &m, manifest_dir) {
+        let gpu = GpuIdentity::from_context(&ctx).unwrap();
+        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg))
                 if msg.contains("model_file_fp16") && msg.contains("fp16") => {}
             Err(other) => panic!(
@@ -1196,7 +1211,8 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        match ClassifierModel::load(&ctx, &m, manifest_dir) {
+        let gpu = GpuIdentity::from_context(&ctx).unwrap();
+        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("letterbox") => {}
             Err(other) => panic!("expected letterbox rejection, got Err({other:?})"),
             Ok(_) => panic!("expected letterbox rejection, got Ok(_)"),
@@ -1212,7 +1228,8 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        match ClassifierModel::load(&ctx, &m, manifest_dir) {
+        let gpu = GpuIdentity::from_context(&ctx).unwrap();
+        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("input_size") => {}
             Err(other) => panic!("expected missing-input_size rejection, got Err({other:?})"),
             Ok(_) => panic!("expected missing-input_size rejection, got Ok(_)"),
@@ -1228,7 +1245,8 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        match ClassifierModel::load(&ctx, &m, manifest_dir) {
+        let gpu = GpuIdentity::from_context(&ctx).unwrap();
+        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("normalization") => {}
             Err(other) => panic!("expected normalization-none rejection, got Err({other:?})"),
             Ok(_) => panic!("expected normalization-none rejection, got Ok(_)"),
@@ -1244,7 +1262,8 @@ mod tests {
             None => return,
         };
         let manifest_dir = Path::new("/tmp");
-        match ClassifierModel::load(&ctx, &m, manifest_dir) {
+        let gpu = GpuIdentity::from_context(&ctx).unwrap();
+        match ClassifierModel::load(&ctx, &gpu, &m, manifest_dir) {
             Err(SparrowEngineError::InvalidManifest(msg)) if msg.contains("NHWC") => {}
             Err(other) => panic!("expected NHWC-layout rejection, got Err({other:?})"),
             Ok(_) => panic!("expected NHWC-layout rejection, got Ok(_)"),
