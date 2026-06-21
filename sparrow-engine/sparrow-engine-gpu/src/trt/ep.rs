@@ -253,6 +253,8 @@ impl<'a> TrtEpBuilder<'a> {
             gpu_identity: self.gpu.cache_identity(),
             profile_shapes_json,
             precision: format!("{:?}", config.precision).to_ascii_lowercase(),
+            builder_optimization_level: config.builder_optimization_level,
+            engine_hw_compatible: config.engine_hw_compatible,
         });
         let root = trt_cache_root_from_env(std::env::var(TRT_CACHE_ENV).ok().as_deref());
         let dir = trt_cache_dir(&root, &key);
@@ -261,7 +263,7 @@ impl<'a> TrtEpBuilder<'a> {
             .and_then(|m| m.modified())
             .map_err(SparrowEngineError::Io)?;
         if cache_dir_has_stale_entries(&dir, onnx_mtime)? {
-            let _ = std::fs::remove_dir_all(&dir);
+            remove_stale_cache_dir(&dir)?;
         }
         prepare_trt_cache_dir(&dir, &key.full_hash)?;
         Ok(dir)
@@ -312,7 +314,7 @@ pub(crate) fn decide_trt_provider_order(
     };
     if !trt_libs_present {
         return Err(SparrowEngineError::TrtRuntimeMissing(format!(
-            "Model {model_id} requires TensorRT but libnvinfer was not found. Install TensorRT 10.x (see docs), or set SPARROW_ENGINE_TRT_DISABLE=1 to run on the CUDA EP."
+            "Model {model_id} requires TensorRT but libnvinfer was not found. Install TensorRT 10.x (https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html), or set SPARROW_ENGINE_TRT_DISABLE=1 to run on the CUDA EP."
         )));
     }
     Ok(TrtProviderPlan {
@@ -365,20 +367,49 @@ fn find_tensorrt_runtime() -> TrtLibProbe {
 }
 
 fn find_tensorrt_runtime_in_dirs(dirs: &[PathBuf]) -> TrtLibProbe {
-    for dir in dirs {
-        for name in ["libnvinfer.so.10", "libnvinfer.so"] {
-            let candidate = dir.join(name);
-            if candidate.exists() {
-                return TrtLibProbe {
-                    present: true,
-                    version: Some(name.trim_start_matches("libnvinfer.so.").to_string()),
-                };
-            }
+    let nvinfer = find_first_library(dirs, &["libnvinfer.so.10", "libnvinfer.so"]);
+    let plugin = find_first_library(dirs, &["libnvinfer_plugin.so.10", "libnvinfer_plugin.so"]);
+    let parser = find_first_library(dirs, &["libnvonnxparser.so.10", "libnvonnxparser.so"]);
+
+    if let Some(nvinfer) = nvinfer {
+        if plugin.is_some() && parser.is_some() {
+            return TrtLibProbe {
+                present: true,
+                version: tensorrt_version_from_nvinfer(&nvinfer),
+            };
         }
     }
     TrtLibProbe {
         present: false,
         version: None,
+    }
+}
+
+fn find_first_library(dirs: &[PathBuf], names: &[&str]) -> Option<PathBuf> {
+    for name in names {
+        for dir in dirs {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn tensorrt_version_from_nvinfer(path: &Path) -> Option<String> {
+    let name = path.file_name()?.to_str()?;
+    name.strip_prefix("libnvinfer.so.")
+        .filter(|version| !version.is_empty())
+        .map(str::to_string)
+        .or_else(|| Some("unknown".to_string()))
+}
+
+fn remove_stale_cache_dir(dir: &Path) -> Result<()> {
+    match std::fs::remove_dir_all(dir) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(SparrowEngineError::Io(err)),
     }
 }
 
@@ -480,7 +511,74 @@ mod tests {
         assert!(matches!(err, SparrowEngineError::TrtRuntimeMissing(_)));
         let message = err.to_string();
         assert!(message.contains("Model model-a requires TensorRT"));
+        assert!(message.contains("docs.nvidia.com/deeplearning/tensorrt/install-guide"));
         assert!(message.contains("SPARROW_ENGINE_TRT_DISABLE=1"));
+    }
+
+    #[test]
+    fn tensorrt_runtime_probe_requires_plugin_and_parser() {
+        let root = unique_test_dir("trt-partial");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("libnvinfer.so.10"), b"").unwrap();
+
+        let probe = find_tensorrt_runtime_in_dirs(std::slice::from_ref(&root));
+        assert!(!probe.present);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn tensorrt_runtime_probe_rejects_directory_named_like_library() {
+        let root = unique_test_dir("trt-directory");
+        for name in [
+            "libnvinfer.so.10",
+            "libnvinfer_plugin.so.10",
+            "libnvonnxparser.so.10",
+        ] {
+            std::fs::create_dir_all(root.join(name)).unwrap();
+        }
+
+        let probe = find_tensorrt_runtime_in_dirs(std::slice::from_ref(&root));
+        assert!(!probe.present);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn remove_stale_cache_dir_treats_missing_dir_as_removed() {
+        let root = unique_test_dir("trt-remove-missing");
+        remove_stale_cache_dir(&root).unwrap();
+    }
+
+    #[test]
+    fn tensorrt_runtime_probe_accepts_split_runtime_lib_dirs() {
+        let root = unique_test_dir("trt-split");
+        let nvinfer_dir = root.join("nvinfer");
+        let plugin_dir = root.join("plugin");
+        let parser_dir = root.join("parser");
+        for dir in [&nvinfer_dir, &plugin_dir, &parser_dir] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(nvinfer_dir.join("libnvinfer.so.10"), b"").unwrap();
+        std::fs::write(plugin_dir.join("libnvinfer_plugin.so.10"), b"").unwrap();
+        std::fs::write(parser_dir.join("libnvonnxparser.so.10"), b"").unwrap();
+
+        let probe = find_tensorrt_runtime_in_dirs(&[nvinfer_dir, plugin_dir, parser_dir]);
+        assert!(probe.present);
+        assert_eq!(probe.version.as_deref(), Some("10"));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn unique_test_dir(prefix: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("test-artifacts")
+            .join(format!("{prefix}-{}-{nanos}", std::process::id()))
     }
 
     #[test]

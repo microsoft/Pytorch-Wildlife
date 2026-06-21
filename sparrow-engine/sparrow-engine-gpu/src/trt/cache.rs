@@ -18,6 +18,8 @@ pub struct TrtCacheKeyInput {
     pub gpu_identity: String,
     pub profile_shapes_json: String,
     pub precision: String,
+    pub builder_optimization_level: u8,
+    pub engine_hw_compatible: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +105,8 @@ mod tests {
             gpu_identity: "sm89-RTX".into(),
             profile_shapes_json: "{}".into(),
             precision: "fp16".into(),
+            builder_optimization_level: 3,
+            engine_hw_compatible: false,
         }
     }
 
@@ -120,6 +124,27 @@ mod tests {
         let mut changed = sample_input();
         let original = trt_cache_key(&changed);
         changed.precision = "fp32".into();
+        assert_ne!(original, trt_cache_key(&changed));
+    }
+
+    #[test]
+    fn trt_cache_key_changes_when_trt_engine_settings_change() {
+        let mut changed = sample_input();
+        let original = trt_cache_key(&changed);
+
+        changed.builder_optimization_level = 4;
+        assert_ne!(original, trt_cache_key(&changed));
+
+        changed = sample_input();
+        changed.engine_hw_compatible = true;
+        assert_ne!(original, trt_cache_key(&changed));
+    }
+
+    #[test]
+    fn trt_cache_key_changes_when_gpu_identity_changes() {
+        let mut changed = sample_input();
+        let original = trt_cache_key(&changed);
+        changed.gpu_identity = "sm75-T4".into();
         assert_ne!(original, trt_cache_key(&changed));
     }
 

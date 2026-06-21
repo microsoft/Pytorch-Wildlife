@@ -1250,9 +1250,7 @@ fn validate_trt_config(trt: &Option<TrtConfig>) -> Result<()> {
         )));
     }
 
-    if trt.enabled
-        && (trt.profile_min.is_some() || trt.profile_opt.is_some() || trt.profile_max.is_some())
-    {
+    if trt.profile_min.is_some() || trt.profile_opt.is_some() || trt.profile_max.is_some() {
         let Some(profile_min) = &trt.profile_min else {
             return Err(SparrowEngineError::InvalidManifest(
                 "inference.trt profiles must set profile_min, profile_opt, and profile_max together"
@@ -1522,6 +1520,48 @@ audio = [1, 1, 224, 90]
     }
 
     #[test]
+    fn test_trt_profile_tables_must_be_all_or_none_even_when_disabled() {
+        let mut toml = make_model_toml(&[]);
+        toml.push_str(
+            r#"
+[inference.trt]
+enabled = false
+
+[inference.trt.profile_min]
+audio = [1, 1, 224, 90]
+"#,
+        );
+        let dir = write_temp_file("manifest.toml", &toml);
+        let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
+        assert!(matches!(err, SparrowEngineError::InvalidManifest(_)));
+        assert!(err.to_string().contains("profile_opt"));
+    }
+
+    #[test]
+    fn test_trt_profile_tables_must_have_identical_keys() {
+        let mut toml = make_model_toml(&[]);
+        toml.push_str(
+            r#"
+[inference.trt]
+enabled = true
+
+[inference.trt.profile_min]
+audio = [1, 1, 224, 90]
+
+[inference.trt.profile_opt]
+image = [1, 3, 640, 640]
+
+[inference.trt.profile_max]
+audio = [32, 1, 224, 90]
+"#,
+        );
+        let dir = write_temp_file("manifest.toml", &toml);
+        let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
+        assert!(matches!(err, SparrowEngineError::InvalidManifest(_)));
+        assert!(err.to_string().contains("identical input keys"));
+    }
+
+    #[test]
     fn test_trt_builder_optimization_level_must_be_one_through_five() {
         let mut toml = make_model_toml(&[]);
         toml.push_str(
@@ -1529,6 +1569,22 @@ audio = [1, 1, 224, 90]
 [inference.trt]
 enabled = true
 builder_optimization_level = 6
+"#,
+        );
+        let dir = write_temp_file("manifest.toml", &toml);
+        let err = load_manifest(&dir.path().join("manifest.toml")).unwrap_err();
+        assert!(matches!(err, SparrowEngineError::InvalidManifest(_)));
+        assert!(err.to_string().contains("builder_optimization_level"));
+    }
+
+    #[test]
+    fn test_trt_builder_optimization_level_rejects_zero() {
+        let mut toml = make_model_toml(&[]);
+        toml.push_str(
+            r#"
+[inference.trt]
+enabled = true
+builder_optimization_level = 0
 "#,
         );
         let dir = write_temp_file("manifest.toml", &toml);
