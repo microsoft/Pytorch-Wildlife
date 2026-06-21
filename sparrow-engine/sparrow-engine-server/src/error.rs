@@ -136,6 +136,8 @@ fn bongo_into_response(e: SparrowEngineError) -> Response {
         ImageFileNotFound(_) => (StatusCode::NOT_FOUND, "IMAGE_NOT_FOUND"),
         // GPU resources
         NvjpegUnavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "NVJPEG_UNAVAILABLE"),
+        // Required runtime is missing, so the service cannot serve this model yet.
+        TrtRuntimeMissing(_) => (StatusCode::SERVICE_UNAVAILABLE, "TRT_RUNTIME_UNAVAILABLE"),
         // ORT / IO
         Ort(_) => (StatusCode::INTERNAL_SERVER_ERROR, "INFERENCE_ERROR"),
         Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "IO_ERROR"),
@@ -180,6 +182,19 @@ mod tests {
         let body = error_body(empty).await;
         assert_eq!(body["error"]["status"], 400);
         assert_eq!(body["error"]["code"], "EMPTY_PIPELINE");
+    }
+
+    #[tokio::test]
+    async fn trt_runtime_missing_maps_to_service_unavailable() {
+        let response = AppError::from(SparrowEngineError::TrtRuntimeMissing(
+            "Model detector requires TensorRT but libnvinfer was not found.".to_string(),
+        ))
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = error_body(response).await;
+        assert_eq!(body["error"]["status"], 503);
+        assert_eq!(body["error"]["code"], "TRT_RUNTIME_UNAVAILABLE");
     }
 
     async fn error_body(response: Response) -> serde_json::Value {
