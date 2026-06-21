@@ -178,7 +178,9 @@ impl RawAudioModel {
             )));
         }
 
-        // 5. Build CUDA-EP-first session. NOTE: unlike AudioModel we do NOT
+        // 5. Build session via the TRT→CUDA→CPU EP policy (crate::trt::ep): TRT
+        // only when the manifest opts in, else CUDA-first, CPU per-op fallback.
+        // NOTE: unlike AudioModel we do NOT
         // bind a dedicated compute stream — there are no cudarc kernels to
         // co-schedule (raw audio path is pure ORT), so the default stream
         // is fine and saves the `Arc<CudaStream>` plumbing.

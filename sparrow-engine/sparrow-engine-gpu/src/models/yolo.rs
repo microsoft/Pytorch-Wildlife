@@ -550,7 +550,9 @@ impl YoloModel {
             .try_into()
             .map_err(|e| SparrowEngineError::Ort(format!("ctx.ordinal as i32: {e}")))?;
 
-        // Build ORT session: CUDA EP first, CPU fallback.
+        // Build ORT session via the TRT→CUDA→CPU EP policy
+        // (crate::trt::ep::TrtEpBuilder): TRT only when the manifest opts in,
+        // else CUDA EP first, CPU per-op fallback.
         // EXHAUSTIVE cuDNN algo selection is ORT's default for the CUDA
         // EP — matches sparrow-engine-cpu.
         let gpu = GpuIdentity::from_context(ctx)?;
@@ -1252,7 +1254,9 @@ impl YoloModel {
 // ORT session construction
 // ---------------------------------------------------------------------------
 
-/// Build an ORT session against the CUDA EP for this model.
+/// Build an ORT session for this model via the TRT→CUDA→CPU EP policy
+/// (`crate::trt::ep::TrtEpBuilder`): TensorRT when the manifest opts in,
+/// otherwise the CUDA EP, with a CPU per-op fallback.
 ///
 /// `device_id` is the ordinal of the CUDA device the session must pin to;
 /// passed in from `YoloModel::load` (which captured it from

@@ -593,7 +593,7 @@ impl TiledModel {
             }
         };
 
-        // --- Build ORT session with CUDA EP ------------------------------------------
+        // --- Build ORT session (TRT→CUDA→CPU EP policy, crate::trt::ep) ---------------
         // Pin ORT CUDA EP to the same device ordinal as `ctx`. Previously
         // hardcoded to device 0, which silently mis-pinned multi-GPU
         // configurations (Phase 3.8 Step 1 audit-fix R1 B2). `error_on_failure`
