@@ -117,6 +117,10 @@ pub enum SparrowEngineError {
     #[error("nvjpeg runtime unavailable: {0}")]
     NvjpegUnavailable(String),
 
+    // -- TensorRT runtime deps (GPU flavor) --
+    #[error("{0}")]
+    TrtRuntimeMissing(String),
+
     // -- ORT --
     #[error("ONNX Runtime error: {0}")]
     Ort(String),
@@ -204,19 +208,37 @@ mod phase_a_r1_error_tests {
             reason: "modality mismatch",
         };
         let display = e.to_string();
-        assert!(display.contains("Incompatible pipeline"), "missing prefix: {display}");
-        assert!(display.contains("AudioDetector"), "missing detector: {display}");
-        assert!(display.contains("Classifier"), "missing classifier: {display}");
-        assert!(display.contains("modality mismatch"), "missing reason: {display}");
+        assert!(
+            display.contains("Incompatible pipeline"),
+            "missing prefix: {display}"
+        );
+        assert!(
+            display.contains("AudioDetector"),
+            "missing detector: {display}"
+        );
+        assert!(
+            display.contains("Classifier"),
+            "missing classifier: {display}"
+        );
+        assert!(
+            display.contains("modality mismatch"),
+            "missing reason: {display}"
+        );
         let debug = format!("{e:?}");
-        assert!(debug.contains("IncompatiblePipeline"), "unexpected Debug: {debug}");
+        assert!(
+            debug.contains("IncompatiblePipeline"),
+            "unexpected Debug: {debug}"
+        );
     }
 
     #[test]
     fn empty_pipeline_displays_clear_message() {
         let e = SparrowEngineError::EmptyPipeline;
         let display = e.to_string();
-        assert!(display.contains("at least one model"), "unexpected Display: {display}");
+        assert!(
+            display.contains("at least one model"),
+            "unexpected Display: {display}"
+        );
         let debug = format!("{e:?}");
         assert!(debug.contains("EmptyPipeline"), "unexpected Debug: {debug}");
     }

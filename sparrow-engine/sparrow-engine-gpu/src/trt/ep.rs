@@ -311,10 +311,7 @@ pub(crate) fn decide_trt_provider_order(
         });
     };
     if !trt_libs_present {
-        // BLOCKED-ON coder-schema: replace this fallback with
-        // SparrowEngineError::TrtRuntimeMissing once the shared error enum owns
-        // that variant.
-        return Err(SparrowEngineError::Ort(format!(
+        return Err(SparrowEngineError::TrtRuntimeMissing(format!(
             "Model {model_id} requires TensorRT but libnvinfer was not found. Install TensorRT 10.x (see docs), or set SPARROW_ENGINE_TRT_DISABLE=1 to run on the CUDA EP."
         )));
     }
@@ -479,10 +476,11 @@ mod tests {
     fn trt_decision_enabled_missing_libs_returns_actionable_error() {
         let err =
             decide_trt_provider_order(Some(&enabled_trt()), 8, 9, false, false, "model-a", "gpu")
-                .unwrap_err()
-                .to_string();
-        assert!(err.contains("Model model-a requires TensorRT"));
-        assert!(err.contains("SPARROW_ENGINE_TRT_DISABLE=1"));
+                .unwrap_err();
+        assert!(matches!(err, SparrowEngineError::TrtRuntimeMissing(_)));
+        let message = err.to_string();
+        assert!(message.contains("Model model-a requires TensorRT"));
+        assert!(message.contains("SPARROW_ENGINE_TRT_DISABLE=1"));
     }
 
     #[test]
