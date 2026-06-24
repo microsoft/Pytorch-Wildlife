@@ -11,7 +11,7 @@ tags:
 
 # Installation
 
-PyTorch-Wildlife installs as a single PyPI package, `PytorchWildlife`, on Windows, macOS, and Linux. The fastest path is a one-line `pip install`; the sections below add GPU acceleration, Docker, and platform-specific notes. Once it is installed, the [API overview](api.md) and [inference examples](inference-examples.md) show what to do next.
+PyTorch-Wildlife installs as a single PyPI package, `PytorchWildlife`, on Windows, macOS, and Linux. The fastest path is a one-line `pip install`; the sections below add GPU acceleration, Docker, and platform-specific notes. Once it is installed, the [API overview](api.md) and [inference examples](inference-examples.md) show what to do next. New to the framework? The [Getting Started](getting-started.md) guide puts this install step in context.
 
 ## Prerequisites
 

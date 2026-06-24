@@ -73,6 +73,44 @@
   </script>
   {%- endif %}
 
+  {%- if page and page.file and page.file.src_path == "getting-started.md" and page.canonical_url %}
+  {#- Getting Started page only: HowTo. Steps mirror the visible getting-started.md headings. -#}
+  <script type="application/ld+json">
+  {{- {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "Getting Started with PyTorch-Wildlife",
+    "description": "How to get started with PyTorch-Wildlife: install the framework, run your first MegaDetector detection, add a species classifier, and scale up to batch inference.",
+    "step": [
+      {
+        "@type": "HowToStep",
+        "name": "Install the framework",
+        "text": "Install PyTorch-Wildlife from PyPI with pip, optionally in a clean conda environment. A CUDA GPU is optional, or try the hosted Hugging Face demo and Google Colab notebook without installing.",
+        "url": page.canonical_url ~ "#step-1-install-the-framework"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Run your first detection",
+        "text": "Load MegaDetectorV6 and run single_image_detection on one image. Weights download on first use.",
+        "url": page.canonical_url ~ "#step-2-run-your-first-detection"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Add species classification",
+        "text": "Pass each detection crop to a species classifier. Detection and classification share the same API, so chaining them is direct.",
+        "url": page.canonical_url ~ "#step-3-add-species-classification"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Scale up and explore",
+        "text": "Run batch_image_detection over a folder, process video or the Gradio web UI, browse the model zoo, or fine-tune on your own data.",
+        "url": page.canonical_url ~ "#step-4-scale-up-and-explore"
+      }
+    ]
+  } | tojson -}}
+  </script>
+  {%- endif %}
+
   {%- if page and page.file and page.file.src_path != "index.md" and page.canonical_url %}
   <script type="application/ld+json">
   {{- {

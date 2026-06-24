@@ -22,6 +22,8 @@ tags:
 
 The goal is a shared foundation that conservation scientists can build on together: common model interfaces, reusable training and inference code, and a place to publish new architectures so the whole community benefits. Every modality-focused project in our ecosystem plugs into this framework rather than reinventing it.
 
+New here? The [Getting Started](getting-started.md) guide walks you from install to your first detection and species classification step by step.
+
 ## Why a framework, not just a model
 
 A single detection model solves one problem. Real conservation pipelines need detection, classification, batch processing, video support, and exportable results that downstream tools can read. PyTorch-Wildlife packages all of that behind one import:

@@ -13,7 +13,7 @@ tags:
 
 PyTorch-Wildlife ships runnable demo scripts so you can go from a fresh install to real output without writing your own harness first. This page walks through the common ways to run inference: one image, a whole folder, a video, and an interactive web UI. Each example maps to a script under the repository's `demo/` directory.
 
-Before you start, install the framework with the [installation guide](installation.md) and skim the [API overview](api.md) so the method names below feel familiar.
+Before you start, install the framework with the [installation guide](installation.md) and skim the [API overview](api.md) so the method names below feel familiar. New to the framework? The [Getting Started](getting-started.md) guide covers the path up to this point.
 
 > [!TIP]
 > The demo scripts are written in cell style (`#%%`), so they run top to bottom as a plain `python demo/<script>.py`, or block by block in an interactive window.
