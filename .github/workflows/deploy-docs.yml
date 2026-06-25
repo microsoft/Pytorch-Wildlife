@@ -6,8 +6,10 @@ on:
       - main
     paths:
       - 'docs/**'
+      - 'overrides/**'
       - 'mkdocs.yml'
       - 'docs-requirements.txt'
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -16,6 +18,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
