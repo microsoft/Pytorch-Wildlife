@@ -22,7 +22,7 @@
 //! `engine_dispatch::detect_audio::AudioRange`.
 
 use sparrow_engine_types::error::{Result, SparrowEngineError};
-use sparrow_engine_types::manifest::{ModelManifest, PostprocessMethod, PreprocessMethod};
+use sparrow_engine_types::manifest::{ModelManifest, PreprocessMethod};
 use sparrow_engine_types::types::{AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment};
 
 use crate::engine::{LoadedModelInner, ModelHandle};
@@ -40,25 +40,6 @@ pub use sparrow_engine_types::AudioRange;
 /// are accepted (raw audio routes through the parallel
 /// [`crate::models::audio_raw::RawAudioModel`]).
 pub(crate) fn validate_audio_model(manifest: &ModelManifest) -> Result<()> {
-    // RP-39 partial-enablement guard (mirrors sparrow-engine-cpu/src/detect_audio.rs).
-    // The shared loader now accepts mel-input audio classifiers (mel_spectrogram +
-    // softmax) so the mobile LiteRT flavor can run them as stage 2 of an audio
-    // cascade. The ORT GPU audio path supports only mel+sigmoid detectors and
-    // raw-audio multi-class classifiers; full mel-input multi-class handling on ORT
-    // is RP-39's remaining scope. Reject it here with a clear, actionable error.
-    if matches!(
-        manifest.preprocess_method,
-        PreprocessMethod::MelSpectrogram { .. }
-    ) && matches!(manifest.postprocess_method, PostprocessMethod::Softmax)
-    {
-        return Err(SparrowEngineError::InvalidManifest(format!(
-            "model '{}' is a mel-input audio classifier (mel_spectrogram + softmax); \
-             detect_audio on this flavor supports only mel+sigmoid detectors and \
-             raw-audio classifiers. Run a mel-input multi-class classifier as stage 2 \
-             of an audio cascade on the mobile (LiteRT) flavor.",
-            manifest.id
-        )));
-    }
     match &manifest.preprocess_method {
         PreprocessMethod::MelSpectrogram { .. } | PreprocessMethod::RawAudio { .. } => Ok(()),
         other => Err(SparrowEngineError::NotAnAudioModel {
