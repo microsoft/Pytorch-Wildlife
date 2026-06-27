@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use ndarray::ArrayViewD;
+use ndarray::{ArrayD, ArrayViewD};
 use ort::value::TensorRef;
 // Phase 3.8 Step 2 Wave 0b: per-stage `tracing::info!` timings (the workspace
 // `tracing` dep is declared unconditional in sparrow-engine-cpu/Cargo.toml since Phase
@@ -14,7 +14,7 @@ use ort::value::TensorRef;
 // as `stage = "audio.<stage>" duration_ns = N` events. No new dep.
 
 use crate::engine::ModelHandle;
-use crate::error::{SparrowEngineError, Result};
+use crate::error::{Result, SparrowEngineError};
 use crate::manifest::{InferenceStrategy, PostprocessMethod, PreprocessMethod};
 use crate::preprocess_audio;
 use crate::types::{AudioClass, AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment};
@@ -127,6 +127,14 @@ enum PreparedAudioKind {
         audio_config: preprocess_audio::AudioPreprocessConfig,
         filterbank: preprocess_audio::MelFilterbank,
     },
+    MelClassifier {
+        audio_config: preprocess_audio::AudioPreprocessConfig,
+        filterbank: preprocess_audio::MelFilterbank,
+        /// Index of the ORT output tensor that carries per-class logits.
+        logits_output_idx: usize,
+        /// Number of softmax classes the model emits.
+        num_classes: usize,
+    },
     Raw {
         /// Index of the ORT output tensor that carries the per-class logits.
         /// For models like Perch 2 with multiple output heads we look up the
@@ -162,28 +170,6 @@ fn prepare_audio_detection(
         }
     };
 
-    // RP-39 partial-enablement guard. The shared manifest loader now accepts
-    // mel-input audio classifiers (mel_spectrogram + softmax) so the mobile
-    // LiteRT flavor can run them as stage 2 of an audio cascade. The cpu/gpu ORT
-    // `detect_audio` path only supports mel+sigmoid detectors and raw-audio
-    // multi-class classifiers; running a mel-input multi-class model through the
-    // binary mel loop would be wrong (sigmoid over N logits / shape mismatch).
-    // Full mel-input multi-class handling on ORT is RP-39's remaining scope —
-    // until then, reject it here with a clear, actionable error.
-    if matches!(
-        manifest.preprocess_method,
-        PreprocessMethod::MelSpectrogram { .. }
-    ) && matches!(manifest.postprocess_method, PostprocessMethod::Softmax)
-    {
-        return Err(SparrowEngineError::InvalidManifest(format!(
-            "model '{}' is a mel-input audio classifier (mel_spectrogram + softmax); \
-             detect_audio on this flavor supports only mel+sigmoid detectors and \
-             raw-audio classifiers. Run a mel-input multi-class classifier as stage 2 \
-             of an audio cascade on the mobile (LiteRT) flavor.",
-            manifest.id
-        )));
-    }
-
     // 2. Fail fast: check handle validity before expensive audio loading.
     handle.check_valid()?;
 
@@ -208,30 +194,45 @@ fn prepare_audio_detection(
     // 5. Branch on preprocess method to assemble path-specific state.
     match &manifest.preprocess_method {
         PreprocessMethod::MelSpectrogram { .. } => {
-            let audio_config = preprocess_audio::AudioPreprocessConfig::from_manifest(
-                &manifest.preprocess_method,
-            )
-            .ok_or_else(|| SparrowEngineError::NotAnAudioModel {
-                id: manifest.id.clone(),
-                method: "non-mel".to_string(),
-            })?;
-            let (segment_samples, stride_samples) =
-                preprocess_audio::validate_audio_window_params(
-                    segment_duration_s,
-                    segment_stride_s,
-                    threshold,
-                    sample_rate,
-                    audio_config.n_fft,
-                )?;
+            let audio_config =
+                preprocess_audio::AudioPreprocessConfig::from_manifest(&manifest.preprocess_method)
+                    .ok_or_else(|| SparrowEngineError::NotAnAudioModel {
+                        id: manifest.id.clone(),
+                        method: "non-mel".to_string(),
+                    })?;
+            let (segment_samples, stride_samples) = preprocess_audio::validate_audio_window_params(
+                segment_duration_s,
+                segment_stride_s,
+                threshold,
+                sample_rate,
+                audio_config.n_fft,
+            )?;
             let audio_samples = preprocess_audio::load_audio(audio, &audio_config)?;
             let filterbank = preprocess_audio::MelFilterbank::new(&audio_config)?;
 
-            Ok(PreparedAudioDetection {
-                audio_samples,
-                kind: PreparedAudioKind::Mel {
+            let kind = if matches!(manifest.postprocess_method, PostprocessMethod::Softmax) {
+                let (logits_output_idx, num_classes) = resolve_mel_classifier_output(
+                    handle,
+                    &audio_config,
+                    &filterbank,
+                    segment_samples,
+                )?;
+                PreparedAudioKind::MelClassifier {
                     audio_config,
                     filterbank,
-                },
+                    logits_output_idx,
+                    num_classes,
+                }
+            } else {
+                PreparedAudioKind::Mel {
+                    audio_config,
+                    filterbank,
+                }
+            };
+
+            Ok(PreparedAudioDetection {
+                audio_samples,
+                kind,
                 segment_samples,
                 stride_samples,
                 threshold,
@@ -273,15 +274,18 @@ fn prepare_audio_detection(
                 }
             }
 
-            let audio_samples =
-                preprocess_audio::load_audio_at_sample_rate(audio, sample_rate)?;
+            let audio_samples = preprocess_audio::load_audio_at_sample_rate(audio, sample_rate)?;
 
             // Resolve the logits output: prefer the tensor named "label" (Perch 2),
             // fall back to output 0 for single-head softmax classifiers.
             // When pass_orig_sample_rate=true, probe with a dummy orig_sr=sample_rate
             // (the no-op case for fill_highfreq) so the 2-input ONNX accepts the call.
-            let (logits_output_idx, num_classes) =
-                resolve_classifier_output(handle, segment_samples, *pass_orig_sample_rate, sample_rate)?;
+            let (logits_output_idx, num_classes) = resolve_classifier_output(
+                handle,
+                segment_samples,
+                *pass_orig_sample_rate,
+                sample_rate,
+            )?;
 
             Ok(PreparedAudioDetection {
                 audio_samples,
@@ -324,12 +328,7 @@ fn resolve_classifier_output(
         .lock()
         .map_err(|_| SparrowEngineError::Ort("audio session lock poisoned".into()))?;
 
-    // Find the "label" output by name, falling back to output 0.
-    let logits_idx = guard
-        .outputs()
-        .iter()
-        .position(|o| o.name() == "label")
-        .unwrap_or(0);
+    let logits_idx = classifier_logits_output_idx(&guard);
 
     // Probe with one zero-filled window to learn the class count.
     let probe = ndarray::Array2::<f32>::zeros((1, window_samples));
@@ -341,9 +340,15 @@ fn resolve_classifier_output(
         probe_sr_arr = ndarray::Array1::from_vec(vec![target_sample_rate as i64]);
         let orig_sr_value =
             TensorRef::from_array_view(&probe_sr_arr).map_err(crate::engine::ort_err)?;
-        let inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = vec![
+        let inputs: Vec<(
+            std::borrow::Cow<'_, str>,
+            ort::session::SessionInputValue<'_>,
+        )> = vec![
             (std::borrow::Cow::Borrowed("audio"), input_value.into()),
-            (std::borrow::Cow::Borrowed("orig_sample_rate"), orig_sr_value.into()),
+            (
+                std::borrow::Cow::Borrowed("orig_sample_rate"),
+                orig_sr_value.into(),
+            ),
         ];
         guard.run(inputs).map_err(crate::engine::ort_err)?
     } else {
@@ -361,6 +366,67 @@ fn resolve_classifier_output(
     let view: ArrayViewD<'_, f32> = outputs[logits_idx]
         .try_extract_array::<f32>()
         .map_err(crate::engine::ort_err)?;
+    let num_classes = validate_classifier_probe_output(&view)?;
+    drop(outputs);
+    drop(guard);
+
+    validate_classifier_label_count(handle, num_classes)?;
+
+    Ok((logits_idx, num_classes))
+}
+
+fn resolve_mel_classifier_output(
+    handle: &ModelHandle,
+    audio_config: &preprocess_audio::AudioPreprocessConfig,
+    filterbank: &preprocess_audio::MelFilterbank,
+    segment_samples: usize,
+) -> Result<(usize, usize)> {
+    let session = handle.pin_session()?;
+    let mut guard = session
+        .lock()
+        .map_err(|_| SparrowEngineError::Ort("audio session lock poisoned".into()))?;
+
+    let logits_idx = classifier_logits_output_idx(&guard);
+    let probe_audio = vec![0.0f32; segment_samples];
+    let probe_mel = preprocess_audio::mel_spectrogram(
+        &probe_audio,
+        audio_config.sample_rate,
+        audio_config,
+        filterbank,
+    )?
+    .into_dyn();
+    let input_value = TensorRef::from_array_view(&probe_mel).map_err(crate::engine::ort_err)?;
+    let outputs = guard
+        .run(ort::inputs![input_value])
+        .map_err(crate::engine::ort_err)?;
+    if outputs.len() <= logits_idx {
+        return Err(SparrowEngineError::Ort(format!(
+            "classifier session probe returned {} outputs; expected at least {}",
+            outputs.len(),
+            logits_idx + 1
+        )));
+    }
+    let view: ArrayViewD<'_, f32> = outputs[logits_idx]
+        .try_extract_array::<f32>()
+        .map_err(crate::engine::ort_err)?;
+    let num_classes = validate_classifier_probe_output(&view)?;
+    drop(outputs);
+    drop(guard);
+
+    validate_classifier_label_count(handle, num_classes)?;
+
+    Ok((logits_idx, num_classes))
+}
+
+fn classifier_logits_output_idx(session: &ort::session::Session) -> usize {
+    session
+        .outputs()
+        .iter()
+        .position(|o| o.name() == "label")
+        .unwrap_or(0)
+}
+
+fn validate_classifier_probe_output(view: &ArrayViewD<'_, f32>) -> Result<usize> {
     let shape = view.shape();
     if shape.len() != 2 || shape[0] != 1 {
         return Err(SparrowEngineError::Ort(format!(
@@ -368,20 +434,18 @@ fn resolve_classifier_output(
             shape
         )));
     }
-    let num_classes = shape[1];
-    drop(outputs);
-    drop(guard);
+    Ok(shape[1])
+}
 
+fn validate_classifier_label_count(handle: &ModelHandle, num_classes: usize) -> Result<()> {
     if !handle.labels.is_empty() && handle.labels.len() != num_classes {
         return Err(SparrowEngineError::InvalidManifest(format!(
-            "labels count ({}) does not match classifier output dim ({}) — \
-             manifest's labels file is out of sync with the ONNX model",
+            "labels count ({}) does not match classifier output dim ({}) — manifest labels file is out of sync with the ONNX model",
             handle.labels.len(),
             num_classes
         )));
     }
-
-    Ok((logits_idx, num_classes))
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -402,8 +466,48 @@ fn detect_audio_loop(
 ) -> Result<AudioDetectResult> {
     match &prep.kind {
         PreparedAudioKind::Mel { .. } => detect_audio_loop_mel(handle, prep, start, on_segment),
+        PreparedAudioKind::MelClassifier { .. } => {
+            detect_audio_loop_mel_softmax(handle, prep, start, on_segment)
+        }
         PreparedAudioKind::Raw { .. } => detect_audio_loop_raw(handle, prep, start, on_segment),
     }
+}
+
+fn build_mel_batch(
+    prep: &PreparedAudioDetection,
+    audio_config: &preprocess_audio::AudioPreprocessConfig,
+    filterbank: &preprocess_audio::MelFilterbank,
+    batch_offsets: &[usize],
+) -> Result<ArrayD<f32>> {
+    let total_samples = prep.audio_samples.data.len();
+    let segment_samples = prep.segment_samples;
+    let mut mel_tensors = Vec::with_capacity(batch_offsets.len());
+
+    for &seg_offset in batch_offsets {
+        let remaining = total_samples - seg_offset;
+        let tensor = if remaining >= segment_samples {
+            preprocess_audio::mel_spectrogram(
+                &prep.audio_samples.data[seg_offset..seg_offset + segment_samples],
+                prep.audio_samples.orig_sample_rate,
+                audio_config,
+                filterbank,
+            )?
+        } else {
+            let mut padded = prep.audio_samples.data[seg_offset..].to_vec();
+            padded.resize(segment_samples, 0.0);
+            preprocess_audio::mel_spectrogram(
+                &padded,
+                prep.audio_samples.orig_sample_rate,
+                audio_config,
+                filterbank,
+            )?
+        };
+        mel_tensors.push(tensor.into_dyn());
+    }
+
+    let mel_views: Vec<_> = mel_tensors.iter().map(|t| t.view()).collect();
+    ndarray::concatenate(ndarray::Axis(0), &mel_views)
+        .map_err(|e| SparrowEngineError::Ort(format!("batch concatenation failed: {e}")))
 }
 
 /// Mel-spectrogram path: binary detectors (e.g. MD_AudioBirds_V1) with
@@ -450,39 +554,7 @@ fn detect_audio_loop_mel(
 
         // ----- audio.preprocess (per batch): mel spectrogram + concat -----
         let t_preprocess = Instant::now();
-        // Compute mel spectrograms for all segments in this batch.
-        // mel_spectrogram returns Array4<f32> [1, 1, n_mels, time_steps];
-        // convert to dynamic for concatenation along batch axis.
-        let mut mel_views = Vec::with_capacity(batch_len);
-        let mut mel_tensors = Vec::with_capacity(batch_len);
-        for &seg_offset in batch_offsets {
-            let remaining = total_samples - seg_offset;
-            let tensor = if remaining >= segment_samples {
-                preprocess_audio::mel_spectrogram(
-                    &prep.audio_samples.data[seg_offset..seg_offset + segment_samples],
-                    prep.audio_samples.orig_sample_rate,
-                    audio_config,
-                    filterbank,
-                )?
-            } else {
-                let mut padded = prep.audio_samples.data[seg_offset..].to_vec();
-                padded.resize(segment_samples, 0.0);
-                preprocess_audio::mel_spectrogram(
-                    &padded,
-                    prep.audio_samples.orig_sample_rate,
-                    audio_config,
-                    filterbank,
-                )?
-            };
-            mel_tensors.push(tensor.into_dyn());
-        }
-        for t in &mel_tensors {
-            mel_views.push(t.view());
-        }
-
-        // Stack into batch tensor [N, 1, n_mels, time_steps].
-        let batch_tensor = ndarray::concatenate(ndarray::Axis(0), &mel_views)
-            .map_err(|e| SparrowEngineError::Ort(format!("batch concatenation failed: {e}")))?;
+        let batch_tensor = build_mel_batch(prep, audio_config, filterbank, batch_offsets)?;
         tracing::info!(
             stage = "audio.preprocess",
             duration_ns = t_preprocess.elapsed().as_nanos() as u64,
@@ -588,6 +660,144 @@ fn detect_audio_loop_mel(
     })
 }
 
+/// Mel-spectrogram path: multi-class softmax classifiers.
+/// Emits one [`AudioSegment`] per window unconditionally, each carrying the top-K
+/// classes. `confidence` is denormalised to the top-1 probability.
+fn detect_audio_loop_mel_softmax(
+    handle: &ModelHandle,
+    prep: &PreparedAudioDetection,
+    start: Instant,
+    mut on_segment: Option<&mut dyn FnMut(&AudioSegment)>,
+) -> Result<AudioDetectResult> {
+    let (audio_config, filterbank, logits_output_idx, num_classes) = match &prep.kind {
+        PreparedAudioKind::MelClassifier {
+            audio_config,
+            filterbank,
+            logits_output_idx,
+            num_classes,
+        } => (audio_config, filterbank, *logits_output_idx, *num_classes),
+        _ => unreachable!("guarded by detect_audio_loop dispatch"),
+    };
+
+    let session = handle.pin_session()?;
+    let total_samples = prep.audio_samples.data.len();
+    let duration_s = prep.audio_samples.duration_s;
+    let segment_samples = prep.segment_samples;
+    let stride_samples = prep.stride_samples;
+    let sample_rate = prep.sample_rate;
+    let top_k = prep.top_k.min(num_classes).max(1);
+
+    let offsets =
+        preprocess_audio::compute_segment_offsets(total_samples, segment_samples, stride_samples);
+    let mut segments = Vec::with_capacity(offsets.len());
+
+    for batch_offsets in offsets.chunks(DEFAULT_BATCH_SIZE) {
+        let batch_len = batch_offsets.len();
+
+        // ----- audio.preprocess (per batch): mel spectrogram + concat -----
+        let t_preprocess = Instant::now();
+        let batch_tensor = build_mel_batch(prep, audio_config, filterbank, batch_offsets)?;
+        tracing::info!(
+            stage = "audio.preprocess",
+            duration_ns = t_preprocess.elapsed().as_nanos() as u64,
+            batch_len = batch_len,
+        );
+
+        // ----- audio.ort (per batch): session.run ---------------------------
+        let t_ort = Instant::now();
+        let input_value =
+            TensorRef::from_array_view(&batch_tensor).map_err(crate::engine::ort_err)?;
+        let mut guard = session
+            .lock()
+            .map_err(|_| SparrowEngineError::Ort("audio session lock poisoned".into()))?;
+        let outputs = guard
+            .run(ort::inputs![input_value])
+            .map_err(crate::engine::ort_err)?;
+        if outputs.len() <= logits_output_idx {
+            return Err(SparrowEngineError::Ort(format!(
+                "audio classifier returned {} outputs; expected at least {}",
+                outputs.len(),
+                logits_output_idx + 1
+            )));
+        }
+        let output_view: ArrayViewD<'_, f32> = outputs[logits_output_idx]
+            .try_extract_array::<f32>()
+            .map_err(crate::engine::ort_err)?;
+        let expected = batch_len * num_classes;
+        let view_shape = output_view.shape().to_vec();
+        if output_view.len() != expected {
+            return Err(SparrowEngineError::Ort(format!(
+                "audio classifier returned {} elements (shape {:?}) for batch of {} segments x {} classes; expected exactly {}",
+                output_view.len(),
+                view_shape,
+                batch_len,
+                num_classes,
+                expected
+            )));
+        }
+        let logits: Vec<f32> = output_view.iter().copied().collect();
+        drop(outputs);
+        drop(guard);
+        if !logits.iter().all(|x| x.is_finite()) {
+            return Err(SparrowEngineError::Ort(
+                "audio classifier returned non-finite logits".to_string(),
+            ));
+        }
+        tracing::info!(
+            stage = "audio.ort",
+            duration_ns = t_ort.elapsed().as_nanos() as u64,
+            batch_len = batch_len,
+        );
+
+        // ----- audio.postprocess (per batch): softmax + top-K ---------------
+        let t_post = Instant::now();
+        for (i, &seg_offset) in batch_offsets.iter().enumerate() {
+            let window_logits = &logits[i * num_classes..(i + 1) * num_classes];
+            let probs = softmax(window_logits);
+            let top = top_k_indices(&probs, top_k);
+            let classes: Vec<AudioClass> = top
+                .into_iter()
+                .map(|(idx, p)| AudioClass {
+                    class_idx: idx as u32,
+                    label: prep.labels.get(idx).cloned(),
+                    probability: p,
+                })
+                .collect();
+            let top1_prob = classes.first().map(|c| c.probability).unwrap_or(0.0);
+
+            let (start_s, end_s) = preprocess_audio::segment_time_range(
+                seg_offset,
+                segment_samples,
+                total_samples,
+                sample_rate,
+            );
+            let seg = AudioSegment {
+                start_time_s: start_s,
+                end_time_s: end_s,
+                confidence: top1_prob,
+                classes,
+            };
+            if let Some(ref mut cb) = on_segment {
+                cb(&seg);
+            }
+            segments.push(seg);
+        }
+        tracing::info!(
+            stage = "audio.postprocess",
+            duration_ns = t_post.elapsed().as_nanos() as u64,
+            batch_len = batch_len,
+        );
+    }
+
+    let elapsed = start.elapsed();
+    Ok(AudioDetectResult {
+        segments,
+        duration_s,
+        sample_rate,
+        processing_time_ms: elapsed.as_secs_f32() * 1000.0,
+    })
+}
+
 /// Raw-audio path: multi-class softmax classifiers (e.g. Perch 2 / 14795 species).
 /// Emits one [`AudioSegment`] per window unconditionally, each carrying the top-K
 /// classes. `confidence` is denormalised to the top-1 probability.
@@ -660,14 +870,19 @@ fn detect_audio_loop_raw(
         // ONNX must declare two inputs in this order: ("audio", "orig_sample_rate").
         let orig_sr_arr;
         let outputs = if pass_orig_sample_rate {
-            orig_sr_arr = ndarray::Array1::from_vec(vec![
-                prep.audio_samples.orig_sample_rate as i64,
-            ]);
+            orig_sr_arr =
+                ndarray::Array1::from_vec(vec![prep.audio_samples.orig_sample_rate as i64]);
             let orig_sr_value =
                 TensorRef::from_array_view(&orig_sr_arr).map_err(crate::engine::ort_err)?;
-            let inputs: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = vec![
+            let inputs: Vec<(
+                std::borrow::Cow<'_, str>,
+                ort::session::SessionInputValue<'_>,
+            )> = vec![
                 (std::borrow::Cow::Borrowed("audio"), input_value.into()),
-                (std::borrow::Cow::Borrowed("orig_sample_rate"), orig_sr_value.into()),
+                (
+                    std::borrow::Cow::Borrowed("orig_sample_rate"),
+                    orig_sr_value.into(),
+                ),
             ];
             guard.run(inputs).map_err(crate::engine::ort_err)?
         } else {
@@ -926,6 +1141,20 @@ mod tests {
             confidence: conf,
             classes: Vec::new(),
         }
+    }
+
+    #[test]
+    fn classifier_probe_output_accepts_single_batch_logits() {
+        let logits = ndarray::Array2::<f32>::zeros((1, 3)).into_dyn();
+        let num_classes = validate_classifier_probe_output(&logits.view()).unwrap();
+        assert_eq!(num_classes, 3);
+    }
+
+    #[test]
+    fn classifier_probe_output_rejects_wrong_rank() {
+        let logits = ndarray::Array1::<f32>::zeros(3).into_dyn();
+        let err = validate_classifier_probe_output(&logits.view()).unwrap_err();
+        assert!(err.to_string().contains("expected [batch, num_classes]"));
     }
 
     #[test]
