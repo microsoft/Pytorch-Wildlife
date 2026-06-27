@@ -1,0 +1,29 @@
+[model]
+id = "mel-classifier-tiny"
+format = "onnx"
+file = "model.onnx"
+
+[preprocessing]
+method = "mel_spectrogram"
+sample_rate = 24000
+n_fft = 512
+hop_length = 160
+n_mels = 64
+fmin = 0.0
+fmax = 12000.0
+top_db = 80.0
+window = "hann_symmetric"
+mel_scale = "slaney"
+filter_norm = "slaney"
+
+[inference]
+strategy = "sliding_window"
+segment_duration_s = 1.0
+segment_stride_s = 1.0
+
+[postprocessing]
+method = "softmax"
+
+[labels]
+file = "labels.txt"
+format = "one_per_line"
