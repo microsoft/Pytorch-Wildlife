@@ -61,14 +61,16 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use cudarc::cufft::sys as cufft_sys;
+use cudarc::driver::{CudaContext, CudaSlice, CudaStream, DeviceRepr, ValidAsZeroBits};
 use sparrow_engine_core::preprocess_audio::{self, AudioPreprocessConfig, AudioSamples};
-use sparrow_engine_types::error::{SparrowEngineError, Result};
+use sparrow_engine_types::error::{Result, SparrowEngineError};
 use sparrow_engine_types::manifest::{
     self, InferenceStrategy, ModelManifest, PostprocessMethod, Precision, PreprocessMethod,
 };
-use sparrow_engine_types::{AudioClass, AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment};
-use cudarc::cufft::sys as cufft_sys;
-use cudarc::driver::{CudaContext, CudaSlice, CudaStream, DeviceRepr, ValidAsZeroBits};
+use sparrow_engine_types::{
+    AudioClass, AudioDetectOpts, AudioDetectResult, AudioInput, AudioSegment,
+};
 
 use crate::audio::cufft_plan::{alloc_complex_output, BatchedR2cPlan};
 use crate::audio::hann::{upload_hann_window, upload_mel_filterbank, UploadedMelFilterbank};
@@ -78,6 +80,8 @@ use crate::audio::power_kernel::{power_gpu, PowerKernel};
 use crate::audio::power_to_db::{power_to_db_gpu, PowerToDbKernel};
 use crate::audio::transpose::{transpose_per_segment_gpu, TransposeKernel};
 use crate::audio::window_frame::{window_frame_gpu, WindowFrameKernel};
+
+const DEFAULT_AUDIO_CLASSIFIER_TOP_K: usize = 5;
 
 // ---------------------------------------------------------------------------
 // Strategy + opts
@@ -308,6 +312,9 @@ pub struct AudioModel {
     workspace: Mutex<AudioWorkspace>,
 
     // Manifest-derived defaults.
+    postprocess: AudioPostprocess,
+    num_classes: usize,
+    labels: Vec<String>,
     threshold: f32,
     segment_duration_s: f32,
     stride_s: f32,
@@ -364,6 +371,8 @@ impl AudioModel {
         // 1. Validate that this manifest describes an audio (mel) model.
         let (sample_rate, segment_duration_s, stride_s, threshold) =
             extract_audio_params(manifest)?;
+        let (postprocess, labels) = resolve_audio_postprocess(manifest, manifest_dir, threshold)?;
+        let num_classes = postprocess.num_classes();
         let config =
             AudioPreprocessConfig::from_manifest(&manifest.preprocess_method).ok_or_else(|| {
                 SparrowEngineError::NotAnAudioModel {
@@ -452,6 +461,9 @@ impl AudioModel {
             mel_gemm,
             plans: Mutex::new(HashMap::new()),
             workspace: Mutex::new(AudioWorkspace::new()),
+            postprocess,
+            num_classes,
+            labels,
             threshold,
             segment_duration_s,
             stride_s,
@@ -575,8 +587,11 @@ impl AudioModel {
         let duration_s = samples.duration_s;
 
         // Pre-compute segment offsets (matches sparrow-engine-cpu termination logic).
-        let segment_offsets =
-            preprocess_audio::compute_segment_offsets(total_samples, win.segment_samples, win.stride_samples);
+        let segment_offsets = preprocess_audio::compute_segment_offsets(
+            total_samples,
+            win.segment_samples,
+            win.stride_samples,
+        );
         let n_segments = segment_offsets.len();
         // Shared audio option validation guarantees `segment_samples >= n_fft`,
         // so the subtraction below cannot underflow.
@@ -774,7 +789,7 @@ impl AudioModel {
         // only observable change is that VRAM is reserved BETWEEN detect
         // calls instead of being returned. Steady-state peak unchanged.
         let t_ort = Instant::now();
-        let mut all_logits: Vec<f32> = Vec::with_capacity(n_segments);
+        let mut all_logits: Vec<f32> = Vec::with_capacity(n_segments * self.num_classes);
         // The reported `chunk_elements` is the per-call buffer
         // footprint, capped at `n_segments` so callers can pass
         // `ort_chunk = usize::MAX`-style sentinels (e.g. via
@@ -800,10 +815,12 @@ impl AudioModel {
                 chunk_seq = chunk_seq,
                 chunk_batch = chunk_batch,
             );
-            if logits.len() != chunk_batch {
+            let expected_logits = chunk_batch * self.num_classes;
+            if logits.len() != expected_logits {
                 return Err(SparrowEngineError::Ort(format!(
-                    "Audio model returned {} logits for chunk of {chunk_batch}; expected exactly {chunk_batch}",
+                    "Audio model returned {} logits for chunk of {chunk_batch} x {} classes; expected exactly {expected_logits}",
                     logits.len(),
+                    self.num_classes,
                 )));
             }
             if !logits.iter().all(|logit| logit.is_finite()) {
@@ -828,11 +845,13 @@ impl AudioModel {
 
         // ---- Stage 9: postprocess (sigmoid + threshold + collect/callback) ----
         let t_post = Instant::now();
-        let segments = collect_segments(
+        let segments = collect_segments_for_postprocess(
             &all_logits,
             segment_offsets,
             samples.data.len(),
             win,
+            &self.postprocess,
+            &self.labels,
             on_segment,
         );
         tracing::info!(
@@ -910,7 +929,7 @@ impl AudioModel {
 
         let kernels = self.pipeline_kernels();
 
-        let mut all_logits: Vec<f32> = Vec::with_capacity(n_segments);
+        let mut all_logits: Vec<f32> = Vec::with_capacity(n_segments * self.num_classes);
         let total_samples = samples.data.len();
         let total_audio_samples = total_samples;
 
@@ -1066,10 +1085,12 @@ impl AudioModel {
                 duration_ns = t_ort.elapsed().as_nanos() as u64,
                 batch_n = batch_n,
             );
-            if logits.len() != batch_n {
+            let expected_logits = batch_n * self.num_classes;
+            if logits.len() != expected_logits {
                 return Err(SparrowEngineError::Ort(format!(
-                    "Audio model returned {} logits for batch of {batch_n}; expected exactly {batch_n}",
+                    "Audio model returned {} logits for batch of {batch_n} x {} classes; expected exactly {expected_logits}",
                     logits.len(),
+                    self.num_classes,
                 )));
             }
             if !logits.iter().all(|logit| logit.is_finite()) {
@@ -1081,11 +1102,13 @@ impl AudioModel {
         }
 
         let t_post = Instant::now();
-        let segments = collect_segments(
+        let segments = collect_segments_for_postprocess(
             &all_logits,
             segment_offsets,
             samples.data.len(),
             win,
+            &self.postprocess,
+            &self.labels,
             on_segment,
         );
         tracing::info!(
@@ -1102,10 +1125,9 @@ impl AudioModel {
 
     /// Look up (or build) a cuFFT plan for the requested batch size.
     pub(crate) fn get_or_build_plan(&self, total_frames: usize) -> Result<Arc<BatchedR2cPlan>> {
-        let mut plans = self
-            .plans
-            .lock()
-            .map_err(|_| SparrowEngineError::Ort("AudioModel plan-cache lock poisoned".to_string()))?;
+        let mut plans = self.plans.lock().map_err(|_| {
+            SparrowEngineError::Ort("AudioModel plan-cache lock poisoned".to_string())
+        })?;
         if let Some(existing) = plans.get(&total_frames) {
             return Ok(existing.clone());
         }
@@ -1150,8 +1172,11 @@ impl AudioModel {
         let win = self.resolve_window(opts)?;
         let samples = preprocess_audio::load_audio(audio, &self.config)?;
         let total_samples = samples.data.len();
-        let segment_offsets =
-            preprocess_audio::compute_segment_offsets(total_samples, win.segment_samples, win.stride_samples);
+        let segment_offsets = preprocess_audio::compute_segment_offsets(
+            total_samples,
+            win.segment_samples,
+            win.stride_samples,
+        );
         let n_segments = segment_offsets.len();
         // Shared audio option validation guarantees `segment_samples >= n_fft`,
         // so the subtraction below cannot underflow.
@@ -1319,6 +1344,21 @@ pub(crate) struct WindowParams {
     pub top_db: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AudioPostprocess {
+    Detector,
+    Classifier { num_classes: usize, top_k: usize },
+}
+
+impl AudioPostprocess {
+    fn num_classes(self) -> usize {
+        match self {
+            AudioPostprocess::Detector => 1,
+            AudioPostprocess::Classifier { num_classes, .. } => num_classes,
+        }
+    }
+}
+
 fn extract_audio_params(manifest: &ModelManifest) -> Result<(u32, f32, f32, f32)> {
     let sample_rate = match &manifest.preprocess_method {
         PreprocessMethod::MelSpectrogram { sample_rate, .. } => *sample_rate,
@@ -1357,6 +1397,51 @@ fn extract_audio_params(manifest: &ModelManifest) -> Result<(u32, f32, f32, f32)
         _ => manifest.confidence_threshold.unwrap_or(0.5),
     };
     Ok((sample_rate, segment_duration_s, stride_s, threshold))
+}
+
+fn resolve_audio_postprocess(
+    manifest: &ModelManifest,
+    manifest_dir: &Path,
+    threshold: f32,
+) -> Result<(AudioPostprocess, Vec<String>)> {
+    let labels = match (&manifest.label_file, &manifest.label_format) {
+        (Some(file), Some(format)) => manifest::load_labels(&manifest_dir.join(file), format)?,
+        _ => Vec::new(),
+    };
+    let label_count = (!labels.is_empty()).then_some(labels.len());
+    let postprocess =
+        resolve_audio_postprocess_from_parts(&manifest.postprocess_method, label_count, threshold)?;
+    Ok((postprocess, labels))
+}
+
+pub(crate) fn resolve_audio_postprocess_from_parts(
+    method: &PostprocessMethod,
+    label_count: Option<usize>,
+    _threshold: f32,
+) -> Result<AudioPostprocess> {
+    match method {
+        PostprocessMethod::Sigmoid { .. } => Ok(AudioPostprocess::Detector),
+        PostprocessMethod::Softmax => {
+            let num_classes = label_count.ok_or_else(|| {
+                SparrowEngineError::InvalidManifest(
+                    "mel-input softmax audio classifiers require a labels file so the GPU flavor can resolve class count at load time".to_string(),
+                )
+            })?;
+            if num_classes == 0 {
+                return Err(SparrowEngineError::InvalidManifest(
+                    "mel-input softmax audio classifier labels file is empty".to_string(),
+                ));
+            }
+            Ok(AudioPostprocess::Classifier {
+                num_classes,
+                top_k: DEFAULT_AUDIO_CLASSIFIER_TOP_K.min(num_classes).max(1),
+            })
+        }
+        other => Err(SparrowEngineError::InvalidManifest(format!(
+            "AudioModel supports only sigmoid or softmax postprocess, got {:?}",
+            other
+        ))),
+    }
 }
 
 /// Sigmoid activation (matches `sparrow-engine-cpu/src/detect_audio.rs::sigmoid`).
@@ -1411,6 +1496,107 @@ pub(crate) fn collect_segments(
         }
     }
     segments
+}
+
+fn collect_segments_for_postprocess(
+    logits: &[f32],
+    segment_offsets: &[usize],
+    total_samples: usize,
+    win: &WindowParams,
+    postprocess: &AudioPostprocess,
+    labels: &[String],
+    on_segment: &mut Option<&mut dyn FnMut(&AudioSegment)>,
+) -> Vec<AudioSegment> {
+    match *postprocess {
+        AudioPostprocess::Detector => {
+            collect_segments(logits, segment_offsets, total_samples, win, on_segment)
+        }
+        AudioPostprocess::Classifier { .. } => collect_classifier_segments(
+            logits,
+            segment_offsets,
+            total_samples,
+            win,
+            *postprocess,
+            labels,
+            on_segment,
+        ),
+    }
+}
+
+fn collect_classifier_segments(
+    logits: &[f32],
+    segment_offsets: &[usize],
+    total_samples: usize,
+    win: &WindowParams,
+    postprocess: AudioPostprocess,
+    labels: &[String],
+    on_segment: &mut Option<&mut dyn FnMut(&AudioSegment)>,
+) -> Vec<AudioSegment> {
+    let AudioPostprocess::Classifier { num_classes, top_k } = postprocess else {
+        return Vec::new();
+    };
+    let mut segments = Vec::with_capacity(segment_offsets.len());
+    for (i, &seg_offset) in segment_offsets.iter().enumerate() {
+        let start = i * num_classes;
+        let end = start + num_classes;
+        let Some(window_logits) = logits.get(start..end) else {
+            break;
+        };
+        if !window_logits.iter().all(|logit| logit.is_finite()) {
+            continue;
+        }
+        let probs = softmax(window_logits);
+        let classes: Vec<AudioClass> = top_k_indices(&probs, top_k)
+            .into_iter()
+            .map(|(idx, p)| AudioClass {
+                class_idx: idx as u32,
+                label: labels.get(idx).cloned(),
+                probability: p,
+            })
+            .collect();
+        let confidence = classes.first().map(|c| c.probability).unwrap_or(0.0);
+        let (start_time_s, end_time_s) = preprocess_audio::segment_time_range(
+            seg_offset,
+            win.segment_samples,
+            total_samples,
+            win.sample_rate,
+        );
+        let seg = AudioSegment {
+            start_time_s,
+            end_time_s,
+            confidence,
+            classes,
+        };
+        if let Some(cb) = on_segment.as_deref_mut() {
+            cb(&seg);
+        }
+        segments.push(seg);
+    }
+    segments
+}
+
+fn softmax(logits: &[f32]) -> Vec<f32> {
+    if logits.is_empty() {
+        return Vec::new();
+    }
+    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let exps: Vec<f32> = logits.iter().map(|&v| (v - max).exp()).collect();
+    let sum: f32 = exps.iter().sum();
+    if sum == 0.0 {
+        return vec![0.0; logits.len()];
+    }
+    exps.into_iter().map(|v| v / sum).collect()
+}
+
+fn top_k_indices(probs: &[f32], k: usize) -> Vec<(usize, f32)> {
+    let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
+    indexed.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
+    indexed.truncate(k);
+    indexed
 }
 
 /// Helper for Wave 2 strategies: synchronize the audio model's stream.
@@ -1643,6 +1829,41 @@ mod tests {
                 "default_strategy_streaming() must be HybridA{{16}} for per-batch cadence, got {other:?}"
             ),
         }
+    }
+
+    #[test]
+    fn postprocess_mode_sigmoid_detector_uses_single_class() {
+        let mode = resolve_audio_postprocess_from_parts(
+            &PostprocessMethod::Sigmoid {
+                confidence_threshold: 0.7,
+            },
+            None,
+            0.7,
+        )
+        .expect("sigmoid postprocess should resolve");
+        assert_eq!(mode, AudioPostprocess::Detector);
+        assert_eq!(mode.num_classes(), 1);
+    }
+
+    #[test]
+    fn postprocess_mode_softmax_classifier_uses_label_count_and_top_k() {
+        let mode = resolve_audio_postprocess_from_parts(&PostprocessMethod::Softmax, Some(3), 0.0)
+            .expect("softmax postprocess should resolve with labels");
+        assert_eq!(
+            mode,
+            AudioPostprocess::Classifier {
+                num_classes: 3,
+                top_k: 3,
+            }
+        );
+        assert_eq!(mode.num_classes(), 3);
+    }
+
+    #[test]
+    fn postprocess_mode_softmax_rejects_missing_labels() {
+        let err = resolve_audio_postprocess_from_parts(&PostprocessMethod::Softmax, None, 0.0)
+            .expect_err("softmax without labels must be rejected");
+        assert!(format!("{err}").contains("labels file"));
     }
 
     #[test]
