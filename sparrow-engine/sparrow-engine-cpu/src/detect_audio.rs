@@ -119,9 +119,10 @@ struct PreparedAudioDetection {
     labels: Arc<Vec<String>>,
 }
 
-/// Per-path state inside `PreparedAudioDetection`: mel spectrogram detector
-/// (binary, Sigmoid postprocess) vs raw-audio classifier (multi-class, Softmax
-/// postprocess; e.g. Perch 2).
+/// Per-path state inside `PreparedAudioDetection`, one variant per detection path:
+/// - `Mel`: mel-spectrogram input, binary detector (Sigmoid postprocess).
+/// - `MelClassifier`: mel-spectrogram input, multi-class classifier (Softmax postprocess).
+/// - `Raw`: raw-audio input, multi-class classifier (Softmax postprocess; e.g. Perch 2).
 enum PreparedAudioKind {
     Mel {
         audio_config: preprocess_audio::AudioPreprocessConfig,
