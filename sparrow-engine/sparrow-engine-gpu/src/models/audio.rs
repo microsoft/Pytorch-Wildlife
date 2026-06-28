@@ -371,7 +371,7 @@ impl AudioModel {
         // 1. Validate that this manifest describes an audio (mel) model.
         let (sample_rate, segment_duration_s, stride_s, threshold) =
             extract_audio_params(manifest)?;
-        let (postprocess, labels) = resolve_audio_postprocess(manifest, manifest_dir, threshold)?;
+        let (postprocess, labels) = resolve_audio_postprocess(manifest, manifest_dir)?;
         let num_classes = postprocess.num_classes();
         let config =
             AudioPreprocessConfig::from_manifest(&manifest.preprocess_method).ok_or_else(|| {
@@ -1402,7 +1402,6 @@ fn extract_audio_params(manifest: &ModelManifest) -> Result<(u32, f32, f32, f32)
 fn resolve_audio_postprocess(
     manifest: &ModelManifest,
     manifest_dir: &Path,
-    threshold: f32,
 ) -> Result<(AudioPostprocess, Vec<String>)> {
     let labels = match (&manifest.label_file, &manifest.label_format) {
         (Some(file), Some(format)) => manifest::load_labels(&manifest_dir.join(file), format)?,
@@ -1410,14 +1409,13 @@ fn resolve_audio_postprocess(
     };
     let label_count = (!labels.is_empty()).then_some(labels.len());
     let postprocess =
-        resolve_audio_postprocess_from_parts(&manifest.postprocess_method, label_count, threshold)?;
+        resolve_audio_postprocess_from_parts(&manifest.postprocess_method, label_count)?;
     Ok((postprocess, labels))
 }
 
 pub(crate) fn resolve_audio_postprocess_from_parts(
     method: &PostprocessMethod,
     label_count: Option<usize>,
-    _threshold: f32,
 ) -> Result<AudioPostprocess> {
     match method {
         PostprocessMethod::Sigmoid { .. } => Ok(AudioPostprocess::Detector),
@@ -1511,12 +1509,13 @@ fn collect_segments_for_postprocess(
         AudioPostprocess::Detector => {
             collect_segments(logits, segment_offsets, total_samples, win, on_segment)
         }
-        AudioPostprocess::Classifier { .. } => collect_classifier_segments(
+        AudioPostprocess::Classifier { num_classes, top_k } => collect_classifier_segments(
             logits,
             segment_offsets,
             total_samples,
             win,
-            *postprocess,
+            num_classes,
+            top_k,
             labels,
             on_segment,
         ),
@@ -1528,13 +1527,11 @@ fn collect_classifier_segments(
     segment_offsets: &[usize],
     total_samples: usize,
     win: &WindowParams,
-    postprocess: AudioPostprocess,
+    num_classes: usize,
+    top_k: usize,
     labels: &[String],
     on_segment: &mut Option<&mut dyn FnMut(&AudioSegment)>,
 ) -> Vec<AudioSegment> {
-    let AudioPostprocess::Classifier { num_classes, top_k } = postprocess else {
-        return Vec::new();
-    };
     let mut segments = Vec::with_capacity(segment_offsets.len());
     for (i, &seg_offset) in segment_offsets.iter().enumerate() {
         let start = i * num_classes;
@@ -1838,7 +1835,6 @@ mod tests {
                 confidence_threshold: 0.7,
             },
             None,
-            0.7,
         )
         .expect("sigmoid postprocess should resolve");
         assert_eq!(mode, AudioPostprocess::Detector);
@@ -1847,7 +1843,7 @@ mod tests {
 
     #[test]
     fn postprocess_mode_softmax_classifier_uses_label_count_and_top_k() {
-        let mode = resolve_audio_postprocess_from_parts(&PostprocessMethod::Softmax, Some(3), 0.0)
+        let mode = resolve_audio_postprocess_from_parts(&PostprocessMethod::Softmax, Some(3))
             .expect("softmax postprocess should resolve with labels");
         assert_eq!(
             mode,
@@ -1861,7 +1857,7 @@ mod tests {
 
     #[test]
     fn postprocess_mode_softmax_rejects_missing_labels() {
-        let err = resolve_audio_postprocess_from_parts(&PostprocessMethod::Softmax, None, 0.0)
+        let err = resolve_audio_postprocess_from_parts(&PostprocessMethod::Softmax, None)
             .expect_err("softmax without labels must be rejected");
         assert!(format!("{err}").contains("labels file"));
     }

@@ -3,13 +3,11 @@
 //! This exercises the RP-39 CPU ORT path: shared mel preprocessing feeds a
 //! multi-class ONNX classifier, then the audio path applies softmax + top-K.
 
-mod common;
-
 use std::path::PathBuf;
 
 use serial_test::serial;
 use sparrow_engine::engine::{Device, EngineConfig};
-use sparrow_engine::{AudioDetectOpts, AudioInput, Engine, ModelType, SparrowEngineError};
+use sparrow_engine::{AudioDetectOpts, AudioInput, Engine, ModelHandle, ModelType, SparrowEngineError};
 
 const EXPECTED_SEGMENT_RANGES: [(f32, f32); 2] = [(0.0, 1.0), (1.0, 2.0)];
 const SOFTMAX_SUM_TOLERANCE: f32 = 1e-3;
@@ -45,23 +43,28 @@ fn core_audio_fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sparrow-engine-core/tests/fixtures/audio")
 }
 
-#[test]
-#[serial]
-fn mel_softmax_manifest_loads_as_audio_classifier() {
-    let Some(bundle_dir) = mel_classifier_bundle_dir() else {
-        return;
-    };
+fn load_mel_classifier() -> Option<(Engine, ModelHandle)> {
+    let bundle_dir = mel_classifier_bundle_dir()?;
     let manifest_path = bundle_dir.join("manifest.toml");
     let config = EngineConfig {
         device: Device::Cpu,
         inter_threads: 1,
         intra_threads: 1,
-        model_dir: bundle_dir.clone(),
+        model_dir: bundle_dir,
     };
     let engine = Engine::new(config).expect("Engine::new failed");
     let model = engine
         .load_model(&manifest_path)
-        .expect("MelSpectrogram + Softmax manifest should load");
+        .expect("load mel classifier manifest");
+    Some((engine, model))
+}
+
+#[test]
+#[serial]
+fn mel_softmax_manifest_loads_as_audio_classifier() {
+    let Some((engine, model)) = load_mel_classifier() else {
+        return;
+    };
 
     assert_eq!(model.model_type(), ModelType::AudioClassifier);
     assert_eq!(model.labels().len(), 3);
@@ -73,27 +76,15 @@ fn mel_softmax_manifest_loads_as_audio_classifier() {
 #[test]
 #[serial]
 fn mel_softmax_detect_audio_emits_top3_class_segment_per_window() {
-    let Some(bundle_dir) = mel_classifier_bundle_dir() else {
+    let Some((engine, model)) = load_mel_classifier() else {
         return;
     };
-    let manifest_path = bundle_dir.join("manifest.toml");
     let audio_path = core_audio_fixtures_dir().join("short_2s.wav");
     assert!(
         audio_path.exists(),
         "expected audio fixture at {}",
         audio_path.display()
     );
-
-    let config = EngineConfig {
-        device: Device::Cpu,
-        inter_threads: 1,
-        intra_threads: 1,
-        model_dir: bundle_dir.clone(),
-    };
-    let engine = Engine::new(config).expect("Engine::new failed");
-    let model = engine
-        .load_model(&manifest_path)
-        .expect("load mel classifier manifest");
 
     let result = sparrow_engine::detect_audio::detect_audio(
         &model,
@@ -175,21 +166,10 @@ fn mel_softmax_detect_audio_emits_top3_class_segment_per_window() {
 #[test]
 #[serial]
 fn mel_softmax_detect_audio_no_longer_returns_invalid_manifest_guard() {
-    let Some(bundle_dir) = mel_classifier_bundle_dir() else {
+    let Some((engine, model)) = load_mel_classifier() else {
         return;
     };
-    let manifest_path = bundle_dir.join("manifest.toml");
     let audio_path = core_audio_fixtures_dir().join("short_2s.wav");
-    let config = EngineConfig {
-        device: Device::Cpu,
-        inter_threads: 1,
-        intra_threads: 1,
-        model_dir: bundle_dir.clone(),
-    };
-    let engine = Engine::new(config).expect("Engine::new failed");
-    let model = engine
-        .load_model(&manifest_path)
-        .expect("load mel classifier manifest");
 
     let result = sparrow_engine::detect_audio::detect_audio(
         &model,
