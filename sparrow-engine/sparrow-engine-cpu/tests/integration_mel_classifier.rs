@@ -11,6 +11,10 @@ use serial_test::serial;
 use sparrow_engine::engine::{Device, EngineConfig};
 use sparrow_engine::{AudioDetectOpts, AudioInput, Engine, ModelType, SparrowEngineError};
 
+const EXPECTED_SEGMENT_RANGES: [(f32, f32); 2] = [(0.0, 1.0), (1.0, 2.0)];
+const SOFTMAX_SUM_TOLERANCE: f32 = 1e-3;
+const TIME_TOLERANCE: f32 = 1e-6;
+
 fn ort_runtime_configured() -> bool {
     std::env::var_os("ORT_LIB_LOCATION").is_some()
         || std::env::var_os("ORT_DYLIB_PATH").is_some()
@@ -24,11 +28,17 @@ fn mel_classifier_bundle_dir() -> Option<PathBuf> {
     }
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../sparrow-engine-core/tests/fixtures/audio/mel_classifier_tiny");
-    if p.join("manifest.toml").exists() && p.join("model.onnx").exists() {
-        Some(p)
-    } else {
-        None
-    }
+    assert!(
+        p.join("manifest.toml").exists(),
+        "expected committed mel_classifier_tiny manifest at {}",
+        p.join("manifest.toml").display()
+    );
+    assert!(
+        p.join("model.onnx").exists(),
+        "expected committed mel_classifier_tiny model at {}",
+        p.join("model.onnx").display()
+    );
+    Some(p)
 }
 
 fn core_audio_fixtures_dir() -> PathBuf {
@@ -39,7 +49,6 @@ fn core_audio_fixtures_dir() -> PathBuf {
 #[serial]
 fn mel_softmax_manifest_loads_as_audio_classifier() {
     let Some(bundle_dir) = mel_classifier_bundle_dir() else {
-        eprintln!("SKIP: mel_classifier_tiny fixture not found");
         return;
     };
     let manifest_path = bundle_dir.join("manifest.toml");
@@ -65,7 +74,6 @@ fn mel_softmax_manifest_loads_as_audio_classifier() {
 #[serial]
 fn mel_softmax_detect_audio_emits_top3_class_segment_per_window() {
     let Some(bundle_dir) = mel_classifier_bundle_dir() else {
-        eprintln!("SKIP: mel_classifier_tiny fixture not found");
         return;
     };
     let manifest_path = bundle_dir.join("manifest.toml");
@@ -94,9 +102,24 @@ fn mel_softmax_detect_audio_emits_top3_class_segment_per_window() {
     )
     .unwrap_or_else(|e| panic!("detect_audio on {} failed: {}", audio_path.display(), e));
 
-    assert!(!result.segments.is_empty(), "expected at least one segment");
+    assert_eq!(
+        result.segments.len(),
+        EXPECTED_SEGMENT_RANGES.len(),
+        "expected one classifier segment per 1s sliding window"
+    );
     assert_eq!(result.sample_rate, 24_000);
     for (i, segment) in result.segments.iter().enumerate() {
+        let (expected_start_s, expected_end_s) = EXPECTED_SEGMENT_RANGES[i];
+        assert!(
+            (segment.start_time_s - expected_start_s).abs() <= TIME_TOLERANCE,
+            "segment {i}: expected start {expected_start_s}, got {}",
+            segment.start_time_s
+        );
+        assert!(
+            (segment.end_time_s - expected_end_s).abs() <= TIME_TOLERANCE,
+            "segment {i}: expected end {expected_end_s}, got {}",
+            segment.end_time_s
+        );
         assert_eq!(
             segment.classes.len(),
             3,
@@ -107,11 +130,17 @@ fn mel_softmax_detect_audio_emits_top3_class_segment_per_window() {
             "segment {i}: confidence must equal top-1 probability"
         );
         let mut prev = f32::INFINITY;
+        let mut probability_sum = 0.0f32;
         for (rank, class) in segment.classes.iter().enumerate() {
             assert!(
                 (class.class_idx as usize) < 3,
                 "segment {i} rank {rank}: class_idx {} out of range",
                 class.class_idx
+            );
+            assert!(
+                class.probability.is_finite(),
+                "segment {i} rank {rank}: probability {} is not finite",
+                class.probability
             );
             assert!(
                 class.probability >= 0.0 && class.probability <= 1.0,
@@ -123,6 +152,7 @@ fn mel_softmax_detect_audio_emits_top3_class_segment_per_window() {
                 "segment {i} rank {rank}: probability order is not descending"
             );
             prev = class.probability;
+            probability_sum += class.probability;
             assert!(
                 matches!(
                     class.label.as_deref(),
@@ -132,6 +162,10 @@ fn mel_softmax_detect_audio_emits_top3_class_segment_per_window() {
                 class.label
             );
         }
+        assert!(
+            (probability_sum - 1.0).abs() <= SOFTMAX_SUM_TOLERANCE,
+            "segment {i}: top-3 probabilities should cover full softmax distribution, sum={probability_sum}"
+        );
     }
 
     drop(model);
@@ -142,7 +176,6 @@ fn mel_softmax_detect_audio_emits_top3_class_segment_per_window() {
 #[serial]
 fn mel_softmax_detect_audio_no_longer_returns_invalid_manifest_guard() {
     let Some(bundle_dir) = mel_classifier_bundle_dir() else {
-        eprintln!("SKIP: mel_classifier_tiny fixture not found");
         return;
     };
     let manifest_path = bundle_dir.join("manifest.toml");
