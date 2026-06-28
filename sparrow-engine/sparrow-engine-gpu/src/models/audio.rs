@@ -1522,6 +1522,7 @@ fn collect_segments_for_postprocess(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_classifier_segments(
     logits: &[f32],
     segment_offsets: &[usize],
