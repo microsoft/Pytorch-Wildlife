@@ -439,7 +439,13 @@ fn validate_classifier_probe_output(view: &ArrayViewD<'_, f32>) -> Result<usize>
 }
 
 fn validate_classifier_label_count(handle: &ModelHandle, num_classes: usize) -> Result<()> {
-    if !handle.labels.is_empty() && handle.labels.len() != num_classes {
+    if handle.labels.is_empty() {
+        return Err(SparrowEngineError::InvalidManifest(
+            "softmax audio classifiers require a non-empty labels file so class probabilities can be mapped to labels"
+                .to_string(),
+        ));
+    }
+    if handle.labels.len() != num_classes {
         return Err(SparrowEngineError::InvalidManifest(format!(
             "labels count ({}) does not match classifier output dim ({}) — manifest labels file is out of sync with the ONNX model",
             handle.labels.len(),
