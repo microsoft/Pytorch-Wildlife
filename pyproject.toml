@@ -8,7 +8,10 @@ version = "1.3.1"
 description = "PyTorch-Wildlife: unified open-source AI framework for camera-trap detection, species classification, and wildlife monitoring."
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.8"
+# SECURITY: Python 3.8 is EOL (October 2024) and pins gradio below the CVE fix
+# line (gradio<4.44.1 contains arbitrary-file-read CVEs exercised via
+# demo/gradio_demo.py). Bump the floor so pip can resolve a patched gradio.
+requires-python = ">=3.10"
 authors = [
     {name = "Andres Hernandez", email = "v-hernandres@microsoft.com"},
     {name = "Zhongqi Miao", email = "zhongqimiao@microsoft.com"},
@@ -35,8 +38,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -50,7 +51,10 @@ dependencies = [
     "tqdm",
     "Pillow",
     "supervision==0.23.0",
-    "gradio",
+    # SECURITY: gradio<4.44.1 contains multiple arbitrary-file-read CVEs
+    # (e.g. CVE-2024-1561, CVE-2024-4941) exploitable via demo/gradio_demo.py.
+    # Pin to the 4.x line with the fixes applied.
+    "gradio>=4.44.1,<5",
     "ultralytics",
     "chardet",
     "wget",
