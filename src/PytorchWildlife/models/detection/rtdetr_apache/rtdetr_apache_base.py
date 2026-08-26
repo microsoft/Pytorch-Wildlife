@@ -138,7 +138,7 @@ class RTDETRApacheBase(BaseDetector):
         
 
     def single_image_detection(self, img, img_path=None, det_conf_thres=0.2, id_strip=None, 
-                               verbose = False):
+                               verbose=True):
         """
         Perform detection on a single image.
         
