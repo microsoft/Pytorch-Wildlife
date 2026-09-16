@@ -118,7 +118,8 @@ class YOLOV8Base(BaseDetector):
         return results
         
 
-    def single_image_detection(self, img, img_path=None, det_conf_thres=0.2, id_strip=None) -> dict:
+    def single_image_detection(self, img, img_path=None, det_conf_thres=0.2, id_strip=None, 
+                               verbose=True) -> dict:
         """
         Perform detection on a single image.
         
@@ -144,6 +145,7 @@ class YOLOV8Base(BaseDetector):
 
         self.predictor.args.batch = 1
         self.predictor.args.conf = det_conf_thres
+        self.predictor.args.verbose = verbose
         
         det_results = list(self.predictor.stream_inference([img]))
 
