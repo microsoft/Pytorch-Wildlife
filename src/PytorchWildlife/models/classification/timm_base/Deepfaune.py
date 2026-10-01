@@ -13,16 +13,13 @@ from .base_classifier import TIMM_BaseClassifierInference
 from ....data import transforms as pw_trans
 
 __all__ = [
-    "DeepfauneClassifier",
-    "DeepFauneClassifierV15"
+    "DeepFauneClassifierV1_3",
+    "DeepFauneClassifierV1_5"
 ]
 
-class DeepfauneClassifier(TIMM_BaseClassifierInference):
+class DeepFauneClassifierV1_3(TIMM_BaseClassifierInference):
     """
-    Base detector class for dinov2 classifier. This class provides utility methods
-    for loading the model, performing single and batch image classifications, and 
-    formatting results. Make sure the appropriate file for the model weights has been 
-    downloaded to the "models" folder before running DFNE.
+    Classifier model of DeepFaune v1.3
     """
     BACKBONE = "vit_large_patch14_dinov2.lvd142m"
     MODEL_NAME = "deepfaune-vit_large_patch14_dinov2.lvd142m.v3.pt"
@@ -43,10 +40,10 @@ class DeepfauneClassifier(TIMM_BaseClassifierInference):
                                                                     interpolation=InterpolationMode.BICUBIC, 
                                                                     max_size=None,
                                                                     antialias=None)
-        super(DeepfauneClassifier, self).__init__(weights=weights, device=device, url=url, transform=transform,
+        super(DeepFauneClassifierV1_3, self).__init__(weights=weights, device=device, url=url, transform=transform,
                                                   weights_key='state_dict', weights_prefix='base_model.')
 
-class DeepFauneClassifierV15(TIMM_BaseClassifierInference):
+class DeepFauneClassifierV1_5(TIMM_BaseClassifierInference):
     """
     Classifier model of DeepFaune v1.5
     """

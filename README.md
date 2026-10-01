@@ -63,7 +63,8 @@ classification_result = classification_model.single_image_classification("path/t
 | `AI4GAmazonRainforest` | Species classification for Amazon Rainforest |
 | `AI4GSnapshotSerengeti` | Species classification for African savanna |
 | `AI4GOpossum` | Opossum vs. non-opossum classifier |
-| `DeepfauneClassifier` | European ecosystem species classifier |
+| `DeepFauneClassifierV1_5` | European ecosystem species classifier - 40 classes |
+| `DeepFauneClassifierV1_3` | European ecosystem species classifier - 34 classes |
 | `DFNE` | Deepfaune fine-tuned for Northeastern North America |
 
 See the [Model Zoo](https://microsoft.github.io/Pytorch-Wildlife/model_zoo/) for full details, performance benchmarks, and version history.
