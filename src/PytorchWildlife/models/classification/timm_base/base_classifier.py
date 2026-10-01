@@ -74,7 +74,8 @@ class TIMM_BaseClassifierInference(BaseClassifierInference):
             self.BACKBONE, 
             pretrained = False, 
             num_classes = len(self.CLASS_NAMES),
-            dynamic_img_size = True
+            dynamic_img_size = True,
+            global_pool="token"
         )
 
         if url:
