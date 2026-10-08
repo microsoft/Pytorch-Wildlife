@@ -1,0 +1,37 @@
+name: Tests
+
+# Runs the unit tests on pull requests and on pushes to main.
+# The tests use generated images and hand-built results, so no model weights are downloaded.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and test dependencies
+        # soundfile, librosa and setuptools<82 are needed for `import PytorchWildlife`
+        # to work until #26 is resolved. The CPU-only PyTorch index keeps the install small.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest soundfile librosa "setuptools<82" --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run tests
+        run: python -m pytest -v
