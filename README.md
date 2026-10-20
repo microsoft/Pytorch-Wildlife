@@ -1,14 +1,79 @@
-# Project
+# SPARROW Playground
 
-> This repo has been populated by an initial template to help get you started. Please
-> make sure to update the content to build a great experience for community-building.
+> **Pytorch-Wildlife is now SPARROW Playground.** This repository replaces
+> [microsoft/Pytorch-Wildlife](https://github.com/microsoft/Pytorch-Wildlife). The models are the
+> same and now run on [Sparrow Engine](https://github.com/microsoft/SPARROW-Engine), which does not
+> need PyTorch. Coming from Pytorch-Wildlife? Start with
+> [`notebooks/10_from_pytorch_wildlife.ipynb`](notebooks/10_from_pytorch_wildlife.ipynb).
 
-As the maintainer of this project, please make a few updates:
+SPARROW Playground is a set of notebooks and scripts that show what the SPARROW toolkit can do for
+wildlife monitoring: detect animals in camera-trap images and videos, classify them to species,
+identify birds from audio, compare images with embeddings, and export the results. Every example
+runs on the `sparrow-engine` Python package and models from the Sparrow Model Zoo.
 
-- Improving this README.MD file to provide a great experience
-- Updating SUPPORT.MD with content about this project's support experience
-- Understanding the security reporting process in SECURITY.MD
-- Remove this section from the README
+This repository is for inference only. To fine-tune MegaDetector classifiers, use
+[microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier).
+
+## Install
+
+Python 3.11 or later.
+
+```bash
+pip install -r requirements.txt          # CPU
+# NVIDIA GPU: pip install sparrow-engine-gpu  (instead of sparrow-engine)
+```
+
+Each notebook also installs `sparrow-engine` itself when it is missing, so the notebooks run
+in Google Colab without a separate setup step.
+
+Models are downloaded on first use into `~/.sparrow-engine/models` (set
+`SPARROW_ENGINE_MODEL_DIR` to change it):
+
+```bash
+python scripts/download_models.py --list
+python scripts/download_models.py MDV6-yolov10-c AI4G-Amazon-V2
+```
+
+## Notebooks
+
+| Notebook | What it shows |
+|---|---|
+| [00 Quickstart](notebooks/00_quickstart.ipynb) | Download a detector and find animals in a folder of images |
+| [01 Model zoo](notebooks/01_model_zoo.ipynb) | Browse the Sparrow Model Zoo and download models |
+| [02 Image detection](notebooks/02_image_detection.ipynb) | Detection results, confidence thresholds, drawing boxes |
+| [03 Detection + classification](notebooks/03_detection_classification.ipynb) | Detect animals, then classify each one to species |
+| [04 Bioacoustics](notebooks/04_bioacoustics.ipynb) | Bird presence and species from WAV recordings |
+| [05 Embeddings](notebooks/05_embeddings.ipynb) | BioCLIP image embeddings and similarity search |
+| [06 Export](notebooks/06_export.ipynb) | Save results as MegaDetector JSON, COCO or CSV |
+| [07 Day/night and visualization](notebooks/07_day_night_visualization.ipynb) | Day/night tagging and annotated images |
+| [08 Video](notebooks/08_video.ipynb) | Detect and classify animals in video, write an annotated clip |
+| [09 Webcam](notebooks/09_webcam.ipynb) | Live detection from a webcam or RTSP camera |
+| [10 From Pytorch-Wildlife](notebooks/10_from_pytorch_wildlife.ipynb) | Map Pytorch-Wildlife classes and calls to Sparrow Engine |
+
+Demo data is downloaded by the notebooks into `./data` (set `SPP_DATA_DIR` to change it).
+
+## Scripts
+
+| Script | Use |
+|---|---|
+| `scripts/download_models.py` | List or download zoo models |
+| `scripts/detect_folder.py` | Detect in a folder of images, export JSON/COCO/CSV, optional annotated images |
+| `scripts/pipeline.py` | Detection plus species classification |
+| `scripts/audio.py` | Bioacoustics on WAV files |
+| `scripts/video.py` | Detection on a video file, annotated output video |
+| `scripts/webcam.py` | Live detection in an OpenCV window (needs `opencv-python`, not the headless build) |
+
+## Licenses
+
+The code in this repository is MIT licensed. Each model in the Sparrow Model Zoo carries its own
+license; check `license` in `sparrow_engine.zoo_models()` (or notebook 01) before using a model.
+
+Demo data:
+- Camera-trap images and the opossum video: Pytorch-Wildlife demo data,
+  [Zenodo record 15376499](https://zenodo.org/records/15376499), CC BY 4.0.
+- Bird recording: "Vireo flavifrons - Yellow-Throated Vireo Song" by SwampVids,
+  [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Vireo_flavifrons_-_Yellow-Throated_Vireo_Song.wav),
+  CC BY 4.0.
 
 ## Contributing
 
