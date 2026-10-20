@@ -4,6 +4,7 @@
 """
 
 import argparse
+from pathlib import Path
 
 import cv2
 import sparrow_engine as spe
@@ -18,6 +19,8 @@ def main() -> None:
     parser.add_argument("--fps", type=float, default=2.0, help="frames per second to analyse")
     parser.add_argument("--out", default="annotated.mp4")
     args = parser.parse_args()
+    if not Path(args.input).exists():
+        parser.error(f"input not found: {args.input}")
 
     spe.download_models([m for m in (args.model, args.classifier) if m])
     writer = None

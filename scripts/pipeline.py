@@ -4,6 +4,7 @@
 """
 
 import argparse
+from pathlib import Path
 
 import sparrow_engine as spe
 
@@ -18,6 +19,8 @@ def main() -> None:
     parser.add_argument("--format", default="csv", choices=["megadet", "coco", "csv"])
     parser.add_argument("--out", default="pipeline.csv")
     args = parser.parse_args()
+    if not Path(args.input).exists():
+        parser.error(f"input not found: {args.input}")
 
     spe.download_models([args.detector, args.classifier])
     results = spe.pipeline(

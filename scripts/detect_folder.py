@@ -4,6 +4,7 @@
 """
 
 import argparse
+from pathlib import Path
 
 import sparrow_engine as spe
 
@@ -18,6 +19,8 @@ def main() -> None:
     parser.add_argument("--out", default="detections.json", help="output file")
     parser.add_argument("--viz", help="also write annotated images to this folder")
     args = parser.parse_args()
+    if not Path(args.input).exists():
+        parser.error(f"input not found: {args.input}")
 
     spe.download_model(args.model)
     results = spe.detect(

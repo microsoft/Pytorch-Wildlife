@@ -7,9 +7,12 @@ Needs the GUI build of OpenCV (`pip install opencv-python`), not the headless on
 """
 
 import argparse
+import sys
 
 import cv2
 import sparrow_engine as spe
+
+WINDOW = "SPARROW Playground"
 
 
 def main() -> None:
@@ -21,6 +24,16 @@ def main() -> None:
     parser.add_argument("--every-n", type=int, default=1, help="analyse every n-th frame")
     args = parser.parse_args()
 
+    try:
+        cv2.namedWindow(WINDOW)
+    except cv2.error:
+        sys.exit(
+            "This OpenCV build has no window support (opencv-python-headless).\n"
+            "Install the GUI build: pip uninstall -y opencv-python-headless && "
+            "pip install opencv-python\n"
+            "In Jupyter, use notebooks/09_webcam.ipynb instead."
+        )
+
     source = int(args.source) if args.source.isdigit() else args.source
     spe.download_models([m for m in (args.model, args.classifier) if m])
     try:
@@ -31,7 +44,7 @@ def main() -> None:
             threshold=args.threshold,
             every_n=args.every_n,
         ):
-            cv2.imshow("SPARROW Playground", spe.draw_detections(fr.frame, fr.result))
+            cv2.imshow(WINDOW, spe.draw_detections(fr.frame, fr.result))
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:

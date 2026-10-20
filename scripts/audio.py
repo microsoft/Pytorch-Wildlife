@@ -4,6 +4,7 @@
 """
 
 import argparse
+from pathlib import Path
 
 import sparrow_engine as spe
 
@@ -15,6 +16,8 @@ def main() -> None:
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--top", type=int, default=3, help="classes to print per segment")
     args = parser.parse_args()
+    if not Path(args.input).exists():
+        parser.error(f"input not found: {args.input}")
 
     spe.download_model(args.model)
     for result in spe.detect_audio(args.input, model=args.model, threshold=args.threshold):
