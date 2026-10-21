@@ -2,6 +2,16 @@
 
 # PyTorch-Wildlife
 
+> [!IMPORTANT]
+> **PyTorch-Wildlife is no longer maintained. Version 1.3.1 is the final release.**
+> Its inference work continues in [SPARROW-Engine](https://github.com/microsoft/SPARROW-Engine)
+> (`pip install sparrow-engine`), which runs MegaDetector and the species classifiers without PyTorch,
+> and in [SPARROW-Playground](https://github.com/microsoft/SPARROW-Playground), which has the example notebooks.
+> To port existing code, follow the
+> [migration notebook](https://github.com/microsoft/SPARROW-Playground/blob/main/notebooks/10_from_pytorch_wildlife.ipynb).
+> Fine-tuning lives in [MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier).
+> There will be no further PytorchWildlife releases or fixes.
+
 **Unified open-source AI framework for wildlife monitoring and conservation.**  
 Microsoft AI for Good Lab — camera-trap detection, species classification, bioacoustic analysis, and more.
 
