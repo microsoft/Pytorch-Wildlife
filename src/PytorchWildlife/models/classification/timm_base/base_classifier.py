@@ -22,7 +22,7 @@ from ....data import datasets as pw_data
 
 class TIMM_BaseClassifierInference(BaseClassifierInference):
     """
-    Base detector class for dinov2 classifier. This class provides utility methods
+    Base detector class for dinov2 and dinov3 classifiers. This class provides utility methods
     for loading the model, performing single and batch image classifications, and 
     formatting results. Make sure the appropriate file for the model weights has been 
     downloaded to the "models" folder before running DFNE.
@@ -74,7 +74,8 @@ class TIMM_BaseClassifierInference(BaseClassifierInference):
             self.BACKBONE, 
             pretrained = False, 
             num_classes = len(self.CLASS_NAMES),
-            dynamic_img_size = True
+            dynamic_img_size = True,
+            global_pool="token"
         )
 
         if url:
