@@ -60,7 +60,7 @@ class YOLOV8Base(BaseDetector):
             Exception: If weights are not provided.
         """
 
-        if self.MODEL_NAME == 'MDV6b-rtdetrl.pt':
+        if self.MODEL_NAME == 'MDV6-rtdetr-c.pt':
             self.predictor = rtdetr.RTDETRPredictor()
         else:
             self.predictor = yolo.detect.DetectionPredictor()
