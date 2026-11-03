@@ -15,47 +15,15 @@ jobs:
     # The heavier ones (03 pipeline, 04 audio, 05 embeddings, 08 video) run locally before release.
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      # Pre-release fallback: until sparrow-engine 0.1.31 is on PyPI, build it from these open
-      # microsoft/SPARROW-Engine pull requests (#15 contains #13 and #14; #17 is the decode fix).
-      # Delete the two "fallback" steps once 0.1.31 is released.
-      SPE_PULLS: "15 17"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-      - name: Check for a released sparrow-engine
-        id: spe
+      - name: Install
         run: |
-          if pip download --no-deps -q -d /tmp/spe-probe "sparrow-engine>=0.1.31"; then
-            echo "released=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::sparrow-engine>=0.1.31 is not on PyPI; building from SPARROW-Engine pulls $SPE_PULLS"
-            echo "released=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Install (released engine)
-        if: steps.spe.outputs.released == 'true'
-        run: pip install -r requirements.txt nbmake pytest
-      - name: Fetch unreleased engine (fallback)
-        if: steps.spe.outputs.released == 'false'
-        run: |
-          git clone -q --filter=blob:none https://github.com/microsoft/SPARROW-Engine /tmp/spe
-          cd /tmp/spe
-          git config user.name ci && git config user.email ci@example.invalid
-          for n in $SPE_PULLS; do
-            git fetch -q origin "pull/$n/head:pr-$n"
-            git merge -q --no-edit "pr-$n"
-          done
-          git log --oneline -5
-      - name: Build and install unreleased engine (fallback)
-        if: steps.spe.outputs.released == 'false'
-        run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          pip install "/tmp/spe/sparrow-engine/sparrow-engine-python[video]"
-          grep -v '^sparrow-engine' requirements.txt > /tmp/requirements-rest.txt
-          pip install -r /tmp/requirements-rest.txt nbmake pytest
+          pip install -r requirements.txt nbmake pytest
           python -c "import sparrow_engine as s; print('sparrow_engine', s.__version__)"
       - name: Cache models
         uses: actions/cache@v4
