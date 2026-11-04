@@ -61,6 +61,11 @@ and our species classifiers. We changed three things:
 That leaves this repository with one job: a place to test and play with the SPARROW and AI for
 Good biodiversity toolkits.
 
+**Still on the `PytorchWildlife` package?** You can keep using it: `pip install PytorchWildlife`
+still works, and version 1.3.1 stays on PyPI. It will not get any more updates or fixes, though,
+so we suggest switching to Sparrow Engine now. [Notebook 10](notebooks/10_from_pytorch_wildlife.ipynb)
+shows the Sparrow Engine replacement for each Pytorch-Wildlife class and call.
+
 ## ⚡ Sparrow Engine in five lines
 
 Install the engine (Python 3.11 or later):
