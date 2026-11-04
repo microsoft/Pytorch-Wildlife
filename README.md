@@ -1,97 +1,98 @@
-![PyTorch-Wildlife — open-source AI framework for wildlife monitoring from the Microsoft AI for Good Lab](https://zenodo.org/records/15376499/files/Pytorch_Banner_transparentbk.png)
+# SPARROW Playground
 
-# PyTorch-Wildlife
+> **Pytorch-Wildlife is now SPARROW Playground.** This repository replaces
+> [microsoft/Pytorch-Wildlife](https://github.com/microsoft/Pytorch-Wildlife). The models are the
+> same and now run on [Sparrow Engine](https://github.com/microsoft/SPARROW-Engine), which does not
+> need PyTorch. Coming from Pytorch-Wildlife? Start with
+> [`notebooks/10_from_pytorch_wildlife.ipynb`](notebooks/10_from_pytorch_wildlife.ipynb).
 
-> [!IMPORTANT]
-> **PyTorch-Wildlife is no longer maintained. Version 1.3.1 is the final release.**
-> Its inference work continues in [SPARROW-Engine](https://github.com/microsoft/SPARROW-Engine)
-> (`pip install sparrow-engine`), which runs MegaDetector and the species classifiers without PyTorch,
-> and in [SPARROW-Playground](https://github.com/microsoft/SPARROW-Playground), which has the example notebooks.
-> To port existing code, follow the
-> [migration notebook](https://github.com/microsoft/SPARROW-Playground/blob/main/notebooks/10_from_pytorch_wildlife.ipynb).
-> Fine-tuning lives in [MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier).
-> There will be no further PytorchWildlife releases or fixes.
+SPARROW Playground is a set of notebooks and scripts that show what the SPARROW toolkit can do for
+wildlife monitoring: detect animals in camera-trap images and videos, classify them to species,
+identify birds from audio, compare images with embeddings, and export the results. Every example
+runs on the `sparrow-engine` Python package and models from the Sparrow Model Zoo.
 
-**Unified open-source AI framework for wildlife monitoring and conservation.**  
-Microsoft AI for Good Lab — camera-trap detection, species classification, bioacoustic analysis, and more.
+This repository is for inference only. To fine-tune MegaDetector classifiers, use
+[microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier).
 
-<div align="center">
-<br>
-<a href="https://github.com/microsoft/Pytorch-Wildlife/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" /></a>
-<a href="https://pypi.org/project/PytorchWildlife"><img src="https://img.shields.io/pypi/v/PytorchWildlife?color=limegreen" /></a>
-<a href="https://pypi.org/project/PytorchWildlife"><img src="https://static.pepy.tech/badge/pytorchwildlife" /></a>
-<a href="https://pypi.org/project/PytorchWildlife"><img src="https://img.shields.io/pypi/pyversions/PytorchWildlife" /></a>
-<a href="https://huggingface.co/spaces/ai-for-good-lab/pytorch-wildlife"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-blue" /></a>
-<a href="https://discord.gg/TeEVxzaYtm"><img src="https://img.shields.io/badge/Discord-Join_us-5865F2?logo=discord&logoColor=white" /></a>
-<a href="https://microsoft.github.io/Pytorch-Wildlife/"><img src="https://img.shields.io/badge/Docs-526CFE?logo=MaterialForMkDocs&logoColor=white" /></a>
-<br><br>
-</div>
+## Install
 
-PyTorch-Wildlife is the collaborative deep learning framework that powers the [Microsoft AI for Good Lab](https://www.microsoft.com/en-us/ai/ai-for-good)'s biodiversity work. It hosts detection models, species classifiers, and the tools needed to run them — from single-image inference to large-scale batch processing.
-
-**MegaDetector**, the most widely used camera-trap detection model in conservation, is invoked through PyTorch-Wildlife. So are the species classifiers for Amazon Rainforest, Snapshot Serengeti, and European ecosystems.
-
-
-## Quick Start
+Python 3.11 or later.
 
 ```bash
-pip install PytorchWildlife
+pip install -r requirements.txt          # CPU
+# NVIDIA GPU: pip install sparrow-engine-gpu  (instead of sparrow-engine)
 ```
 
-```python
-import numpy as np
-from PytorchWildlife.models import detection as pw_detection
-from PytorchWildlife.models import classification as pw_classification
+Each notebook also installs `sparrow-engine` itself when it is missing, so the notebooks run
+in Google Colab without a separate setup step.
 
-# Detection — weights download automatically
-detection_model = pw_detection.MegaDetectorV6()
-detection_result = detection_model.single_image_detection("path/to/image.jpg")
+Models are downloaded on first use into `~/.sparrow-engine/models` (set
+`SPARROW_ENGINE_MODEL_DIR` to change it):
 
-# Classification
-classification_model = pw_classification.AI4GAmazonRainforest()
-classification_result = classification_model.single_image_classification("path/to/image.jpg")
+```bash
+python scripts/download_models.py --list
+python scripts/download_models.py MDV6-yolov10-c AI4G-Amazon-V2
 ```
 
-**Try without installing anything:**
-- [Hugging Face demo](https://huggingface.co/spaces/ai-for-good-lab/pytorch-wildlife) — upload images in your browser
-- [Google Colab notebook](https://colab.research.google.com/drive/1rjqHrTMzEHkMualr4vB55dQWCsCKMNXi?usp=sharing) — free cloud GPU
+## Notebooks
 
-
-## Available Models
-
-### Detection
-| Model | Architecture | Description |
-|---|---|---|
-| `MegaDetectorV6` | YOLOv10 / YOLOv9 / RT-DETR | Animal detection in camera-trap images |
-| `MegaDetectorV5` | YOLOv5 | Previous generation, widely deployed |
-| `DeepfauneDetector` | YOLOv8 | European ecosystem detection |
-| `HerdNet` | CNN localization | Point-based detection for aerial imagery |
-
-### Classification
-| Model | Description |
+| Notebook | What it shows |
 |---|---|
-| `AI4GAmazonRainforest` | Species classification for Amazon Rainforest |
-| `AI4GSnapshotSerengeti` | Species classification for African savanna |
-| `AI4GOpossum` | Opossum vs. non-opossum classifier |
-| `DeepfauneClassifier` | European ecosystem species classifier |
-| `DFNE` | Deepfaune fine-tuned for Northeastern North America |
+| [00 Quickstart](notebooks/00_quickstart.ipynb) | Download a detector and find animals in a folder of images |
+| [01 Model zoo](notebooks/01_model_zoo.ipynb) | Browse the Sparrow Model Zoo and download models |
+| [02 Image detection](notebooks/02_image_detection.ipynb) | Detection results, confidence thresholds, drawing boxes |
+| [03 Detection + classification](notebooks/03_detection_classification.ipynb) | Detect animals, then classify each one to species |
+| [04 Bioacoustics](notebooks/04_bioacoustics.ipynb) | Bird presence and species from WAV recordings |
+| [05 Embeddings](notebooks/05_embeddings.ipynb) | BioCLIP image embeddings and similarity search |
+| [06 Export](notebooks/06_export.ipynb) | Save results as MegaDetector JSON, COCO or CSV |
+| [07 Day/night and visualization](notebooks/07_day_night_visualization.ipynb) | Day/night tagging and annotated images |
+| [08 Video](notebooks/08_video.ipynb) | Detect and classify animals in video, write an annotated clip |
+| [09 Webcam](notebooks/09_webcam.ipynb) | Live detection from a webcam or RTSP camera |
+| [10 From Pytorch-Wildlife](notebooks/10_from_pytorch_wildlife.ipynb) | Map Pytorch-Wildlife classes and calls to Sparrow Engine |
 
-See the [Model Zoo](https://microsoft.github.io/Pytorch-Wildlife/model_zoo/) for full details, performance benchmarks, and version history.
+Demo data is downloaded by the notebooks into `./data` (set `SPP_DATA_DIR` to change it).
 
+## Scripts
 
-## Part of the Biodiversity Ecosystem
-
-PyTorch-Wildlife is part of the larger open-source ecosystem from the Microsoft AI for Good Lab:
-
-| Repo | Purpose |
+| Script | Use |
 |---|---|
-| [microsoft/Biodiversity](https://github.com/microsoft/Biodiversity) | The umbrella repository — documentation hub for the AI for Good Lab's biodiversity work |
-| [microsoft/Pytorch-Wildlife](https://github.com/microsoft/Pytorch-Wildlife) | This repo — the unified deep learning framework |
-| [microsoft/MegaDetector](https://github.com/microsoft/MegaDetector) | Animal detection in camera-trap imagery ([documentation](https://microsoft.github.io/MegaDetector/)) |
-| [microsoft/SPARROW](https://github.com/microsoft/SPARROW) | Solar-Powered Acoustic and Remote Recording Observation Watch — AI-enabled edge device |
-| [microsoft/MegaDetector-Acoustic](https://github.com/microsoft/MegaDetector-Acoustic) | Bioacoustic models for audio-based wildlife monitoring |
-| [microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) | Camera-trap species classification fine-tuning — adapt classifiers to your own datasets and geographic regions |
-| [microsoft/MegaDetector-Overhead](https://github.com/microsoft/MegaDetector-Overhead) | Point-based detection for overhead and aerial imagery |
-| SPARROW Studio | Desktop application for running all models with a graphical interface |
+| `scripts/download_models.py` | List or download zoo models |
+| `scripts/detect_folder.py` | Detect in a folder of images, export JSON/COCO/CSV, optional annotated images |
+| `scripts/pipeline.py` | Detection plus species classification |
+| `scripts/audio.py` | Bioacoustics on WAV files |
+| `scripts/video.py` | Detection on a video file, annotated output video |
+| `scripts/webcam.py` | Live detection in an OpenCV window (needs `opencv-python`, not the headless build) |
 
-> Questions? [Email us](mailto:zhongqimiao@microsoft.com) or join the [![Discord](https://img.shields.io/badge/any_text-Join_us!-blue?logo=discord&label=Discord)](https://discord.gg/TeEVxzaYtm)
+## Licenses
+
+The code in this repository is MIT licensed. Each model in the Sparrow Model Zoo carries its own
+license; check `license` in `sparrow_engine.zoo_models()` (or notebook 01) before using a model.
+
+Demo data:
+- Camera-trap images and the opossum video: Pytorch-Wildlife demo data,
+  [Zenodo record 15376499](https://zenodo.org/records/15376499), CC BY 4.0.
+- Bird recording: "Vireo flavifrons - Yellow-Throated Vireo Song" by SwampVids,
+  [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Vireo_flavifrons_-_Yellow-Throated_Vireo_Song.wav),
+  CC BY 4.0.
+
+## Contributing
+
+This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
+the rights to use your contribution. For details, visit [Contributor License Agreements](https://cla.opensource.microsoft.com).
+
+When you submit a pull request, a CLA bot will automatically determine whether you need to provide
+a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
+provided by the bot. You will only need to do this once across all repos using our CLA.
+
+This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
+For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
+contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+
+## Trademarks
+
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
+trademarks or logos is subject to and must follow
+[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/legal/intellectualproperty/trademarks/usage/general).
+Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
+Any use of third-party trademarks or logos are subject to those third-party's policies.
