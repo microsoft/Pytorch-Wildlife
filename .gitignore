@@ -426,3 +426,12 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# SPARROW Playground: downloaded demo data, models and notebook outputs
+data/
+models/
+outputs/
+notebooks/data/
+notebooks/outputs/
+*.mp4
+*.wav
