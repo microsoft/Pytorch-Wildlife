@@ -1,10 +1,16 @@
 # SPARROW Playground
 
-> **Pytorch-Wildlife is now SPARROW Playground.** This repository replaces
-> [microsoft/Pytorch-Wildlife](https://github.com/microsoft/Pytorch-Wildlife). The models are the
-> same and now run on [Sparrow Engine](https://github.com/microsoft/SPARROW-Engine), which does not
-> need PyTorch. Coming from Pytorch-Wildlife? Start with
-> [`notebooks/10_from_pytorch_wildlife.ipynb`](notebooks/10_from_pytorch_wildlife.ipynb).
+> [!IMPORTANT]
+> **This repository was Pytorch-Wildlife. It is now SPARROW Playground.**
+> The models are the same (MegaDetector, the AI for Good species classifiers, and more) and now run
+> on [Sparrow Engine](https://github.com/microsoft/SPARROW-Engine), which does not need PyTorch.
+> Old `microsoft/Pytorch-Wildlife` links redirect here.
+>
+> - Coming from Pytorch-Wildlife? Start with
+>   [`notebooks/10_from_pytorch_wildlife.ipynb`](notebooks/10_from_pytorch_wildlife.ipynb).
+> - The `PytorchWildlife` Python package ended at version 1.3.1 and is no longer maintained. Its
+>   code is kept at tag [`v1.3.1`](https://github.com/microsoft/SPARROW-Playground/tree/v1.3.1).
+> - Fine-tuning moved to [MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier).
 
 SPARROW Playground is a set of notebooks and scripts that show what the SPARROW toolkit can do for
 wildlife monitoring: detect animals in camera-trap images and videos, classify them to species,
@@ -74,6 +80,38 @@ Demo data:
 - Bird recording: "Vireo flavifrons - Yellow-Throated Vireo Song" by SwampVids,
   [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Vireo_flavifrons_-_Yellow-Throated_Vireo_Song.wav),
   CC BY 4.0.
+
+## Cite
+
+If SPARROW Playground or Pytorch-Wildlife helped your research, please cite:
+
+```bibtex
+@misc{hernandez2024pytorchwildlife,
+      title={Pytorch-Wildlife: A Collaborative Deep Learning Framework for Conservation},
+      author={Andres Hernandez and Zhongqi Miao and Luisa Vargas and Sara Beery and Rahul Dodhia and Juan Lavista},
+      year={2024},
+      eprint={2405.12930},
+      archivePrefix={arXiv},
+}
+```
+
+If you use MegaDetector, please also cite:
+
+```bibtex
+@misc{beery2019efficient,
+      title={Efficient Pipeline for Camera Trap Image Review},
+      author={Sara Beery and Dan Morris and Siyu Yang},
+      year={2019},
+      eprint={1907.06772},
+      archivePrefix={arXiv},
+}
+```
+
+## Questions
+
+- Email: [zhongqimiao@microsoft.com](mailto:zhongqimiao@microsoft.com)
+- Discord: [join us](https://discord.gg/TeEVxzaYtm)
+- Hub for the AI for Good Lab's biodiversity work: [microsoft/Biodiversity](https://github.com/microsoft/Biodiversity)
 
 ## Contributing
 
