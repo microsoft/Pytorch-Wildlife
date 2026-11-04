@@ -9,6 +9,7 @@
 [![sparrow-engine](https://img.shields.io/pypi/v/sparrow-engine?label=sparrow-engine&color=2e8b57)](https://pypi.org/project/sparrow-engine/)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![discord](https://img.shields.io/badge/Discord-join_us-5865F2?logo=discord&logoColor=white)](https://discord.gg/TeEVxzaYtm)
+[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen)](#-contributing)
 
 </div>
 
@@ -18,7 +19,7 @@
 > Sparrow Engine call for each old class. The last `PytorchWildlife` package is 1.3.1; its code is at
 > tag [`v1.3.1`](https://github.com/microsoft/SPARROW-Playground/tree/v1.3.1).
 
-## What this is
+## 👋 What this is
 
 SPARROW Playground is where you try out the biodiversity tools from the Microsoft AI for Good Lab.
 It is a set of notebooks and small scripts, written the way a data scientist would work: load some
@@ -38,7 +39,7 @@ You can use it to:
 
 Nothing here trains models. The playground only runs them.
 
-## From Pytorch-Wildlife to SPARROW Playground
+## 🔄 From Pytorch-Wildlife to SPARROW Playground
 
 Pytorch-Wildlife started in 2023 as a PyTorch framework for running and fine-tuning MegaDetector
 and our species classifiers. We changed three things:
@@ -60,7 +61,7 @@ and our species classifiers. We changed three things:
 That leaves this repository with one job: a place to test and play with the SPARROW and AI for
 Good biodiversity toolkits.
 
-## Sparrow Engine in five lines
+## ⚡ Sparrow Engine in five lines
 
 Install the engine (Python 3.11 or later):
 
@@ -119,7 +120,7 @@ spe.export(results, "coco", "coco.json")
 Inference never downloads anything by itself. Set `SPARROW_ENGINE_MODEL_DIR` to keep models
 somewhere other than `~/.sparrow-engine/models`.
 
-## The model zoo
+## 🦁 The model zoo
 
 Installing Sparrow Engine gives you the whole Sparrow Model Zoo: 82 models in zoo v0.31.0, across
 camera traps (48), acoustics (13), overhead imagery (10), marine imagery (6) and general use (5).
@@ -139,7 +140,7 @@ for m in spe.zoo_models():
 
 Each model keeps its own licence. Check it before you use a model, especially for commercial work.
 
-## Notebooks
+## 📓 Notebooks
 
 Every notebook installs `sparrow-engine` if it is missing and downloads its own demo data.
 
@@ -159,7 +160,7 @@ Every notebook installs `sparrow-engine` if it is missing and downloads its own 
 
 Demo data goes into `./data` (set `SPP_DATA_DIR` to change it).
 
-## Scripts
+## 🛠️ Scripts
 
 To run the notebooks locally, or to use the scripts, clone the repository and install the
 requirements:
@@ -179,7 +180,7 @@ pip install -r requirements.txt
 | `scripts/video.py` | Detection on a video file, annotated output video |
 | `scripts/webcam.py` | Live detection in an OpenCV window (needs `opencv-python`, not the headless build) |
 
-## Coming next: live data
+## 📡 Coming next: live data
 
 Today the notebooks work on files. Next, we will add notebooks that pull data straight from the
 field through the SPARROW communication toolkits:
@@ -192,7 +193,7 @@ field through the SPARROW communication toolkits:
 Each one will follow the same pattern as the rest of the playground: connect, run a model on what
 arrives, look at the results.
 
-## Licenses
+## 📜 Licenses
 
 The code in this repository is MIT licensed. Each model in the Sparrow Model Zoo carries its own
 license; check `license` in `sparrow_engine.zoo_models()` (or notebook 01) before using a model.
@@ -204,7 +205,7 @@ Demo data:
   [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Vireo_flavifrons_-_Yellow-Throated_Vireo_Song.wav),
   CC BY 4.0.
 
-## Cite
+## 📝 Cite
 
 If SPARROW Playground or Pytorch-Wildlife helped your research, please cite:
 
@@ -230,13 +231,13 @@ If you use MegaDetector, please also cite:
 }
 ```
 
-## Questions
+## 💬 Questions
 
 - Email: [zhongqimiao@microsoft.com](mailto:zhongqimiao@microsoft.com)
 - Discord: [join us](https://discord.gg/TeEVxzaYtm)
 - Hub for the AI for Good Lab's biodiversity work: [microsoft/Biodiversity](https://github.com/microsoft/Biodiversity)
 
-## Contributing
+## 🤝 Contributing
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a
 Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
@@ -250,7 +251,7 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
 contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
 
-## Trademarks
+## ™️ Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
 trademarks or logos is subject to and must follow
