@@ -1,73 +1,196 @@
-# SPARROW Playground
+<div align="center">
+
+<img src="assets/sparrow_playground_banner.jpg" width="100%" alt="SPARROW Playground, Microsoft AI for Good Lab">
+
+<br>
+
+[Sparrow Engine](https://github.com/microsoft/SPARROW-Engine) | [MegaDetector](https://github.com/microsoft/MegaDetector) | [MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) | [SPARROW](https://github.com/microsoft/SPARROW) | [Biodiversity](https://github.com/microsoft/Biodiversity)
+
+<br>
+
+[![sparrow-engine](https://img.shields.io/pypi/v/sparrow-engine?label=sparrow-engine&color=2e8b57)](https://pypi.org/project/sparrow-engine/)
+[![python](https://img.shields.io/pypi/pyversions/sparrow-engine)](https://pypi.org/project/sparrow-engine/)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/00_quickstart.ipynb)
+[![discord](https://img.shields.io/badge/Discord-join_us-5865F2?logo=discord&logoColor=white)](https://discord.gg/TeEVxzaYtm)
+
+</div>
 
 > [!IMPORTANT]
-> **This repository was Pytorch-Wildlife. It is now SPARROW Playground.**
-> The models are the same (MegaDetector, the AI for Good species classifiers, and more) and now run
-> on [Sparrow Engine](https://github.com/microsoft/SPARROW-Engine), which does not need PyTorch.
-> Old `microsoft/Pytorch-Wildlife` links redirect here.
->
-> - Coming from Pytorch-Wildlife? Start with
->   [`notebooks/10_from_pytorch_wildlife.ipynb`](notebooks/10_from_pytorch_wildlife.ipynb).
-> - The `PytorchWildlife` Python package ended at version 1.3.1 and is no longer maintained. Its
->   code is kept at tag [`v1.3.1`](https://github.com/microsoft/SPARROW-Playground/tree/v1.3.1).
-> - Fine-tuning moved to [MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier).
+> **This repository used to be Pytorch-Wildlife.** Old `microsoft/Pytorch-Wildlife` links redirect here.
+> If you have Pytorch-Wildlife code, [notebook 10](notebooks/10_from_pytorch_wildlife.ipynb) shows the
+> Sparrow Engine call for each old class. The last `PytorchWildlife` package is 1.3.1; its code is at
+> tag [`v1.3.1`](https://github.com/microsoft/SPARROW-Playground/tree/v1.3.1).
 
-SPARROW Playground is a set of notebooks and scripts that show what the SPARROW toolkit can do for
-wildlife monitoring: detect animals in camera-trap images and videos, classify them to species,
-identify birds from audio, compare images with embeddings, and export the results. Every example
-runs on the `sparrow-engine` Python package and models from the Sparrow Model Zoo.
+## What this is
 
-This repository is for inference only. To fine-tune MegaDetector classifiers, use
-[microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier).
+SPARROW Playground is where you try out the biodiversity tools from the Microsoft AI for Good Lab.
+It is a set of notebooks and small scripts, written the way a data scientist would work: load some
+camera-trap images, a video or a sound file, run a model, look at the results in a table or a plot,
+and save them.
 
-## Install
+You can use it to:
 
-Python 3.11 or later.
+- find animals, people and vehicles in camera-trap images and videos with MegaDetector;
+- classify the animals to species with regional classifiers (Amazon, Serengeti, Europe and others);
+- detect birds and identify species in audio recordings;
+- compare and search images with BioCLIP embeddings;
+- run live detection on a webcam or an RTSP camera;
+- export results as MegaDetector JSON, COCO or CSV.
+
+Nothing here trains models. The playground only runs them.
+
+## From Pytorch-Wildlife to SPARROW Playground
+
+Pytorch-Wildlife started in 2023 as a PyTorch framework for running and fine-tuning MegaDetector
+and our species classifiers. We changed three things:
+
+1. **The name.** We can no longer use "PyTorch" in a project name, so the project needed a new one.
+2. **The engine.** We built [Sparrow Engine](https://github.com/microsoft/SPARROW-Engine), a general
+   inference engine written in Rust on ONNX Runtime. It runs on CPU or GPU without PyTorch, and it
+   comes with a model zoo of more than 80 models for camera traps, audio, overhead imagery and
+   marine imagery. Every example in this repository uses it.
+3. **Fine-tuning moved out.** Training code now lives in repositories built for each kind of model:
+
+   | Area | Repository |
+   |---|---|
+   | Camera-trap detection | [microsoft/MegaDetector](https://github.com/microsoft/MegaDetector) |
+   | Species classification | [microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) |
+   | Bioacoustics | [microsoft/MegaDetector-Acoustic](https://github.com/microsoft/MegaDetector-Acoustic) |
+   | Overhead and aerial imagery | [microsoft/MegaDetector-Overhead](https://github.com/microsoft/MegaDetector-Overhead) |
+
+That leaves this repository with one job: a place to test and play with the SPARROW and AI for
+Good biodiversity toolkits.
+
+## Sparrow Engine in five lines
+
+Install the engine (Python 3.11 or later):
 
 ```bash
-pip install -r requirements.txt          # CPU
-# NVIDIA GPU: pip install sparrow-engine-gpu  (instead of sparrow-engine)
+pip install "sparrow-engine[video]"        # CPU
+pip install "sparrow-engine-gpu[video]"    # NVIDIA GPU, same Python API
 ```
 
-Each notebook also installs `sparrow-engine` itself when it is missing, so the notebooks run
-in Google Colab without a separate setup step.
+Download a model once, then run it on a folder of images:
 
-Models are downloaded on first use into `~/.sparrow-engine/models` (set
-`SPARROW_ENGINE_MODEL_DIR` to change it):
+```python
+import sparrow_engine as spe
 
-```bash
-python scripts/download_models.py --list
-python scripts/download_models.py MDV6-yolov10-c AI4G-Amazon-V2
+spe.download_model("MDV6-yolov10-c")                  # MegaDetector v6, into ~/.sparrow-engine/models
+results = spe.detect("my_images/", model="MDV6-yolov10-c", threshold=0.3, recursive=True)
+
+for r in results:
+    print(r.path, [(d.label, round(d.confidence, 2)) for d in r.detections])
 ```
+
+Add a species classifier on top of the detector:
+
+```python
+spe.download_model("AI4G-Amazon-V2")
+results = spe.pipeline("my_images/", detector="MDV6-yolov10-c", classifier="AI4G-Amazon-V2", threshold=0.3)
+
+for r in results:
+    for d in r.detections:
+        print(r.path, d.detection.label, "->", d.classification.label, round(d.classification.confidence, 2))
+```
+
+<details>
+<summary>More: video, audio, embeddings, export</summary>
+
+```python
+# Video: one result per sampled frame
+frames = spe.detect_video("clip.mp4", model="MDV6-yolov10-c", every_n=30)
+
+# Audio: bird species in a WAV file
+spe.download_model("perch-v2")
+audio = spe.detect_audio("recording.wav", model="perch-v2")
+
+# Embeddings: one L2-normalized vector per image
+spe.download_model("bioclip-2-fp16")
+vectors = spe.embed(["a.jpg", "b.jpg"], model="bioclip-2-fp16")
+
+# Export detections
+spe.export(results, "coco", "coco.json")
+```
+
+</details>
+
+Inference never downloads anything by itself. Set `SPARROW_ENGINE_MODEL_DIR` to keep models
+somewhere other than `~/.sparrow-engine/models`.
+
+## The model zoo
+
+Installing Sparrow Engine gives you the whole Sparrow Model Zoo: 82 models in zoo v0.31.0, across
+camera traps (48), acoustics (13), overhead imagery (10), marine imagery (6) and general use (5).
+54 of them download directly; the rest link to their original source.
+
+```python
+import sparrow_engine as spe
+
+for m in spe.zoo_models():
+    print(m.id, m.domain, m.task, m.license, m.downloadable)
+```
+
+- Full catalogue with sources, licences and citations:
+  [Sparrow Engine model zoo catalogue](https://github.com/microsoft/SPARROW-Engine/blob/main/docs/model-zoo-catalogue.md)
+- Model files: [Zenodo record 23492166](https://zenodo.org/records/23492166)
+- Browse it in a notebook: [01 Model zoo](notebooks/01_model_zoo.ipynb)
+
+Each model keeps its own licence. Check it before you use a model, especially for commercial work.
 
 ## Notebooks
 
-| Notebook | What it shows |
-|---|---|
-| [00 Quickstart](notebooks/00_quickstart.ipynb) | Download a detector and find animals in a folder of images |
-| [01 Model zoo](notebooks/01_model_zoo.ipynb) | Browse the Sparrow Model Zoo and download models |
-| [02 Image detection](notebooks/02_image_detection.ipynb) | Detection results, confidence thresholds, drawing boxes |
-| [03 Detection + classification](notebooks/03_detection_classification.ipynb) | Detect animals, then classify each one to species |
-| [04 Bioacoustics](notebooks/04_bioacoustics.ipynb) | Bird presence and species from WAV recordings |
-| [05 Embeddings](notebooks/05_embeddings.ipynb) | BioCLIP image embeddings and similarity search |
-| [06 Export](notebooks/06_export.ipynb) | Save results as MegaDetector JSON, COCO or CSV |
-| [07 Day/night and visualization](notebooks/07_day_night_visualization.ipynb) | Day/night tagging and annotated images |
-| [08 Video](notebooks/08_video.ipynb) | Detect and classify animals in video, write an annotated clip |
-| [09 Webcam](notebooks/09_webcam.ipynb) | Live detection from a webcam or RTSP camera |
-| [10 From Pytorch-Wildlife](notebooks/10_from_pytorch_wildlife.ipynb) | Map Pytorch-Wildlife classes and calls to Sparrow Engine |
+Every notebook installs `sparrow-engine` if it is missing and downloads its own demo data, so each
+one runs in Google Colab as is.
 
-Demo data is downloaded by the notebooks into `./data` (set `SPP_DATA_DIR` to change it).
+| | Notebook | What it shows |
+|---|---|---|
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/00_quickstart.ipynb) | [00 Quickstart](notebooks/00_quickstart.ipynb) | Download a detector and find animals in a folder of images |
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/01_model_zoo.ipynb) | [01 Model zoo](notebooks/01_model_zoo.ipynb) | Browse the Sparrow Model Zoo and download models |
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/02_image_detection.ipynb) | [02 Image detection](notebooks/02_image_detection.ipynb) | Detection results, confidence thresholds, drawing boxes |
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/03_detection_classification.ipynb) | [03 Detection + classification](notebooks/03_detection_classification.ipynb) | Detect animals, then classify each one to species |
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/04_bioacoustics.ipynb) | [04 Bioacoustics](notebooks/04_bioacoustics.ipynb) | Bird presence and species from WAV recordings |
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/05_embeddings.ipynb) | [05 Embeddings](notebooks/05_embeddings.ipynb) | BioCLIP image embeddings and similarity search |
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/06_export.ipynb) | [06 Export](notebooks/06_export.ipynb) | Save results as MegaDetector JSON, COCO or CSV |
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/07_day_night_visualization.ipynb) | [07 Day/night and visualization](notebooks/07_day_night_visualization.ipynb) | Day/night tagging and annotated images |
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/08_video.ipynb) | [08 Video](notebooks/08_video.ipynb) | Detect and classify animals in video, write an annotated clip |
+| local only | [09 Webcam](notebooks/09_webcam.ipynb) | Live detection from a webcam or RTSP camera |
+| [![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/microsoft/SPARROW-Playground/blob/main/notebooks/10_from_pytorch_wildlife.ipynb) | [10 From Pytorch-Wildlife](notebooks/10_from_pytorch_wildlife.ipynb) | Map Pytorch-Wildlife classes and calls to Sparrow Engine |
+
+Demo data goes into `./data` (set `SPP_DATA_DIR` to change it).
 
 ## Scripts
 
+To run the notebooks locally, or to use the scripts, clone the repository and install the
+requirements:
+
+```bash
+git clone https://github.com/microsoft/SPARROW-Playground.git
+cd SPARROW-Playground
+pip install -r requirements.txt
+```
+
 | Script | Use |
 |---|---|
-| `scripts/download_models.py` | List or download zoo models |
+| `scripts/download_models.py` | List or download zoo models (`--list`, or model IDs) |
 | `scripts/detect_folder.py` | Detect in a folder of images, export JSON/COCO/CSV, optional annotated images |
 | `scripts/pipeline.py` | Detection plus species classification |
 | `scripts/audio.py` | Bioacoustics on WAV files |
 | `scripts/video.py` | Detection on a video file, annotated output video |
 | `scripts/webcam.py` | Live detection in an OpenCV window (needs `opencv-python`, not the headless build) |
+
+## Coming next: live data
+
+Today the notebooks work on files. Next, we will add notebooks that pull data straight from the
+field through the SPARROW communication toolkits:
+
+- [SPARROW](https://github.com/microsoft/SPARROW) solar-powered edge devices;
+- 4G cellular camera traps, in real time;
+- drones;
+- FTPS uploads.
+
+Each one will follow the same pattern as the rest of the playground: connect, run a model on what
+arrives, look at the results.
 
 ## Licenses
 
