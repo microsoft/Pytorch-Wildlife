@@ -1,6 +1,8 @@
 <div align="center">
 
-# SPARROW Playground
+<img src="assets/sparrow_playground_banner.png" width="100%" alt="SPARROW Playground, Microsoft AI for Good Lab">
+
+<br>
 
 [Sparrow Engine](https://github.com/microsoft/SPARROW-Engine) | [MegaDetector](https://github.com/microsoft/MegaDetector) | [MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) | [SPARROW](https://github.com/microsoft/SPARROW) | [Biodiversity](https://github.com/microsoft/Biodiversity)
 
