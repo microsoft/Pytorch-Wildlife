@@ -142,7 +142,7 @@ for m in spe.zoo_models():
 
 - Full catalogue with sources, licences and citations:
   [Sparrow Engine model zoo catalogue](https://github.com/microsoft/SPARROW-Engine/blob/main/docs/model-zoo-catalogue.md)
-- Model files: [Zenodo record 23492166](https://zenodo.org/records/23492166)
+- Model files: [Sparrow Model Zoo on Zenodo](https://doi.org/10.5281/zenodo.20348978) (this link always opens the latest version)
 - Browse it in a notebook: [01 Model zoo](notebooks/01_model_zoo.ipynb)
 
 Each model keeps its own licence. Check it before you use a model, especially for commercial work.
@@ -164,6 +164,7 @@ Every notebook installs `sparrow-engine` if it is missing and downloads its own 
 | [08 Video](notebooks/08_video.ipynb) | Detect and classify animals in video, write an annotated clip |
 | [09 Webcam](notebooks/09_webcam.ipynb) | Live detection from a webcam or RTSP camera |
 | [10 From Pytorch-Wildlife](notebooks/10_from_pytorch_wildlife.ipynb) | Map Pytorch-Wildlife classes and calls to Sparrow Engine |
+| [11 HTTP server](notebooks/11_http_server.ipynb) | Run the engine as a Docker service and call it over HTTP (needs Docker) |
 
 Demo data goes into `./data` (set `SPP_DATA_DIR` to change it).
 
@@ -186,6 +187,17 @@ pip install -r requirements.txt
 | `scripts/audio.py` | Bioacoustics on WAV files |
 | `scripts/video.py` | Detection on a video file, annotated output video |
 | `scripts/webcam.py` | Live detection in an OpenCV window (needs `opencv-python`, not the headless build) |
+
+## 🔌 Other interfaces
+
+The notebooks use the Python package. The same engine and models are also available as a command-line
+tool, an HTTP server and a C library, for code that is not Python:
+
+| Interface | Example | Good for |
+|---|---|---|
+| `spe` command line | [`interfaces/cli`](interfaces/cli) | Shell scripts, batch jobs, no Python install |
+| HTTP server (Docker) | [notebook 11](notebooks/11_http_server.ipynb) | Other languages, other machines, one model shared by several programs |
+| C library | [`interfaces/c`](interfaces/c) | Embedding the engine in C, C++, Go, Rust or C# programs |
 
 ## 📡 Coming next: live data
 
