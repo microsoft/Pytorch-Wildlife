@@ -1,9 +1,7 @@
 cff-version: 1.2.0
-title: PyTorch-Wildlife
-message: "If you use PyTorch-Wildlife, please cite it using the metadata from this file."
+title: SPARROW Playground (formerly PyTorch-Wildlife)
+message: "If you use SPARROW Playground or PyTorch-Wildlife, please cite it using the metadata from this file."
 type: software
-version: "1.3.0"
-date-released: "2026-05-14"
 authors:
   - given-names: Andres
     family-names: Hernandez
@@ -25,9 +23,9 @@ identifiers:
   - type: url
     value: "https://arxiv.org/abs/1907.06772"
     description: "Efficient Pipeline for Camera Trap Image Review"
-repository-code: "https://github.com/microsoft/Pytorch-Wildlife"
-url: "https://microsoft.github.io/Pytorch-Wildlife/"
+repository-code: "https://github.com/microsoft/SPARROW-Playground"
 keywords:
+  - SPARROW
   - PyTorch-Wildlife
   - MegaDetector
   - camera traps
@@ -38,4 +36,22 @@ keywords:
   - computer vision
   - bioacoustics
   - ai-for-good
+preferred-citation:
+  type: article
+  title: "Pytorch-Wildlife: A Collaborative Deep Learning Framework for Conservation"
+  authors:
+    - given-names: Andres
+      family-names: Hernandez
+    - given-names: Zhongqi
+      family-names: Miao
+    - given-names: Luisa
+      family-names: Vargas
+    - given-names: Sara
+      family-names: Beery
+    - given-names: Rahul
+      family-names: Dodhia
+    - given-names: Juan
+      family-names: Lavista
+  year: 2024
+  url: "https://arxiv.org/abs/2405.12930"
 license: MIT

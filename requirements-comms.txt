@@ -1,0 +1,4 @@
+# Notebooks 11-15: receive field data with sparrow-comm (Python 3.12 or later).
+-r requirements.txt
+sparrow-comm[ftps]>=0.1.0
+httpx

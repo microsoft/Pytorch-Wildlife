@@ -1,0 +1,71 @@
+name: notebooks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  light-notebooks:
+    # Executes the notebooks that need only the small MegaDetector model and the 1.3 MB demo zip.
+    # The heavier ones (03 pipeline, 04 audio, 05 embeddings, 08 video) run locally before release.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          pip install -r requirements.txt nbmake pytest
+          python -c "import sparrow_engine as s; print('sparrow_engine', s.__version__)"
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.sparrow-engine/models
+          key: spe-models-${{ hashFiles('requirements.txt') }}
+      - name: Run notebooks
+        run: >
+          pytest --nbmake --nbmake-timeout=900
+          notebooks/00_quickstart.ipynb
+          notebooks/01_model_zoo.ipynb
+          notebooks/02_image_detection.ipynb
+          notebooks/06_export.ipynb
+          notebooks/07_day_night_visualization.ipynb
+          notebooks/09_webcam.ipynb
+          notebooks/10_from_pytorch_wildlife.ipynb
+
+  comm-notebooks:
+    # Notebooks 11-15 receive data with sparrow-comm (Python 3.12+), then run MegaDetector on it.
+    # Notebook 14 runs against its offline mailbox here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          pip install -r requirements-comms.txt nbmake pytest
+          python -c "import sparrow_comm as c; print('sparrow_comm', c.__version__)"
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.sparrow-engine/models
+          key: spe-models-${{ hashFiles('requirements.txt') }}
+      - name: Run notebooks
+        run: >
+          pytest --nbmake --nbmake-timeout=900
+          notebooks/11_comm_device_api.ipynb
+          notebooks/12_comm_ftps.ipynb
+          notebooks/13_comm_reconyx.ipynb
+          notebooks/14_comm_email.ipynb
+          notebooks/15_comm_process_on_arrival.ipynb

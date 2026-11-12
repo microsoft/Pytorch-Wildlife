@@ -1,0 +1,6 @@
+# Inference engine (CPU). For NVIDIA GPUs install sparrow-engine-gpu instead.
+sparrow-engine[video]>=0.1.31
+pandas
+matplotlib
+pillow
+jupyter
