@@ -11,6 +11,10 @@
 > [migration notebook](https://github.com/microsoft/SPARROW-Playground/blob/main/notebooks/10_from_pytorch_wildlife.ipynb).
 > Fine-tuning lives in [MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier).
 > There will be no further PytorchWildlife releases or fixes.
+>
+> This `archive/pytorch-wildlife` branch is a frozen copy of the PyTorch-Wildlife code as of the 1.3.1 release,
+> kept for reference only. It will not receive updates, and issues or pull requests against it will not be accepted.
+> The repository's `main` branch is now [SPARROW Playground](https://github.com/microsoft/SPARROW-Playground).
 
 **Unified open-source AI framework for wildlife monitoring and conservation.**  
 Microsoft AI for Good Lab — camera-trap detection, species classification, bioacoustic analysis, and more.
