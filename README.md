@@ -164,7 +164,7 @@ Every notebook installs `sparrow-engine` if it is missing and downloads its own 
 | [08 Video](notebooks/08_video.ipynb) | Detect and classify animals in video, write an annotated clip |
 | [09 Webcam](notebooks/09_webcam.ipynb) | Live detection from a webcam or RTSP camera |
 | [10 From Pytorch-Wildlife](notebooks/10_from_pytorch_wildlife.ipynb) | Map Pytorch-Wildlife classes and calls to Sparrow Engine |
-| [11 HTTP server](notebooks/11_http_server.ipynb) | Run the engine as a Docker service and call it over HTTP (needs Docker) |
+| [16 HTTP server](notebooks/16_http_server.ipynb) | Run the engine as a Docker service and call it over HTTP (needs Docker) |
 
 Demo data goes into `./data` (set `SPP_DATA_DIR` to change it).
 
@@ -211,7 +211,7 @@ tool, an HTTP server and a C library, for code that is not Python:
 | Interface | Example | Good for |
 |---|---|---|
 | `spe` command line | [`interfaces/cli`](interfaces/cli) | Shell scripts, batch jobs, no Python install |
-| HTTP server (Docker) | [notebook 11](notebooks/11_http_server.ipynb) | Other languages, other machines, one model shared by several programs |
+| HTTP server (Docker) | [notebook 16](notebooks/16_http_server.ipynb) | Other languages, other machines, one model shared by several programs |
 | C library | [`interfaces/c`](interfaces/c) | Embedding the engine in C, C++, Go, Rust or C# programs |
 
 ## 📡 Coming next: live data
