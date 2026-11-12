@@ -168,6 +168,21 @@ Every notebook installs `sparrow-engine` if it is missing and downloads its own 
 
 Demo data goes into `./data` (set `SPP_DATA_DIR` to change it).
 
+### Receiving field data (sparrow-comm)
+
+Notebooks 11-15 use [sparrow-comm](https://github.com/microsoft/SPARROW-Comm) to receive images
+from field hardware, then process them with Sparrow Engine. Every receiver runs inside the
+notebook, so no server or cloud account is needed. They need **Python 3.12** or later and install
+`sparrow-comm[ftps]` themselves (`pip install -r requirements-comms.txt` does it up front).
+
+| Notebook | What it shows |
+|---|---|
+| [11 Device API](notebooks/11_comm_device_api.ipynb) | A Sparrow field device onboards and uploads images; person images are discarded |
+| [12 FTPS](notebooks/12_comm_ftps.ipynb) | A trail camera uploads over FTPS; the poller stores the files |
+| [13 Reconyx](notebooks/13_comm_reconyx.ipynb) | The Reconyx cloud forwards images to the project endpoint |
+| [14 E-mail](notebooks/14_comm_email.ipynb) | Poll a camera's IMAP mailbox (offline by default, or a real mailbox) |
+| [15 Process on arrival](notebooks/15_comm_process_on_arrival.ipynb) | Run MegaDetector the moment any channel delivers an image |
+
 ## 🛠️ Scripts
 
 To run the notebooks locally, or to use the scripts, clone the repository and install the
@@ -201,15 +216,14 @@ tool, an HTTP server and a C library, for code that is not Python:
 
 ## 📡 Coming next: live data
 
-Today the notebooks work on files. Next, we will add notebooks that pull data straight from the
-field through the SPARROW communication toolkits:
+Notebooks 11-15 receive data the way it arrives from the field: [SPARROW](https://github.com/microsoft/SPARROW)
+solar-powered edge devices, 4G cellular camera traps (by e-mail or through the Reconyx cloud), and
+FTPS uploads. In the notebooks the senders are simulated, so they run anywhere. Next:
 
-- [SPARROW](https://github.com/microsoft/SPARROW) solar-powered edge devices;
-- 4G cellular camera traps, in real time;
-- drones;
-- FTPS uploads.
+- notebooks that connect to a real deployment;
+- drones.
 
-Each one will follow the same pattern as the rest of the playground: connect, run a model on what
+Each one follows the same pattern as the rest of the playground: connect, run a model on what
 arrives, look at the results.
 
 ## 📜 Licenses

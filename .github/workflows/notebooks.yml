@@ -40,3 +40,32 @@ jobs:
           notebooks/07_day_night_visualization.ipynb
           notebooks/09_webcam.ipynb
           notebooks/10_from_pytorch_wildlife.ipynb
+
+  comm-notebooks:
+    # Notebooks 11-15 receive data with sparrow-comm (Python 3.12+), then run MegaDetector on it.
+    # Notebook 14 runs against its offline mailbox here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          pip install -r requirements-comms.txt nbmake pytest
+          python -c "import sparrow_comm as c; print('sparrow_comm', c.__version__)"
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.sparrow-engine/models
+          key: spe-models-${{ hashFiles('requirements.txt') }}
+      - name: Run notebooks
+        run: >
+          pytest --nbmake --nbmake-timeout=900
+          notebooks/11_comm_device_api.ipynb
+          notebooks/12_comm_ftps.ipynb
+          notebooks/13_comm_reconyx.ipynb
+          notebooks/14_comm_email.ipynb
+          notebooks/15_comm_process_on_arrival.ipynb
