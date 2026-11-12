@@ -18,8 +18,8 @@
 > [!IMPORTANT]
 > **This repository used to be Pytorch-Wildlife.** Old `microsoft/Pytorch-Wildlife` links redirect here.
 > If you have Pytorch-Wildlife code, [notebook 10](notebooks/10_from_pytorch_wildlife.ipynb) shows the
-> Sparrow Engine call for each old class. The last `PytorchWildlife` package is 1.3.1; its code is at
-> tag [`v1.3.1`](https://github.com/microsoft/SPARROW-Playground/tree/v1.3.1).
+> Sparrow Engine call for each old class. The old Pytorch-Wildlife code is kept, unmaintained, on the
+> [`archive/pytorch-wildlife`](https://github.com/microsoft/SPARROW-Playground/tree/archive/pytorch-wildlife) branch.
 
 ## 👋 What this is
 
@@ -67,6 +67,13 @@ Good biodiversity toolkits.
 still works, and version 1.3.1 stays on PyPI. It will not get any more updates or fixes, though,
 so we suggest switching to Sparrow Engine now. [Notebook 10](notebooks/10_from_pytorch_wildlife.ipynb)
 shows the Sparrow Engine replacement for each Pytorch-Wildlife class and call.
+
+**Looking for the old code?** The full Pytorch-Wildlife codebase, including the PyTorch models,
+fine-tuning code and Gradio demo, is on the
+[`archive/pytorch-wildlife`](https://github.com/microsoft/SPARROW-Playground/tree/archive/pytorch-wildlife)
+branch, and the released 1.3.1 source is at tag
+[`v1.3.1`](https://github.com/microsoft/SPARROW-Playground/tree/v1.3.1). Both are kept for reference
+only: they will not be maintained, and we will not accept issues or pull requests for them.
 
 ## ⚡ Sparrow Engine in five lines
 
